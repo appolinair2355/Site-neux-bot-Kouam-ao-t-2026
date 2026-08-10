@@ -378,9 +378,11 @@ async function viewStrategy(key){
       </div>
       <div class="row mt">
         <button class="btn" onclick="saveStrategy('${s.key}')">💾 Enregistrer en base</button>
+        <button class="btn ghost" onclick="testSend('${s.key}')">📨 Tester l'envoi dans le canal</button>
         <button class="btn ghost" onclick="api('/api/strategies/${s.key}/bilan','POST',{}).then(()=>alert('Bilan envoyé'))">📤 Tester le bilan</button>
       </div>
       <div class="mt"><span class="eyebrow">Aperçu du bilan</span><pre>${esc(s.bilanPreview)}</pre></div>
+      ${s.sendError?`<div class="mt"><span class="tag loss">Dernier envoi en échec : ${esc(s.sendError)}</span></div>`:''}
       <div id="msg" class="muted mt"></div>
     </div>
 
@@ -399,6 +401,8 @@ async function viewStrategy(key){
           <div><label>Jeu de départ</label><input id="sg" type="number" min="1" value="${s.config.startGame}"></div>
           <div><label>VAR</label><input id="vs" type="number" min="0" max="99" value="${s.config.varStep}"></div>
           <div><label>Décalage</label><input id="dc" type="number" min="1" max="99" value="${s.config.decalage}"></div>`:''}
+          ${s.key==='absente'?`
+          <div><label>Jeux consécutifs sans la carte</label><input id="st" type="number" min="2" max="10" value="${s.config.streak||3}"></div>`:''}
           ${s.config.formatDistribution?`<div><label>Format distribution</label><select id="fd">${opts(s.config.formatDistribution)}</select></div>`:''}
         </div>
         <label>Template personnalisé (optionnel) — {game} {emoji} {suit} {status} {maxR}</label>
@@ -456,6 +460,7 @@ async function saveStrategy(key){
   if($('#sg')) body.startGame = +$('#sg').value;
   if($('#vs')) body.varStep = +$('#vs').value;
   if($('#dc')) body.decalage = +$('#dc').value;
+  if($('#st')) body.streak = +$('#st').value;
   if($('#tok') && $('#tok').value.trim()) body.token = $('#tok').value.trim();
   try{
     const r = await api('/api/strategies/'+key,'POST',body);
@@ -464,6 +469,12 @@ async function saveStrategy(key){
       : ' ⚠️ Confirmation non envoyée : '+(r.notice.error || (r.notice.failed||[]).map(f=>f.id+' '+f.error).join(' / ')); }
     if($('#msg')) $('#msg').textContent = txt;
     setTimeout(()=>viewStrategy(key), 500);
+  }catch(e){ if($('#msg')) $('#msg').textContent = '❌ '+e.message; else alert(e.message); }
+}
+async function testSend(key){
+  try{
+    const r = await api('/api/strategies/'+key+'/test','POST',{});
+    if($('#msg')) $('#msg').textContent = '📨 Message envoyé dans : '+(r.sent||[]).join(', ');
   }catch(e){ if($('#msg')) $('#msg').textContent = '❌ '+e.message; else alert(e.message); }
 }
 async function toggleStrategy(key,on){ await api('/api/strategies/'+key,'POST',{enabled:on==='true'||on===true}); viewStrategy(key); }
