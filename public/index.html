@@ -1,1 +1,279 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Baccara 1xbet — Stratégies de prédiction</title>
+<meta name="description" content="Tableau de bord des stratégies de prédiction Baccara : configuration, formats Telegram et base de données." />
+<style>
+  :root{
+    --bg:#0b1020; --card:#141b34; --card2:#1b2445; --line:#26325c;
+    --txt:#eef2ff; --muted:#9aa8d0; --gold:#f6c25a; --green:#3ddc97; --red:#ff6b6b; --blue:#5b8cff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:
+    radial-gradient(1000px 600px at 10% -10%,#1b2450,transparent),var(--bg);color:var(--txt)}
+  header{padding:18px 16px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  header h1{font-size:18px;margin:0;letter-spacing:.5px}
+  .pill{font-size:12px;padding:4px 10px;border-radius:999px;border:1px solid var(--line);background:var(--card)}
+  .pill.on{border-color:var(--green);color:var(--green)}
+  .pill.off{border-color:var(--red);color:var(--red)}
+  main{max-width:1000px;margin:0 auto;padding:16px}
+  h2{font-size:16px;margin:22px 0 10px;color:var(--gold)}
+  .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(280px,1fr))}
+  .card{background:linear-gradient(180deg,var(--card),var(--card2));border:1px solid var(--line);border-radius:16px;padding:16px}
+  .card.click{cursor:pointer;transition:.15s transform,.15s border-color}
+  .card.click:hover{transform:translateY(-2px);border-color:var(--gold)}
+  .card h3{margin:0 0 6px;font-size:16px}
+  .muted{color:var(--muted);font-size:13px;line-height:1.5}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:10px}
+  label{font-size:12px;color:var(--muted);display:block;margin-bottom:4px}
+  input,select,textarea{width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);background:#0e1430;color:var(--txt);font-size:14px}
+  textarea{min-height:70px;font-family:ui-monospace,monospace}
+  button{padding:10px 14px;border-radius:10px;border:1px solid var(--line);background:var(--blue);color:#fff;font-weight:600;cursor:pointer}
+  button.ghost{background:transparent;color:var(--txt)}
+  button.danger{background:var(--red)}
+  button.gold{background:var(--gold);color:#20180a}
+  pre{white-space:pre-wrap;background:#0e1430;border:1px solid var(--line);border-radius:12px;padding:12px;font-size:13px;margin:8px 0 0}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:7px 6px;border-bottom:1px solid var(--line)}
+  .two{display:grid;gap:12px;grid-template-columns:1fr 1fr}
+  .badge{font-size:12px;padding:2px 8px;border-radius:999px;border:1px solid var(--line)}
+  .win{color:var(--green)} .loss{color:var(--red)} .wait{color:var(--gold)}
+  a.back{color:var(--muted);text-decoration:none;font-size:13px}
+  @media(max-width:620px){.two{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1>🎴 Baccara 1xbet — Stratégies</h1>
+  <span id="pBot" class="pill">bot…</span>
+  <span id="pDb" class="pill">base…</span>
+  <span id="pLive" class="pill">live…</span>
+  <span style="flex:1"></span>
+  <button class="ghost" onclick="go('#/')">🏠 Accueil</button>
+  <button class="ghost" onclick="go('#/reglages')">⚙️ Réglages</button>
+  <button class="ghost" onclick="go('#/base')">🗄️ Base</button>
+</header>
+<main id="view"></main>
 
+<script>
+const $ = (s,r=document)=>r.querySelector(s);
+const esc = (t)=>String(t==null?'':t).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+let ST = null;
+
+async function api(url, method, body){
+  const r = await fetch(url, method ? {method, headers:{'Content-Type':'application/json'}, body: body?JSON.stringify(body):undefined} : undefined);
+  const j = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(j.error || 'Erreur');
+  return j;
+}
+function go(hash){ location.hash = hash; }
+
+async function refreshHeader(){
+  try{
+    ST = await api('/api/state');
+    $('#pBot').className = 'pill ' + (ST.bot.running?'on':'off');
+    $('#pBot').textContent = ST.bot.running ? '🤖 @'+(ST.bot.username||'bot') : '🤖 bot arrêté';
+    $('#pDb').className = 'pill ' + (ST.db.ready?'on':'off');
+    $('#pDb').textContent = ST.db.ready ? '🗄️ base connectée' : '🗄️ base non connectée';
+    $('#pLive').className = 'pill on';
+    $('#pLive').textContent = ST.live ? '🔴 tour #N'+ST.live.number : '⏳ aucun tour';
+  }catch(e){}
+}
+
+// ---------------------------------------------------------------- Accueil
+async function viewHome(){
+  const data = await api('/api/strategies');
+  const cards = data.strategies.map(s=>`
+    <div class="card click" onclick="go('#/strategie/${s.key}')">
+      <h3>${s.config.enabled?'🟢':'🔴'} ${esc(s.name)}</h3>
+      <div class="muted">${esc(s.about)}</div>
+      <div class="row">
+        <span class="badge">format ${s.config.format}</span>
+        <span class="badge">+${s.config.maxR} rattrapage(s)</span>
+        ${s.usesB?`<span class="badge">B = ${s.config.b}</span>`:''}
+        ${s.key==='parite'?`<span class="badge">départ ${s.config.startGame}</span><span class="badge">VAR ${s.config.varStep}</span><span class="badge">décalage ${s.config.decalage}</span>`:`<span class="badge">tour +${s.config.lead}</span>`}
+      </div>
+      <div class="row">
+        <span class="badge win">${s.stats.win} ✅</span>
+        <span class="badge loss">${s.stats.loss} ❌</span>
+        <span class="badge wait">${s.stats.pending} ⌛</span>
+        <span class="badge">${s.stats.rate}%</span>
+      </div>
+      <pre>${esc(s.preview.pending)}</pre>
+      <div class="row"><button class="gold">Configurer →</button></div>
+    </div>`).join('');
+  $('#view').innerHTML = `
+    <h2>🧠 Stratégies disponibles</h2>
+    <div class="muted">Chaque stratégie a sa propre configuration (format du message, rattrapages, canaux). Tout est enregistré dans la base de données : après un redémarrage, le bot repart avec les mêmes réglages.</div>
+    <div class="grid" style="margin-top:14px">${cards}</div>`;
+}
+
+// ------------------------------------------------------- Détail stratégie
+async function viewStrategy(key){
+  const s = await api('/api/strategies/'+key);
+  const opts = (sel)=>Array.from({length:83},(_,i)=>i+1).map(n=>`<option value="${n}" ${n==sel?'selected':''}>Format ${n}</option>`).join('');
+  $('#view').innerHTML = `
+    <a class="back" href="#/">← retour aux stratégies</a>
+    <h2>${s.config.enabled?'🟢':'🔴'} ${esc(s.name)}</h2>
+    <div class="card"><div class="muted">${esc(s.about)}</div></div>
+
+    <div class="two" style="margin-top:14px">
+      <div class="card">
+        <h3>⚙️ Configuration</h3>
+        <div class="row">
+          <div style="flex:1"><label>Format du message</label><select id="f">${opts(s.config.format)}</select></div>
+          <div style="flex:1"><label>Rattrapages (+n)</label><input id="r" type="number" min="0" max="9" value="${s.config.maxR}"></div>
+        </div>
+        <div class="row">
+          ${s.usesB?`<div style="flex:1"><label>Compteur B</label><input id="b" type="number" min="0" max="20" value="${s.config.b}"></div>`:''}
+          <div style="flex:1"><label>Prédire au tour +</label><input id="l" type="number" min="1" max="9" value="${s.config.lead}"></div>
+          ${s.key==='parite'?`
+          <div style="flex:1"><label>Jeu de départ</label><input id="sg" type="number" min="1" value="${s.config.startGame}"></div>
+          <div style="flex:1"><label>VAR</label><input id="vs" type="number" min="0" max="99" value="${s.config.varStep}"></div>
+          <div style="flex:1"><label>Décalage</label><input id="dc" type="number" min="1" max="99" value="${s.config.decalage}"></div>`:''}
+          ${s.config.formatDistribution?`<div style="flex:1"><label>Format distribution</label><select id="fd">${opts(s.config.formatDistribution)}</select></div>`:''}
+        </div>
+        <div class="row"><div style="flex:1"><label>Canaux (ids séparés par des virgules — vide = canaux actifs globaux)</label>
+          <input id="ch" value="${(s.config.channels||[]).join(', ')}"></div></div>
+        <div class="row"><div style="flex:1"><label>Template personnalisé (optionnel) — {game} {emoji} {suit} {status} {maxR}</label>
+          <textarea id="tpl">${esc(s.config.template||'')}</textarea></div></div>
+        <div class="row">
+          <button onclick="saveStrategy('${s.key}')">💾 Enregistrer en base</button>
+          <button class="ghost" onclick="toggleStrategy('${s.key}',${s.config.enabled?'false':'true'})">${s.config.enabled?'⏸️ Désactiver':'▶️ Activer'}</button>
+          <button class="ghost" onclick="resetStrategy('${s.key}')">♻️ Par défaut</button>
+          <button class="danger" onclick="deleteStrategy('${s.key}')">🗑️ Supprimer la config</button>
+        </div>
+        <div id="msg" class="muted"></div>
+      </div>
+
+      <div class="card">
+        <h3>👁️ Aperçu du message</h3>
+        <div class="muted">En cours</div><pre>${esc(s.preview.pending)}</pre>
+        ${s.preview.distribution?`<div class="muted">Distribution</div><pre>${esc(s.preview.distribution)}</pre>`:''}
+        <div class="muted">Gagné</div><pre>${esc(s.preview.win)}</pre>
+        <div class="muted">Perdu</div><pre>${esc(s.preview.loss)}</pre>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <h3>📊 Prédictions de cette stratégie — ${s.stats.win}✅ / ${s.stats.loss}❌ / ${s.stats.pending}⌛ (${s.stats.rate}%)</h3>
+      <table><thead><tr><th>Tour</th><th>Prédiction</th><th>État</th><th>Raison</th></tr></thead><tbody>
+      ${s.predictions.map(p=>`<tr><td>#N${p.target}</td><td>${esc(p.label)}</td>
+        <td class="${p.status==='gagné'?'win':p.status==='perdu'?'loss':'wait'}">${p.badge||'⌛'} ${esc(p.status)}</td>
+        <td class="muted">${esc(p.reason||'')}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">Aucune prédiction pour le moment.</td></tr>'}
+      </tbody></table>
+      <div class="row"><button class="danger" onclick="clearPreds('${s.key}')">🗑️ Effacer les prédictions</button></div>
+    </div>`;
+}
+
+function collect(key){
+  const body = {
+    format: $('#f').value, maxR: $('#r').value, lead: $('#l').value,
+    template: $('#tpl').value.trim() || null,
+    channels: $('#ch').value.split(',').map(x=>x.trim()).filter(Boolean).map(Number),
+  };
+  if($('#b')) body.b = $('#b').value;
+  if($('#sg')) body.startGame = $('#sg').value;
+  if($('#vs')) body.varStep = $('#vs').value;
+  if($('#dc')) body.decalage = $('#dc').value;
+  if($('#fd')) body.formatDistribution = $('#fd').value;
+  return body;
+}
+async function saveStrategy(key){
+  try{ const r = await api('/api/strategies/'+key,'POST',collect(key));
+    $('#msg').textContent = r.saved ? '✅ Configuration enregistrée dans la base de données.' : '✅ Enregistré localement (base non connectée).';
+    setTimeout(()=>viewStrategy(key),600);
+  }catch(e){ $('#msg').textContent = '❌ '+e.message; }
+}
+async function toggleStrategy(key,on){ await api('/api/strategies/'+key,'POST',{enabled:on==='true'||on===true}); viewStrategy(key); }
+async function resetStrategy(key){ await api('/api/strategies/'+key+'/reset','POST',{}); viewStrategy(key); }
+async function deleteStrategy(key){ if(!confirm('Supprimer la configuration enregistrée de cette stratégie ?'))return;
+  await api('/api/strategies/'+key,'DELETE'); viewStrategy(key); }
+async function clearPreds(key){ if(!confirm('Effacer les prédictions de cette stratégie ?'))return;
+  await api('/api/strategies/'+key+'/predictions','DELETE'); viewStrategy(key); }
+
+// ---------------------------------------------------------------- Réglages
+async function viewSettings(){
+  const s = ST || await api('/api/state');
+  $('#view').innerHTML = `
+    <a class="back" href="#/">← retour</a>
+    <h2>⚙️ Réglages généraux</h2>
+    <div class="two">
+      <div class="card">
+        <h3>🤖 Bot Telegram</h3>
+        <label>Token</label><input id="tk" placeholder="${esc(s.bot.tokenMasked||'123456:ABC…')}">
+        <div class="row"><button onclick="setToken()">Enregistrer</button>
+          <button class="ghost" onclick="api('/api/bot/restart','POST',{}).then(()=>location.reload())">Redémarrer</button></div>
+        <label>ID administrateur</label><input id="adm" value="${s.bot.adminId||''}">
+        <div class="row"><button onclick="api('/api/bot/admin','POST',{adminId:$('#adm').value}).then(()=>alert('Enregistré'))">Enregistrer</button></div>
+        <div class="muted">${s.bot.error?('⚠️ '+esc(s.bot.error)):''}</div>
+      </div>
+      <div class="card">
+        <h3>🗄️ Base de données</h3>
+        <div class="muted">${s.db.ready?'🟢 connectée — '+esc(s.db.url):'🔴 non connectée'}</div>
+        <label>Lien PostgreSQL (Render)</label><input id="dburl" placeholder="postgresql://user:pass@host/db">
+        <div class="row"><button onclick="api('/api/db','POST',{url:$('#dburl').value}).then(()=>location.reload())">Connecter</button></div>
+        <div class="muted">Toutes les configurations de stratégies sont enregistrées ici et rechargées automatiquement au redémarrage.</div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h3>📡 Canaux</h3>
+      <table><tbody>${(s.channels||[]).map(c=>`<tr><td>${c.active?'✅':'⚪'} ${esc(c.title)}</td><td class="muted">${c.id}</td>
+        <td><button class="ghost" onclick="api('/api/channels/${c.active?'deactivate':'activate'}','POST',{id:${c.id}}).then(()=>viewSettings())">${c.active?'Désactiver':'Activer'}</button></td></tr>`).join('') || '<tr><td class="muted">Aucun canal détecté.</td></tr>'}</tbody></table>
+    </div>`;
+}
+async function setToken(){ try{ await api('/api/bot/token','POST',{token:$('#tk').value.trim()}); location.reload(); }catch(e){ alert(e.message); } }
+
+// ------------------------------------------------------------------- Base
+async function viewDb(){
+  let ov=null, err=null;
+  try{ ov = await api('/api/db/overview'); }catch(e){ err = e.message; }
+  let games=[]; if(ov){ games=(await api('/api/db/games?limit=20')).games; }
+  $('#view').innerHTML = `
+    <a class="back" href="#/">← retour</a>
+    <h2>🗄️ Vérification de la base de données</h2>
+    ${err?`<div class="card muted">❌ ${esc(err)} — configure le lien dans ⚙️ Réglages.</div>`:`
+    <div class="card">
+      <div class="row"><span class="badge">${ov.overview.games} jeux</span>
+        <span class="badge">${ov.overview.predictions} prédictions</span>
+        <span class="badge">dernier #N${ov.overview.dernier_jeu||'—'}</span></div>
+      <h3 style="margin-top:14px">Dates enregistrées</h3>
+      <table><tbody>${ov.dates.map(d=>`<tr><td>${String(d.played_on).slice(0,10)}</td><td class="muted">${d.total} jeux</td></tr>`).join('')}</tbody></table>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h3>🧾 Derniers jeux (main du joueur)</h3>
+      <table><thead><tr><th>Tour</th><th>Cartes joueur</th><th>Points</th><th>Résultat</th></tr></thead><tbody>
+      ${games.map(g=>`<tr><td>#N${g.number}</td><td>${esc((g.player_cards||[]).join(' '))}</td><td>${g.player_value??'—'}</td><td class="muted">${esc(g.winner||'')}</td></tr>`).join('')}
+      </tbody></table>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h3>🔎 Requête SELECT (lecture seule)</h3>
+      <textarea id="sql">SELECT number, player_cards, player_value, winner FROM games ORDER BY number DESC LIMIT 10</textarea>
+      <div class="row"><button onclick="runSql()">Exécuter</button></div>
+      <pre id="sqlOut" class="muted">—</pre>
+    </div>`}`;
+}
+async function runSql(){
+  try{ const r = await api('/api/db/query','POST',{sql:$('#sql').value});
+    $('#sqlOut').textContent = JSON.stringify(r.rows,null,2);
+  }catch(e){ $('#sqlOut').textContent = '❌ '+e.message; }
+}
+
+// ------------------------------------------------------------------ Router
+async function route(){
+  const h = location.hash || '#/';
+  try{
+    if(h.startsWith('#/strategie/')) await viewStrategy(h.split('/')[2]);
+    else if(h==='#/reglages') await viewSettings();
+    else if(h==='#/base') await viewDb();
+    else await viewHome();
+  }catch(e){ $('#view').innerHTML = `<div class="card">❌ ${esc(e.message)}</div>`; }
+}
+window.addEventListener('hashchange', route);
+refreshHeader().then(route);
+setInterval(refreshHeader, 5000);
+</script>
+</body>
+</html>
