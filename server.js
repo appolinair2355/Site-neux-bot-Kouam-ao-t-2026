@@ -11,7 +11,7 @@ const {
   setStrategyConfig, resetStrategy, initStrategies, parityRuntime,
   strategyGames, bilanText, gameCategories,
 } = require('./predictor');
-const { startLoop, startBot, botStatus, activate, deactivate, persist, sendBilan, dropSender } = require('./bot');
+const { startLoop, startBot, botStatus, activate, deactivate, persist, sendBilan, dropSender, announceConfig, announceMainBot } = require('./bot');
 
 const app = express();
 app.use(express.json());
@@ -32,6 +32,7 @@ app.get('/api/state', (req, res) => {
     suits: SUITS,
     live: state.live,
     liveCategories: gameCategories(state.live),
+    board: strategyGames('costume', 8),
     lastFinished: state.lastFinished,
     error: state.lastError,
     bot: botStatus(),
@@ -74,7 +75,9 @@ app.post('/api/bot/token', async (req, res) => {
   const token = (req.body.token || '').trim();
   if (!/^\d+:[\w-]{20,}$/.test(token)) return res.status(400).json({ error: 'Token Telegram invalide' });
   const r = await startBot(token);
-  res.status(r.ok ? 200 : 400).json({ ...r, bot: botStatus() });
+  // signale dans les canaux actifs que le token API est configuré
+  const notice = r.ok ? await announceMainBot() : null;
+  res.status(r.ok ? 200 : 400).json({ ...r, notice, bot: botStatus() });
 });
 
 app.post('/api/bot/restart', async (req, res) => {
@@ -246,7 +249,10 @@ app.post('/api/strategies/:key', async (req, res) => {
   if (!cfg) return res.status(404).json({ error: 'Stratégie inconnue' });
   persist();
   if (db.ready) await db.saveStrategy(req.params.key, strategies.BY_KEY[req.params.key].name, cfg);
-  res.json({ ok: true, saved: db.ready, ...strategyPayload(req.params.key) });
+  // token API et/ou ID de canal configurés → on prévient le canal
+  const touched = req.body && (req.body.token !== undefined || req.body.channels !== undefined || req.body.channelId !== undefined);
+  const notice = touched ? await announceConfig(req.params.key) : null;
+  res.json({ ok: true, saved: db.ready, notice, ...strategyPayload(req.params.key) });
 });
 
 app.post('/api/strategies/:key/reset', async (req, res) => {

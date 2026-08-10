@@ -130,10 +130,13 @@ const matchnul = {
   source: 'finished',
   detect(game, cfg) {
     if (!game || !game.finished) return null;
+    // MATCH NUL = POINTS ÉGAUX (jamais un nombre de cartes égal !)
     const pv = game.playerValue;
     const bv = game.bankerValue;
     if (pv == null || bv == null) return null;
-    if (pv !== bv) return null;                       // uniquement les matchs nuls
+    const tie = pv === bv || game.winner === 'Égalité';
+    if (!tie) return null;                            // uniquement les matchs nuls
+    // le total des points joueur + banquier décide de la prédiction
     const sum = pv + bv;
     if (sum > 5) {
       return {

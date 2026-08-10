@@ -451,8 +451,8 @@ function gameCategories(g) {
 }
 
 // jeux vus par une stratégie (live + tours récents + prédiction liée)
-function strategyGames(key, limit = 12) {
-  const rows = recentGames(limit).map((g) => ({
+function gameView(g, key) {
+  return {
     number: g.number,
     finished: !!g.finished,
     dealing: !!g.dealing,
@@ -460,25 +460,45 @@ function strategyGames(key, limit = 12) {
     player: g.player || [],
     banker: g.banker || [],
     playerSuits: handSuits(g),
+    bankerSuits: strategies.suitsOf(g.bankerSuits),
     playerValue: g.playerValue ?? null,
     bankerValue: g.bankerValue ?? null,
     playerCards: g.playerCards ?? null,
     bankerCards: g.bankerCards ?? null,
+    tie: g.playerValue != null && g.bankerValue != null && g.playerValue === g.bankerValue,
+    sum: g.playerValue != null && g.bankerValue != null ? g.playerValue + g.bankerValue : null,
     parity: parityOf(g),
     phase: g.phase || null,
+    phaseLabel: g.finished ? 'terminé' : g.dealing ? 'distribution en cours' : 'à venir',
     categories: gameCategories(g),
     prediction: (() => {
       const p = state.predictions.find((x) => x.strategy === key && x.target === g.number);
       return p ? { label: p.label, status: p.status, badge: p.badge, step: p.step, maxR: p.maxR } : null;
     })(),
+  };
+}
+
+// compteur par costume (panneau « Compteur » du tableau de bord)
+function counterView() {
+  const b = state.B || 1;
+  return SUITS.map((s) => ({
+    suit: s,
+    count: state.counters[s] || 0,
+    b,
+    ratio: Math.min(100, Math.round(((state.counters[s] || 0) / b) * 100)),
   }));
-  const live = state.live
-    ? { number: state.live.number, categories: gameCategories(state.live), phase: state.live.phase || null,
-        playerSuits: handSuits(state.live), player: state.live.player || [], banker: state.live.banker || [],
-        playerValue: state.live.playerValue ?? null, bankerValue: state.live.bankerValue ?? null,
-        finished: !!state.live.finished, dealing: !!state.live.dealing }
-    : null;
-  return { live, games: rows, bilan: bilanText(key) };
+}
+
+function strategyGames(key, limit = 12) {
+  const rows = recentGames(limit).map((g) => gameView(g, key));
+  const live = state.live ? gameView(state.live, key) : null;
+  // parties à venir : tours connus, non terminés, après le tour live
+  const upcoming = [...state.games.values()]
+    .filter((g) => !g.finished && (!live || g.number > live.number))
+    .sort((a, b) => a.number - b.number)
+    .slice(0, 4)
+    .map((g) => gameView(g, key));
+  return { live, upcoming, games: rows, counters: counterView(), stats: stats(key), bilan: bilanText(key) };
 }
 
 function stats(key) {
@@ -520,6 +540,8 @@ module.exports = {
   strategyChannels,
   strategyGames,
   gameCategories,
+  gameView,
+  counterView,
   bilanText,
   parseChannels,
   syncCostume,

@@ -603,6 +603,52 @@ async function sendBilan(key) {
   }
 }
 
+// message de confirmation envoyé dans le canal dès qu'on configure
+// le token API et/ou l'ID du canal d'une stratégie
+async function announceConfig(key) {
+  const def = strategies.BY_KEY[key];
+  const cfg = state.strategies[key] || {};
+  const ids = strategyChannels(key);
+  if (!def) return { ok: false, error: 'Stratégie inconnue' };
+  if (!ids.length) return { ok: false, error: 'Aucun canal configuré' };
+  const sender = senderFor(key);
+  if (!sender) return { ok: false, error: 'Aucun bot Telegram configuré' };
+  const text =
+    '✅ CONFIGURATION ENREGISTRÉE\n\n' +
+    `🧠 Stratégie : ${def.name}\n` +
+    `🤖 Bot : ${cfg.token ? 'token dédié' : 'bot principal'}\n` +
+    `📡 Canal : ${ids.join(', ')}\n` +
+    `🎯 Format ${cfg.format}${key === 'matchnul' ? '/' + (cfg.formatDistribution || 79) : ''} • +${cfg.maxR} rattrapage(s)\n` +
+    `📊 Bilan automatique : ${cfg.bilan === false ? 'non' : 'oui'}\n\n` +
+    'Ce canal est bien relié : les prédictions arriveront ici. 🚀';
+  const sent = [];
+  const failed = [];
+  for (const id of ids) {
+    try { await sender.sendMessage(id, text); sent.push(id); }
+    catch (e) { failed.push({ id, error: e.message }); }
+  }
+  return { ok: sent.length > 0, sent, failed, text };
+}
+
+// confirmation pour le bot principal (réglages)
+async function announceMainBot() {
+  if (!bot) return { ok: false, error: 'Bot principal non démarré' };
+  const ids = state.activeChannels || [];
+  if (!ids.length) return { ok: false, error: 'Aucun canal actif' };
+  const text =
+    '✅ BOT CONNECTÉ\n\n' +
+    `🤖 @${state.botUsername || 'bot'}\n` +
+    `📡 Canal : ${ids.join(', ')}\n\n` +
+    'Le token API est enregistré : ce canal recevra les prédictions. 🚀';
+  const sent = [];
+  const failed = [];
+  for (const id of ids) {
+    try { await bot.sendMessage(id, text); sent.push(id); }
+    catch (e) { failed.push({ id, error: e.message }); }
+  }
+  return { ok: sent.length > 0, sent, failed, text };
+}
+
 // ---------------------------------------------------------------------------
 // Envoi + vérification des prédictions
 // ---------------------------------------------------------------------------
@@ -696,4 +742,4 @@ async function startLoop() {
   startBot();
 }
 
-module.exports = { startLoop, startBot, botStatus, activate, deactivate, persist, listChannels, sendBilan, dropSender };
+module.exports = { startLoop, startBot, botStatus, activate, deactivate, persist, listChannels, sendBilan, dropSender, announceConfig, announceMainBot };
