@@ -115,6 +115,54 @@
   .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
   .chip{font-size:11.5px;padding:4px 8px;border-radius:9px;border:1px solid var(--line);background:rgba(3,6,14,.5)}
   .chip b{color:var(--txt)} .chip span{color:var(--muted);font-weight:600;margin-right:4px}
+  /* ---------- tableau des parties en direct ---------- */
+  .board{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(220px,.9fr);gap:14px}
+  .livebox{border:1px solid rgba(56,224,165,.35);border-radius:20px;padding:16px;
+    background:linear-gradient(160deg,#0e1a2b,#0a1120);box-shadow:0 18px 44px -28px rgba(0,0,0,.95)}
+  .livebox .top{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .livebadge{width:62px;height:62px;border-radius:50%;display:grid;place-items:center;gap:0;
+    border:1px solid rgba(56,224,165,.5);background:rgba(56,224,165,.10);color:var(--green);
+    font-size:10.5px;font-weight:800;letter-spacing:.08em;line-height:1.1;text-align:center}
+  .livebadge b{display:block;font-size:15px}
+  .livebox .title{font-family:Sora;font-weight:700;font-size:19px}
+  .hands{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:start;margin-top:16px}
+  .hand .who{font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:800;margin-bottom:8px}
+  .hand.bank{text-align:right}
+  .cardsrow{display:flex;gap:8px;flex-wrap:wrap}
+  .hand.bank .cardsrow{justify-content:flex-end}
+  .pcard{min-width:46px;padding:8px 9px;border-radius:11px;background:#fff;color:#0d1220;
+    font-family:Sora;font-weight:700;font-size:15px;display:flex;align-items:center;gap:3px;
+    box-shadow:0 8px 18px -12px rgba(0,0,0,.9)}
+  .pcard.red{color:#d61f3b}
+  .pcard.empty{background:rgba(255,255,255,.10);color:var(--muted);box-shadow:none}
+  .pts{display:inline-block;margin-top:10px;padding:8px 14px;border-radius:12px;background:rgba(255,255,255,.10);
+    border:1px solid var(--line);font-family:Sora;font-weight:700;font-size:14px}
+  .vs{align-self:center;color:var(--muted);font-family:Sora;font-weight:800;letter-spacing:.12em;font-size:13px}
+  .tiebox{margin-top:12px;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,202,95,.4);
+    background:rgba(255,202,95,.08);color:var(--gold);font-size:12.5px;font-weight:700}
+  .counter{border:1px solid var(--line);border-radius:20px;padding:16px;background:var(--panel)}
+  .counter h3{font-size:14px;display:flex;align-items:center;gap:7px}
+  .crow{display:grid;grid-template-columns:26px 1fr 26px;gap:9px;align-items:center;margin-top:12px}
+  .crow .s{font-size:19px;text-align:center}
+  .crow .n{font-family:Sora;font-weight:700;font-size:15px;text-align:right}
+  .cbar{height:8px;border-radius:99px;background:rgba(255,255,255,.10);overflow:hidden}
+  .cbar>i{display:block;height:100%;background:linear-gradient(90deg,var(--blue),var(--violet))}
+  .soon{display:flex;gap:12px;overflow-x:auto;padding:4px 2px 10px;margin-top:14px}
+  .soon .s1{min-width:210px;border:1px solid rgba(255,202,95,.38);border-radius:16px;padding:12px 14px;
+    background:rgba(255,202,95,.06)}
+  .soon .s1 .h{display:flex;align-items:center;gap:8px;justify-content:space-between}
+  .soon .s1 .lab{font-size:11px;font-weight:800;letter-spacing:.12em;color:var(--gold);
+    border:1px solid rgba(255,202,95,.45);border-radius:999px;padding:5px 10px}
+  .soon .s1 .num{font-family:Sora;font-weight:700}
+  .soon .s1 .sub{margin-top:9px;color:var(--gold);font-weight:700;font-size:14px}
+  .score{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:14px}
+  .score div{border-radius:18px;padding:16px;text-align:center;color:#fff}
+  .score .l{font-size:11px;letter-spacing:.14em;text-transform:uppercase;font-weight:800;opacity:.9}
+  .score .v{font-family:Sora;font-size:30px;font-weight:700;margin-top:6px}
+  .score .win{background:linear-gradient(160deg,#14713f,#0d5730)}
+  .score .loss{background:linear-gradient(160deg,#8e1f22,#6d1518)}
+  .score .rate{background:linear-gradient(160deg,#0f6b64,#0b4d52)}
+  @media(max-width:860px){.board{grid-template-columns:1fr}.hands{grid-template-columns:1fr}.hand.bank{text-align:left}.hand.bank .cardsrow{justify-content:flex-start}}
   @media(max-width:760px){.g2{grid-template-columns:1fr}main{padding:16px 13px 60px}.hero{padding:22px}}
 </style>
 </head>
@@ -171,6 +219,70 @@ function gameCard(g, live){
   </div>`;
 }
 
+
+// ---------------------------------------------- Parties en direct (tableau)
+const RED_SUITS = ['❤️','♦️','♥','♦','❤'];
+function pcard(lbl){
+  const t = String(lbl||'');
+  const suit = (t.match(/[♠♣♥♦❤]\uFE0F?/)||[''])[0];
+  const rank = t.replace(/[♠♣♥♦❤]\uFE0F?/g,'');
+  const red = RED_SUITS.some(x=>suit.indexOf(x)===0);
+  return `<span class="pcard ${red?'red':''}">${esc(rank)}<i style="font-style:normal">${esc(suit)}</i></span>`;
+}
+function hand(who, cards, value, right){
+  const list = (cards&&cards.length) ? cards.map(pcard).join('') : '<span class="pcard empty">—</span>';
+  return `<div class="hand ${right?'bank':''}"><div class="who">${who}</div>
+    <div class="cardsrow">${list}</div>
+    <div class="pts">${value==null?'—':value} pts</div></div>`;
+}
+function renderBoard(d, title){
+  if(!d) return '<div class="muted">—</div>';
+  const live = d.live, st = d.stats || {win:0,loss:0,rate:0};
+  const soon = (d.upcoming||[]);
+  const counters = (d.counters||[]);
+  return `
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <h3 style="margin:0"><i class="dot" style="display:inline-block;color:var(--green)"></i>
+        ${esc(title||'Parties en direct — 1xBet Baccarat')}</h3>
+      <span class="muted">${(d.games||[]).length} parties suivies</span>
+    </div>
+    <div class="board mt">
+      ${live?`<div class="livebox">
+        <div class="top">
+          <span class="livebadge">⚡<b>LIVE</b></span>
+          <div>
+            <div class="title">Partie #${live.number}</div>
+            <div class="muted">${esc(live.phaseLabel||'')}${live.winner?' • '+esc(live.winner):''}</div>
+          </div>
+        </div>
+        <div class="hands">
+          ${hand('Joueur', live.player, live.playerValue, false)}
+          <div class="vs">VS</div>
+          ${hand('Banquier', live.banker, live.bankerValue, true)}
+        </div>
+        ${(live.tie && live.finished && live.playerCards && live.bankerCards)?`<div class="tiebox">🤝 Match nul : ${live.playerValue} = ${live.bankerValue} • total des points ${live.sum} ${live.sum>5?'(> 5 → distribution 2/2 au +1)':'(≤ 5 → 3/3 au +2)'}</div>`:''}
+      </div>`:'<div class="livebox"><div class="muted">Aucune partie live détectée — lecture du flux 1xbet en cours.</div></div>'}
+      <div class="counter">
+        <h3>📊 Compteur des costumes</h3>
+        ${counters.map(c=>`<div class="crow"><span class="s">${c.suit}</span>
+          <span class="cbar"><i style="width:${c.ratio}%"></i></span>
+          <span class="n">${c.count}</span></div>`).join('') || '<div class="muted">—</div>'}
+      </div>
+    </div>
+    <div class="soon">
+      ${soon.length?soon.map(g=>`<div class="s1"><div class="h"><span class="lab">🕐 À venir</span>
+        <span class="num">#${g.number}</span></div><div class="sub">Pre-game betting</div></div>`).join('')
+        :'<div class="muted">Aucune partie à venir annoncée.</div>'}
+    </div>
+    <div class="score">
+      <div class="win"><div class="l">Gagnants</div><div class="v">${st.win}</div></div>
+      <div class="loss"><div class="l">Perdus</div><div class="v">${st.loss}</div></div>
+      <div class="rate"><div class="l">Win %</div><div class="v">${st.rate}%</div></div>
+    </div>
+  </div>`;
+}
+
 // ---------------------------------------------------------------- Accueil
 async function viewHome(){
   const s = ST || await api('/api/state');
@@ -209,14 +321,8 @@ async function viewHome(){
     </section>
 
     <h2>📡 Jeu en direct</h2>
-    <div class="card">
-      ${live?`<div class="row" style="justify-content:space-between">
-          <div><span class="eyebrow">Tour en cours</span><div class="num" style="font-size:24px">#N${live.number}</div></div>
-          <span class="pill live"><i class="dot"></i>${esc(live.finished?'terminé':live.dealing?'distribution':'attente')}</span>
-        </div>
-        ${chips(s.liveCategories)}`:'<div class="muted">Aucun tour détecté pour le moment — le flux 1xbet est en cours de lecture.</div>'}
-      ${s.error?`<div class="muted mt">⚠️ ${esc(s.error)}</div>`:''}
-    </div>
+    <div id="boardWrap">${renderBoard(s.board)}</div>
+    ${s.error?`<div class="card mt muted">⚠️ ${esc(s.error)}</div>`:''}
 
     <h2>📈 Bilan global</h2>
     <div class="grid g4">
@@ -228,6 +334,12 @@ async function viewHome(){
 
     <h2>🧠 Stratégies</h2>
     <div class="grid g3">${cards}</div>`;
+
+  clearInterval(window.__boardTimer);
+  window.__boardTimer = setInterval(async ()=>{
+    if(location.hash && location.hash!=='#/') return clearInterval(window.__boardTimer);
+    try{ const d = await api('/api/state'); const w = $('#boardWrap'); if(w) w.innerHTML = renderBoard(d.board); }catch(e){}
+  }, 4000);
 }
 
 // ------------------------------------------------------- Détail stratégie
@@ -273,9 +385,7 @@ async function viewStrategy(key){
     </div>
 
     <h2>🎴 Jeux en live vus par cette stratégie</h2>
-    <div class="card">
-      <div id="liveWrap">${renderLive(s.live)}</div>
-    </div>
+    <div id="liveWrap">${renderLive(s.live)}</div>
 
     <h2>⚙️ Configuration</h2>
     <div class="grid g2">
@@ -328,13 +438,8 @@ async function viewStrategy(key){
 
 function renderLive(d){
   if(!d) return '<div class="muted">—</div>';
-  const live = d.live;
-  return `
-    ${live?`<div class="gamecard livenow"><div class="row" style="justify-content:space-between">
-        <span class="n">🔴 Tour #N${live.number} — ${esc(live.finished?'terminé':live.dealing?'distribution en cours':'attente des cartes')}</span>
-        <span class="pill live"><i class="dot"></i>live</span></div>${chips(live.categories)}</div>`
-      :'<div class="muted">Aucun tour live détecté.</div>'}
-    <div class="grid g3 mt">${(d.games||[]).map(g=>gameCard(g,false)).join('')}</div>`;
+  return renderBoard(d, 'Parties en direct vues par cette stratégie') +
+    `<div class="grid g3 mt">${(d.games||[]).map(g=>gameCard(g,false)).join('')}</div>`;
 }
 
 async function saveStrategy(key){
@@ -354,7 +459,10 @@ async function saveStrategy(key){
   if($('#tok') && $('#tok').value.trim()) body.token = $('#tok').value.trim();
   try{
     const r = await api('/api/strategies/'+key,'POST',body);
-    if($('#msg')) $('#msg').textContent = r.saved ? '✅ Enregistré dans la base de données.' : '✅ Enregistré (base non connectée : sauvegarde locale).';
+    let txt = r.saved ? '✅ Enregistré dans la base de données.' : '✅ Enregistré (base non connectée : sauvegarde locale).';
+    if(r.notice){ txt += r.notice.ok ? ' 📨 Message de confirmation envoyé dans le canal ('+(r.notice.sent||[]).join(', ')+').'
+      : ' ⚠️ Confirmation non envoyée : '+(r.notice.error || (r.notice.failed||[]).map(f=>f.id+' '+f.error).join(' / ')); }
+    if($('#msg')) $('#msg').textContent = txt;
     setTimeout(()=>viewStrategy(key), 500);
   }catch(e){ if($('#msg')) $('#msg').textContent = '❌ '+e.message; else alert(e.message); }
 }
@@ -399,7 +507,12 @@ async function viewSettings(){
         <td style="text-align:right"><button class="btn ghost" onclick="api('/api/channels/${c.active?'deactivate':'activate'}','POST',{id:${c.id}}).then(()=>viewSettings())">${c.active?'Désactiver':'Activer'}</button></td></tr>`).join('') || '<tr><td class="muted">Aucun canal détecté — ajoute le bot comme administrateur d’un canal.</td></tr>'}</tbody></table>
     </div>`;
 }
-async function setToken(){ try{ await api('/api/bot/token','POST',{token:$('#tk').value.trim()}); location.reload(); }catch(e){ alert(e.message); } }
+async function setToken(){ try{
+  const r = await api('/api/bot/token','POST',{token:$('#tk').value.trim()});
+  alert(r.notice && r.notice.ok ? 'Token enregistré — message de confirmation envoyé dans le canal.'
+    : 'Token enregistré.' + (r.notice && r.notice.error ? ' (confirmation non envoyée : '+r.notice.error+')' : ''));
+  location.reload();
+}catch(e){ alert(e.message); } }
 
 // ------------------------------------------------------------------- Base
 async function viewDb(){
