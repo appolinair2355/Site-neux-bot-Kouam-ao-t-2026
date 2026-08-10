@@ -71,6 +71,12 @@ function strategyConfig(key) {
   return state.strategies[key] || null;
 }
 
+// "-1001234, -1005678" ou [ -100... ] -> [ -1001234, -1005678 ]
+function parseChannels(v) {
+  const list = Array.isArray(v) ? v : String(v == null ? '' : v).split(/[\s,;]+/);
+  return list.map((x) => Number(String(x).trim())).filter((n) => Number.isFinite(n) && n !== 0);
+}
+
 function setStrategyConfig(key, patch = {}) {
   const def = strategies.BY_KEY[key];
   if (!def) return null;
@@ -87,7 +93,10 @@ function setStrategyConfig(key, patch = {}) {
   if (patch.varStep !== undefined) next.varStep = Math.max(0, Math.min(99, parseInt(patch.varStep, 10) || 0));
   if (patch.decalage !== undefined) next.decalage = Math.max(1, Math.min(99, parseInt(patch.decalage, 10) || 1));
   if (patch.template !== undefined) next.template = patch.template ? String(patch.template) : null;
-  if (patch.channels !== undefined) next.channels = Array.isArray(patch.channels) ? patch.channels.map(Number).filter(Number.isFinite) : [];
+  if (patch.channels !== undefined) next.channels = parseChannels(patch.channels);
+  if (patch.channelId !== undefined) next.channels = parseChannels(patch.channelId);
+  if (patch.token !== undefined) next.token = patch.token ? String(patch.token).trim() : null;
+  if (patch.bilan !== undefined) next.bilan = !!patch.bilan;
   state.strategies[key] = next;
   if (key === 'costume') pullCostume();
   return next;
@@ -406,6 +415,72 @@ function parityRuntime() {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Bilan envoyé sur Telegram quand le jeu reprend
+// ---------------------------------------------------------------------------
+function bilanText(key) {
+  const s = stats(key);
+  return (
+    '📊 STATISTIQUE 📈\n\n\n' +
+    `🟢 GAIN : ${s.win}\n` +
+    `🔴 PERTE : ${s.loss}\n\n\n` +
+    `✅ Taux de réussite : ${s.rate} %`
+  );
+}
+
+// catégories lisibles d'un tour (vue « bot » du panel)
+function gameCategories(g) {
+  if (!g) return [];
+  const out = [];
+  out.push({ label: 'Tour', value: '#N' + g.number, tone: 'info' });
+  out.push({
+    label: 'Résultat',
+    value: g.winner || (g.finished ? '—' : 'en cours'),
+    tone: g.winner === 'Joueur' ? 'win' : g.winner === 'Banquier' ? 'loss' : 'wait',
+  });
+  out.push({ label: 'Costumes joueur', value: handSuits(g).join(' ') || '—', tone: 'suit' });
+  out.push({ label: 'Points', value: `J ${g.playerValue ?? '—'} / B ${g.bankerValue ?? '—'}`, tone: 'info' });
+  out.push({ label: 'Parité joueur', value: parityOf(g) || '—', tone: 'info' });
+  out.push({ label: 'Cartes', value: `${g.playerCards ?? 0}/${g.bankerCards ?? 0}`, tone: 'info' });
+  out.push({
+    label: 'Phase',
+    value: g.finished ? 'terminé' : g.dealing ? 'distribution' : 'attente',
+    tone: g.finished ? 'done' : 'live',
+  });
+  return out;
+}
+
+// jeux vus par une stratégie (live + tours récents + prédiction liée)
+function strategyGames(key, limit = 12) {
+  const rows = recentGames(limit).map((g) => ({
+    number: g.number,
+    finished: !!g.finished,
+    dealing: !!g.dealing,
+    winner: g.winner || null,
+    player: g.player || [],
+    banker: g.banker || [],
+    playerSuits: handSuits(g),
+    playerValue: g.playerValue ?? null,
+    bankerValue: g.bankerValue ?? null,
+    playerCards: g.playerCards ?? null,
+    bankerCards: g.bankerCards ?? null,
+    parity: parityOf(g),
+    phase: g.phase || null,
+    categories: gameCategories(g),
+    prediction: (() => {
+      const p = state.predictions.find((x) => x.strategy === key && x.target === g.number);
+      return p ? { label: p.label, status: p.status, badge: p.badge, step: p.step, maxR: p.maxR } : null;
+    })(),
+  }));
+  const live = state.live
+    ? { number: state.live.number, categories: gameCategories(state.live), phase: state.live.phase || null,
+        playerSuits: handSuits(state.live), player: state.live.player || [], banker: state.live.banker || [],
+        playerValue: state.live.playerValue ?? null, bankerValue: state.live.bankerValue ?? null,
+        finished: !!state.live.finished, dealing: !!state.live.dealing }
+    : null;
+  return { live, games: rows, bilan: bilanText(key) };
+}
+
 function stats(key) {
   const list = key ? state.predictions.filter((p) => p.strategy === key) : state.predictions;
   const done = list.filter((p) => p.status !== 'en attente');
@@ -443,6 +518,10 @@ module.exports = {
   setStrategyConfig,
   resetStrategy,
   strategyChannels,
+  strategyGames,
+  gameCategories,
+  bilanText,
+  parseChannels,
   syncCostume,
   pullCostume,
 };

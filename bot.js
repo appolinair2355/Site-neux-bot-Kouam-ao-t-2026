@@ -10,6 +10,7 @@ const {
   state, evaluate, verify, registerGames, setOnFinished,
   predictionText, predictionMessage, liveText, stats, SUITS,
   initStrategies, setStrategyConfig, resetStrategy, strategyChannels, parityRuntime,
+  bilanText,
 } = require('./predictor');
 
 let bot = null;
@@ -567,15 +568,52 @@ function botStatus() {
 }
 
 // ---------------------------------------------------------------------------
+// Expéditeurs : chaque stratégie peut avoir SON propre token de bot
+// ---------------------------------------------------------------------------
+const senders = new Map(); // token -> instance TelegramBot (sans polling)
+
+function senderFor(key) {
+  const cfg = state.strategies[key] || {};
+  const token = (cfg.token || '').trim();
+  if (!token || token === state.botToken) return bot;
+  if (!senders.has(token)) {
+    try { senders.set(token, new TelegramBot(token, { polling: false })); }
+    catch (e) { console.error('Token de stratégie invalide', key, e.message); senders.set(token, null); }
+  }
+  return senders.get(token) || bot;
+}
+
+function dropSender(token) {
+  if (token && senders.has(token)) senders.delete(token);
+}
+
+// bilan à envoyer quand le jeu reprend
+const bilanPending = new Set();
+let lastLiveNumber = null;
+
+async function sendBilan(key) {
+  const cfg = state.strategies[key] || {};
+  if (cfg.bilan === false) return;
+  const sender = senderFor(key);
+  if (!sender) return;
+  const text = bilanText(key);
+  for (const id of strategyChannels(key)) {
+    try { await sender.sendMessage(id, text); }
+    catch (e) { console.error('Bilan non envoyé', id, e.message); }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Envoi + vérification des prédictions
 // ---------------------------------------------------------------------------
 async function broadcast(pred) {
   if (db.ready) db.savePrediction(pred, state.B);
-  if (!bot) return;
+  const sender = senderFor(pred.strategy);
+  if (!sender) return;
   const { text, parse_mode } = predictionText(pred);
   for (const id of strategyChannels(pred.strategy)) {
     try {
-      const m = await bot.sendMessage(id, text, parse_mode ? { parse_mode } : {});
+      const m = await sender.sendMessage(id, text, parse_mode ? { parse_mode } : {});
       pred.messages.push({ chatId: id, messageId: m.message_id });
     } catch (e) {
       console.error('Envoi échoué', id, e.message);
@@ -585,13 +623,14 @@ async function broadcast(pred) {
 
 async function updateResult(pred) {
   if (db.ready) db.closePrediction(pred);
-  if (!bot) return;
+  const sender = senderFor(pred.strategy);
+  if (!sender) return;
   const { text, parse_mode } = predictionText(pred);
   for (const m of pred.messages) {
     try {
-      await bot.editMessageText(text, { chat_id: m.chatId, message_id: m.messageId, ...(parse_mode ? { parse_mode } : {}) });
+      await sender.editMessageText(text, { chat_id: m.chatId, message_id: m.messageId, ...(parse_mode ? { parse_mode } : {}) });
     } catch (e) {
-      try { await bot.sendMessage(m.chatId, text, { reply_to_message_id: m.messageId, ...(parse_mode ? { parse_mode } : {}) }); } catch (_) {}
+      try { await sender.sendMessage(m.chatId, text, { reply_to_message_id: m.messageId, ...(parse_mode ? { parse_mode } : {}) }); } catch (_) {}
     }
   }
 }
@@ -603,7 +642,21 @@ async function tick() {
     registerGames(games);
 
     const closed = verify();
-    for (const p of closed) await updateResult(p);
+    for (const p of closed) {
+      await updateResult(p);
+      bilanPending.add(p.strategy);           // bilan dès que le jeu reprend
+    }
+
+    // le jeu reprend (nouveau tour) → on publie le bilan des stratégies closes
+    const liveNumber = state.live ? state.live.number : null;
+    if (liveNumber && liveNumber !== lastLiveNumber) {
+      lastLiveNumber = liveNumber;
+      if (bilanPending.size) {
+        const keys = [...bilanPending];
+        bilanPending.clear();
+        for (const k of keys) await sendBilan(k);
+      }
+    }
 
     const preds = evaluate();
     for (const pred of preds) await broadcast(pred);
@@ -643,4 +696,4 @@ async function startLoop() {
   startBot();
 }
 
-module.exports = { startLoop, startBot, botStatus, activate, deactivate, persist, listChannels };
+module.exports = { startLoop, startBot, botStatus, activate, deactivate, persist, listChannels, sendBilan, dropSender };

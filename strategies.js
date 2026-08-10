@@ -300,7 +300,9 @@ const BY_KEY = Object.fromEntries(LIST.map((s) => [s.key, s]));
 
 function defaultsFor(key) {
   const s = BY_KEY[key];
-  return s ? JSON.parse(JSON.stringify(s.defaults)) : null;
+  if (!s) return null;
+  // token / canal / bilan : réglables stratégie par stratégie
+  return { token: null, bilan: true, ...JSON.parse(JSON.stringify(s.defaults)) };
 }
 
 function catalog() {

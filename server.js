@@ -9,8 +9,9 @@ const strategies = require('./strategies');
 const {
   state, stats, predictionMessage, recentGames, SUITS,
   setStrategyConfig, resetStrategy, initStrategies, parityRuntime,
+  strategyGames, bilanText, gameCategories,
 } = require('./predictor');
-const { startLoop, startBot, botStatus, activate, deactivate, persist } = require('./bot');
+const { startLoop, startBot, botStatus, activate, deactivate, persist, sendBilan, dropSender } = require('./bot');
 
 const app = express();
 app.use(express.json());
@@ -30,6 +31,7 @@ app.get('/api/state', (req, res) => {
     counters: state.counters,
     suits: SUITS,
     live: state.live,
+    liveCategories: gameCategories(state.live),
     lastFinished: state.lastFinished,
     error: state.lastError,
     bot: botStatus(),
@@ -186,7 +188,13 @@ function strategyPayload(key) {
     name: d.name,
     about: d.about,
     usesB: !!d.usesB,
-    config: cfg,
+    config: { ...cfg, token: undefined },
+    tokenSet: !!cfg.token,
+    tokenMasked: cfg.token ? cfg.token.slice(0, 8) + '••••••' + cfg.token.slice(-4) : null,
+    channels: cfg.channels || [],
+    bilan: cfg.bilan !== false,
+    bilanPreview: bilanText(d.key),
+    live: strategyGames(d.key, 12),
     stats: stats(d.key),
     preview: {
       pending: fmt.formatPreview(cfg.format, { maxR: cfg.maxR }),
@@ -201,6 +209,20 @@ function strategyPayload(key) {
   };
 }
 
+// jeux en live vus par une stratégie (catégories lisibles)
+app.get('/api/strategies/:key/games', (req, res) => {
+  if (!strategies.BY_KEY[req.params.key]) return res.status(404).json({ error: 'Stratégie inconnue' });
+  const limit = Math.min(50, parseInt(req.query.limit, 10) || 12);
+  res.json({ ...strategyGames(req.params.key, limit), stats: stats(req.params.key) });
+});
+
+// envoi manuel du bilan (test)
+app.post('/api/strategies/:key/bilan', async (req, res) => {
+  if (!strategies.BY_KEY[req.params.key]) return res.status(404).json({ error: 'Stratégie inconnue' });
+  await sendBilan(req.params.key);
+  res.json({ ok: true, text: bilanText(req.params.key) });
+});
+
 app.get('/api/strategies', (req, res) => {
   initStrategies();
   res.json({ strategies: strategies.LIST.map((d) => strategyPayload(d.key)) });
@@ -214,7 +236,13 @@ app.get('/api/strategies/:key', (req, res) => {
 
 // modification (administrateur) — enregistrée en base de données
 app.post('/api/strategies/:key', async (req, res) => {
+  const before = (state.strategies[req.params.key] || {}).token || null;
+  if (req.body && req.body.token !== undefined && String(req.body.token || '').trim()
+      && !/^\d+:[\w-]{20,}$/.test(String(req.body.token).trim())) {
+    return res.status(400).json({ error: 'Token Telegram invalide pour cette stratégie' });
+  }
   const cfg = setStrategyConfig(req.params.key, req.body || {});
+  if (before) dropSender(before);
   if (!cfg) return res.status(404).json({ error: 'Stratégie inconnue' });
   persist();
   if (db.ready) await db.saveStrategy(req.params.key, strategies.BY_KEY[req.params.key].name, cfg);
