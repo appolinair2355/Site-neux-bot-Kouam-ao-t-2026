@@ -6,8 +6,37 @@ const config = require('./config');
 const SUIT_MAP = { 0: '♠️', 1: '♣️', 2: '♦️', 3: '❤️' };
 const RANK_MAP = {
   1: 'A', 2: '2', 3: '3', 4: '4', 5: '5', 6: '6', 7: '7', 8: '8',
-  9: '9', 10: '10', 11: 'J', 12: 'Q', 13: 'K',
+  9: '9', 10: '10', 11: 'J', 12: 'Q', 13: 'K', 14: 'A',
 };
+
+// L'API 1xbet renvoie les cartes sous la forme {"S":2,"R":11} :
+//   S = costume (0 ♠️, 1 ♣️, 2 ♦️, 3 ❤️)
+//   R = rang    (2..10 = valeur, 11 J, 12 Q, 13 K, 14 As)
+// Certaines réponses utilisent V / CV / Rank : on accepte toutes les formes.
+function rankOf(c) {
+  if (c == null) return null;
+  if (typeof c === 'number') return c;
+  if (typeof c === 'string') {
+    const m = c.match(/^(10|[2-9]|[AJQKajqk])/);
+    if (!m) return null;
+    const t = m[1].toUpperCase();
+    if (t === 'A') return 14;
+    if (t === 'J') return 11;
+    if (t === 'Q') return 12;
+    if (t === 'K') return 13;
+    return Number(t);
+  }
+  const v = [c.R, c.V, c.CV, c.Rank, c.rank, c.value].find((x) => x != null);
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function suitOf(c) {
+  if (c == null || typeof c !== 'object') return null;
+  const v = [c.S, c.CS, c.Suit, c.suit].find((x) => x != null);
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
 
 const HEADERS = {
   accept: 'application/json, text/plain, */*',
@@ -25,15 +54,18 @@ const FINISHED_PHASES = ['Win1', 'Win2', 'Tie', 'Match finished'];
 
 function cardLabel(c) {
   if (!c) return null;
-  const rank = RANK_MAP[c.V] || (c.V != null ? String(c.V) : '?');
-  return `${rank}${SUIT_MAP[c.S] || ''}`;
+  const r = rankOf(c);
+  const rank = RANK_MAP[r] || (r != null ? String(r) : '?');
+  return `${rank}${SUIT_MAP[suitOf(c)] || ''}`;
 }
 
 // valeur baccara d'une carte : A=1, 2..9 = valeur, 10/J/Q/K = 0
 function cardValue(c) {
-  const v = Number(c && c.V);
-  if (!Number.isFinite(v)) return 0;
-  return v >= 10 ? 0 : v;
+  const r = rankOf(c);
+  if (!Number.isFinite(r)) return 0;
+  if (r === 14 || r === 1) return 1;   // As = 1
+  if (r >= 10) return 0;               // 10, J, Q, K = 0
+  return r;
 }
 
 function handValue(list) {
@@ -41,7 +73,7 @@ function handValue(list) {
 }
 
 function suitsOf(list) {
-  return (list || []).map((c) => SUIT_MAP[c.S]).filter(Boolean);
+  return (list || []).map((c) => SUIT_MAP[suitOf(c)]).filter(Boolean);
 }
 
 function parseCards(scS) {
@@ -82,8 +114,13 @@ function parseChamp(data) {
     const cards = parseCards(scS);
     const ph = phaseOf(scS);
     const finished = !!g.F || sc.CPS === 'Match finished' || FINISHED_PHASES.includes(ph);
-    const playerValue = cards.player.length ? handValue(cards.player) : null;
-    const bankerValue = cards.banker.length ? handValue(cards.banker) : null;
+    const fs = sc.FS || {};
+    const fsP = Number.isFinite(Number(fs.S1)) ? Number(fs.S1) : null;
+    const fsB = Number.isFinite(Number(fs.S2)) ? Number(fs.S2) : null;
+    // points : calculés à partir des cartes ; à défaut on prend le score
+    // officiel FS (S1 = joueur, S2 = banquier) pour ne jamais afficher « ? »
+    const playerValue = cards.player.length ? handValue(cards.player) : fsP;
+    const bankerValue = cards.banker.length ? handValue(cards.banker) : fsB;
 
     out.push({
       number,

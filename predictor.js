@@ -34,6 +34,7 @@ const state = {
   live: null,
   lastFinished: null,
   lastError: null,
+  sendErrors: {},          // clé de stratégie -> dernière erreur d'envoi Telegram
   startedAt: Date.now(),
 };
 
@@ -72,9 +73,23 @@ function strategyConfig(key) {
 }
 
 // "-1001234, -1005678" ou [ -100... ] -> [ -1001234, -1005678 ]
+// Accepte les identifiants numériques (-1001234567890) ET les noms publics
+// (@mon_canal) : Telegram gère les deux comme chat_id.
 function parseChannels(v) {
   const list = Array.isArray(v) ? v : String(v == null ? '' : v).split(/[\s,;]+/);
-  return list.map((x) => Number(String(x).trim())).filter((n) => Number.isFinite(n) && n !== 0);
+  const out = [];
+  for (const raw of list) {
+    const t = String(raw == null ? '' : raw).trim();
+    if (!t) continue;
+    if (/^-?\d+$/.test(t)) {
+      const n = Number(t);
+      if (Number.isFinite(n) && n !== 0 && !out.includes(n)) out.push(n);
+    } else {
+      const name = t.startsWith('@') ? t : `@${t.replace(/^https?:\/\/t\.me\//i, '')}`;
+      if (name.length > 2 && !out.includes(name)) out.push(name);
+    }
+  }
+  return out;
 }
 
 function setStrategyConfig(key, patch = {}) {
@@ -92,6 +107,8 @@ function setStrategyConfig(key, patch = {}) {
   if (patch.startGame !== undefined) next.startGame = Math.max(1, parseInt(patch.startGame, 10) || 1);
   if (patch.varStep !== undefined) next.varStep = Math.max(0, Math.min(99, parseInt(patch.varStep, 10) || 0));
   if (patch.decalage !== undefined) next.decalage = Math.max(1, Math.min(99, parseInt(patch.decalage, 10) || 1));
+  // stratégie « Carte absente » : nombre de jeux consécutifs sans le costume
+  if (patch.streak !== undefined) next.streak = Math.max(2, Math.min(10, parseInt(patch.streak, 10) || 3));
   if (patch.template !== undefined) next.template = patch.template ? String(patch.template) : null;
   if (patch.channels !== undefined) next.channels = parseChannels(patch.channels);
   if (patch.channelId !== undefined) next.channels = parseChannels(patch.channelId);

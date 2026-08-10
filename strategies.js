@@ -298,7 +298,85 @@ const parite = {
   },
 };
 
-const LIST = [costume, dominant, matchnul, parite];
+// ---------------------------------------------------------------------------
+// 5) Carte absente (joueur ET banquier) — 3 jeux consécutifs sans le costume
+// ---------------------------------------------------------------------------
+// Règle : un costume doit être ABSENT de la main du JOUEUR pendant N jeux
+// consécutifs (N = 3 par défaut) ET ABSENT de la main du BANQUIER pendant ces
+// mêmes N jeux. On prédit alors ce costume au tour +2, vérifié sur la main du
+// joueur, avec les rattrapages configurés.
+function absenceStreaks(games, lastNumber, need) {
+  const rounds = [];
+  for (let n = lastNumber - need + 1; n <= lastNumber; n++) {
+    const g = n === lastNumber ? games.get(n) : games.get(n);
+    if (!g || !g.finished) return null;                 // série non consécutive
+    const ps = suitsOf(g.playerSuits);
+    const bs = suitsOf(g.bankerSuits);
+    if (!ps.length || !bs.length) return null;          // cartes non lisibles
+    rounds.push({ number: n, ps, bs });
+  }
+  const missing = [];
+  for (const s of SUITS) {
+    const absent = rounds.every((r) => !r.ps.includes(s) && !r.bs.includes(s));
+    if (absent) missing.push(s);
+  }
+  return { rounds, missing };
+}
+
+const absente = {
+  key: 'absente',
+  name: 'Carte absente (3 jeux)',
+  about:
+    "On surveille les 4 costumes. Si un costume est ABSENT de la main du JOUEUR " +
+    "pendant 3 jeux consécutifs ET absent de la main du BANQUIER pendant ces " +
+    "mêmes 3 jeux, on prédit ce costume au tour +2. La vérification se fait sur " +
+    "la main du joueur, puis sur les rattrapages configurés. Le nombre de jeux " +
+    "consécutifs (3) est réglable.",
+  defaults: {
+    enabled: true,
+    format: config.DEFAULT_FORMAT,
+    maxR: 2,
+    b: 0,
+    lead: 2,
+    streak: 3,
+    template: null,
+    channels: [],
+  },
+  usesB: false,
+  source: 'finished',
+  detect(game, cfg, ctx) {
+    if (!game || !game.finished) return null;
+    const need = Math.max(2, Math.min(10, parseInt(cfg && cfg.streak, 10) || 3));
+    const games = (ctx && ctx.games) || new Map();
+    const res = absenceStreaks(games, game.number, need);
+    if (!res || !res.missing.length) return null;
+    // « une seule carte manquante » : on ne joue que s'il reste un candidat clair.
+    // Si plusieurs costumes sont absents, on prend le premier dans l'ordre
+    // ♦️ ❤️ ♣️ ♠️ pour rester déterministe.
+    const suit = res.missing[0];
+    const lead = Math.max(1, parseInt(cfg && cfg.lead, 10) || 2);
+    return {
+      kind: 'suit',
+      target: game.number + lead,
+      suit,
+      label: suit,
+      trigger: game.number,
+      reason:
+        `${suit} absent du joueur ET du banquier sur ${need} jeux consécutifs ` +
+        `(#N${game.number - need + 1} → #N${game.number}) → prédiction ${suit} sur ` +
+        `#N${game.number + lead}`,
+      meta: {
+        streak: need,
+        missing: res.missing,
+        from: game.number - need + 1,
+        to: game.number,
+        rounds: res.rounds.map((r) => ({ number: r.number, player: r.ps, banker: r.bs })),
+      },
+    };
+  },
+};
+
+const LIST = [costume, dominant, matchnul, parite, absente];
 const BY_KEY = Object.fromEntries(LIST.map((s) => [s.key, s]));
 
 function defaultsFor(key) {

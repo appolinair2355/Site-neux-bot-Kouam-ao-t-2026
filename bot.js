@@ -380,6 +380,7 @@ function wire(b) {
         `   format ${c.format}${d.key === 'matchnul' ? '/' + (c.formatDistribution || 79) : ''} • +${c.maxR} rattrapage(s)` +
         `${d.usesB ? ' • B=' + c.b : ''}` +
         `${d.key === 'parite' ? ` • départ ${c.startGame} • VAR ${c.varStep} • décalage ${c.decalage}` : ''}` +
+        `${d.key === 'absente' ? ` • ${c.streak || 3} jeux consécutifs` : ''}` +
         ` • ${st.win}✅/${st.loss}❌ (${st.rate}%)`;
     });
     b.sendMessage(msg.chat.id, `🧠 *Stratégies*\n\n${lines.join('\n\n')}\n\n➡️ /strategie <clé>`, { parse_mode: 'Markdown' });
@@ -403,6 +404,7 @@ function wire(b) {
           ? `• Jeu de départ : ${c.startGame} • VAR : ${c.varStep} • Décalage : ${c.decalage}\n` +
             `• Séquence : ${strategies.triggerSequence(c.startGame, c.varStep, 8).join(' → ')} …\n`
           : '') +
+        (key === 'absente' ? `• Jeux consécutifs sans la carte : ${c.streak || 3}\n` : '') +
         `• Canaux : ${(c.channels && c.channels.length ? c.channels.join(', ') : 'canaux actifs globaux')}\n` +
         `• Résultats : ${st.win}✅ / ${st.loss}❌ / ${st.pending}⌛ → ${st.rate}%\n\n` +
         `Aperçu :\n${fmt.formatPreview(c.format, { maxR: c.maxR })}`,
@@ -439,8 +441,9 @@ function wire(b) {
       format: 'format', formatdistribution: 'formatDistribution', maxr: 'maxR', b: 'b', lead: 'lead', template: 'template',
       depart: 'startGame', start: 'startGame', jeudepart: 'startGame',
       var: 'varStep', decalage: 'decalage', rattrapage: 'maxR',
+      streak: 'streak', jeux: 'streak', consecutifs: 'streak',
     };
-    if (!map[field]) return b.sendMessage(msg.chat.id, '⚠️ Champ inconnu (format, formatdistribution, maxr, b, lead, depart, var, decalage, template).');
+    if (!map[field]) return b.sendMessage(msg.chat.id, '⚠️ Champ inconnu (format, formatdistribution, maxr, b, lead, depart, var, decalage, streak, template).');
     const cfg = setStrategyConfig(key, { [map[field]]: value });
     persist();
     b.sendMessage(msg.chat.id, `✅ ${strategies.BY_KEY[key].name} → ${field} = ${cfg[map[field]]}\n\n${fmt.formatPreview(cfg.format, { maxR: cfg.maxR })}`);
@@ -572,15 +575,19 @@ function botStatus() {
 // ---------------------------------------------------------------------------
 const senders = new Map(); // token -> instance TelegramBot (sans polling)
 
+// Renvoie TOUJOURS un expéditeur si un token est disponible : le bot principal
+// quand il tourne, sinon une instance d'envoi seul (sans polling). Ainsi les
+// prédictions partent même si le polling du bot principal est en erreur.
 function senderFor(key) {
   const cfg = state.strategies[key] || {};
-  const token = (cfg.token || '').trim();
-  if (!token || token === state.botToken) return bot;
+  const token = (cfg.token || '').trim() || (state.botToken || '').trim();
+  if (!token) return null;
+  if (bot && token === (state.botToken || '').trim()) return bot;
   if (!senders.has(token)) {
     try { senders.set(token, new TelegramBot(token, { polling: false })); }
-    catch (e) { console.error('Token de stratégie invalide', key, e.message); senders.set(token, null); }
+    catch (e) { console.error('Token Telegram invalide', key, e.message); senders.set(token, null); }
   }
-  return senders.get(token) || bot;
+  return senders.get(token) || null;
 }
 
 function dropSender(token) {
@@ -655,13 +662,17 @@ async function announceMainBot() {
 async function broadcast(pred) {
   if (db.ready) db.savePrediction(pred, state.B);
   const sender = senderFor(pred.strategy);
-  if (!sender) return;
+  if (!sender) { state.sendErrors[pred.strategy] = 'Aucun token Telegram configuré'; return; }
+  const ids = strategyChannels(pred.strategy);
+  if (!ids.length) { state.sendErrors[pred.strategy] = 'Aucun canal configuré'; return; }
+  state.sendErrors[pred.strategy] = null;
   const { text, parse_mode } = predictionText(pred);
-  for (const id of strategyChannels(pred.strategy)) {
+  for (const id of ids) {
     try {
       const m = await sender.sendMessage(id, text, parse_mode ? { parse_mode } : {});
       pred.messages.push({ chatId: id, messageId: m.message_id });
     } catch (e) {
+      state.sendErrors[pred.strategy] = `${id} : ${e.message}`;
       console.error('Envoi échoué', id, e.message);
     }
   }

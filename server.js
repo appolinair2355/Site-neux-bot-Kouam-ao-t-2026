@@ -197,6 +197,7 @@ function strategyPayload(key) {
     channels: cfg.channels || [],
     bilan: cfg.bilan !== false,
     bilanPreview: bilanText(d.key),
+    sendError: state.sendErrors ? state.sendErrors[d.key] || null : null,
     live: strategyGames(d.key, 12),
     stats: stats(d.key),
     preview: {
@@ -250,7 +251,7 @@ app.post('/api/strategies/:key', async (req, res) => {
   persist();
   if (db.ready) await db.saveStrategy(req.params.key, strategies.BY_KEY[req.params.key].name, cfg);
   // token API et/ou ID de canal configurés → on prévient le canal
-  const touched = req.body && (req.body.token !== undefined || req.body.channels !== undefined || req.body.channelId !== undefined);
+  const touched = req.body && (req.body.token !== undefined || req.body.channels !== undefined || req.body.enabled === true || req.body.channelId !== undefined);
   const notice = touched ? await announceConfig(req.params.key) : null;
   res.json({ ok: true, saved: db.ready, notice, ...strategyPayload(req.params.key) });
 });
