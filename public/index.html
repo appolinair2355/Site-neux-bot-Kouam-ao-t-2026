@@ -3,63 +3,138 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Baccara 1xbet — Stratégies de prédiction</title>
-<meta name="description" content="Tableau de bord des stratégies de prédiction Baccara : configuration, formats Telegram et base de données." />
+<title>Baccara 1xbet — Console de prédiction</title>
+<meta name="description" content="Console Baccara 1xbet : stratégies, jeux en live par catégorie, canaux Telegram, bilan des gains et base de données." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;700&family=Manrope:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg:#0b1020; --card:#141b34; --card2:#1b2445; --line:#26325c;
-    --txt:#eef2ff; --muted:#9aa8d0; --gold:#f6c25a; --green:#3ddc97; --red:#ff6b6b; --blue:#5b8cff;
+    --bg:#070b16; --bg2:#0b1224;
+    --panel:rgba(255,255,255,.045); --panel2:rgba(255,255,255,.075);
+    --line:rgba(255,255,255,.10); --line2:rgba(255,255,255,.18);
+    --txt:#f2f5ff; --muted:#93a0c4;
+    --gold:#ffca5f; --green:#38e0a5; --red:#ff6b81; --blue:#6aa4ff; --violet:#a78bfa;
+    --r:18px;
   }
   *{box-sizing:border-box}
-  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:
-    radial-gradient(1000px 600px at 10% -10%,#1b2450,transparent),var(--bg);color:var(--txt)}
-  header{padding:18px 16px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-  header h1{font-size:18px;margin:0;letter-spacing:.5px}
-  .pill{font-size:12px;padding:4px 10px;border-radius:999px;border:1px solid var(--line);background:var(--card)}
-  .pill.on{border-color:var(--green);color:var(--green)}
-  .pill.off{border-color:var(--red);color:var(--red)}
-  main{max-width:1000px;margin:0 auto;padding:16px}
-  h2{font-size:16px;margin:22px 0 10px;color:var(--gold)}
-  .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(280px,1fr))}
-  .card{background:linear-gradient(180deg,var(--card),var(--card2));border:1px solid var(--line);border-radius:16px;padding:16px}
-  .card.click{cursor:pointer;transition:.15s transform,.15s border-color}
-  .card.click:hover{transform:translateY(-2px);border-color:var(--gold)}
-  .card h3{margin:0 0 6px;font-size:16px}
-  .muted{color:var(--muted);font-size:13px;line-height:1.5}
-  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:10px}
-  label{font-size:12px;color:var(--muted);display:block;margin-bottom:4px}
-  input,select,textarea{width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);background:#0e1430;color:var(--txt);font-size:14px}
-  textarea{min-height:70px;font-family:ui-monospace,monospace}
-  button{padding:10px 14px;border-radius:10px;border:1px solid var(--line);background:var(--blue);color:#fff;font-weight:600;cursor:pointer}
-  button.ghost{background:transparent;color:var(--txt)}
-  button.danger{background:var(--red)}
-  button.gold{background:var(--gold);color:#20180a}
-  pre{white-space:pre-wrap;background:#0e1430;border:1px solid var(--line);border-radius:12px;padding:12px;font-size:13px;margin:8px 0 0}
+  html,body{height:100%}
+  body{
+    margin:0;color:var(--txt);font-family:Manrope,system-ui,sans-serif;
+    background:
+      radial-gradient(900px 520px at 8% -8%, rgba(106,164,255,.20), transparent 60%),
+      radial-gradient(800px 520px at 100% 0%, rgba(255,202,95,.14), transparent 60%),
+      radial-gradient(700px 500px at 50% 110%, rgba(56,224,165,.12), transparent 60%),
+      linear-gradient(180deg,var(--bg),var(--bg2));
+    background-attachment:fixed;
+  }
+  h1,h2,h3,.num{font-family:Sora,Manrope,sans-serif;letter-spacing:-.2px}
+  a{color:inherit}
+
+  /* ---------- barre haute ---------- */
+  header{
+    position:sticky;top:0;z-index:20;display:flex;gap:10px;align-items:center;flex-wrap:wrap;
+    padding:12px 18px;border-bottom:1px solid var(--line);
+    background:rgba(7,11,22,.78);backdrop-filter:blur(14px);
+  }
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-family:Sora}
+  .logo{width:34px;height:34px;border-radius:12px;display:grid;place-items:center;font-size:18px;
+    background:linear-gradient(140deg,var(--gold),#ff8f5f);color:#241a05;box-shadow:0 6px 20px rgba(255,202,95,.32)}
+  nav{display:flex;gap:6px;margin-left:auto;flex-wrap:wrap}
+  nav button{
+    padding:9px 14px;border-radius:999px;border:1px solid var(--line);background:var(--panel);
+    color:var(--txt);font:inherit;font-weight:600;font-size:13px;cursor:pointer;transition:.18s
+  }
+  nav button:hover{border-color:var(--line2);background:var(--panel2)}
+  nav button.on{background:linear-gradient(140deg,var(--gold),#ffb24d);color:#241a05;border-color:transparent}
+
+  main{max-width:1140px;margin:0 auto;padding:22px 18px 70px}
+
+  /* ---------- éléments ---------- */
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:6px 11px;
+    border-radius:999px;border:1px solid var(--line);background:var(--panel)}
+  .pill.on{border-color:rgba(56,224,165,.5);color:var(--green);background:rgba(56,224,165,.10)}
+  .pill.off{border-color:rgba(255,107,129,.45);color:var(--red);background:rgba(255,107,129,.10)}
+  .pill.live{border-color:rgba(255,202,95,.5);color:var(--gold);background:rgba(255,202,95,.10)}
+  .dot{width:7px;height:7px;border-radius:50%;background:currentColor;box-shadow:0 0 0 0 currentColor;animation:pulse 1.8s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,255,255,.5)}70%{box-shadow:0 0 0 7px rgba(255,255,255,0)}100%{box-shadow:0 0 0 0 rgba(255,255,255,0)}}
+
+  .card{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);
+    border-radius:var(--r);padding:18px;backdrop-filter:blur(8px)}
+  .card.click{cursor:pointer;transition:.2s}
+  .card.click:hover{transform:translateY(-3px);border-color:rgba(255,202,95,.45);box-shadow:0 18px 40px -22px rgba(0,0,0,.9)}
+  .grid{display:grid;gap:14px}
+  .g2{grid-template-columns:1fr 1fr}
+  .g3{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+  .g4{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .mt{margin-top:14px}
+  .muted{color:var(--muted);font-size:13.5px;line-height:1.6}
+  .eyebrow{font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:700}
+  h2{font-size:20px;margin:26px 0 12px}
+  h3{font-size:16px;margin:0 0 8px}
+
+  label{font-size:12px;color:var(--muted);display:block;margin:10px 0 5px;font-weight:600}
+  input,select,textarea{width:100%;padding:11px 12px;border-radius:12px;border:1px solid var(--line);
+    background:rgba(3,6,14,.7);color:var(--txt);font:inherit;font-size:14px}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--blue)}
+  textarea{min-height:74px;font-family:ui-monospace,monospace;font-size:12.5px}
+  button.btn{padding:11px 15px;border-radius:12px;border:1px solid transparent;font:inherit;font-weight:700;
+    font-size:13.5px;cursor:pointer;background:linear-gradient(140deg,var(--blue),#4f7ff0);color:#fff;transition:.18s}
+  button.btn:hover{filter:brightness(1.08)}
+  button.btn.gold{background:linear-gradient(140deg,var(--gold),#ffb24d);color:#241a05}
+  button.btn.ghost{background:var(--panel);border-color:var(--line);color:var(--txt)}
+  button.btn.danger{background:linear-gradient(140deg,#ff6b81,#e0455f)}
+  pre{white-space:pre-wrap;background:rgba(3,6,14,.72);border:1px solid var(--line);border-radius:14px;
+    padding:13px;font-size:13px;margin:8px 0 0;font-family:ui-monospace,monospace;line-height:1.55}
   table{width:100%;border-collapse:collapse;font-size:13px}
-  th,td{text-align:left;padding:7px 6px;border-bottom:1px solid var(--line)}
-  .two{display:grid;gap:12px;grid-template-columns:1fr 1fr}
-  .badge{font-size:12px;padding:2px 8px;border-radius:999px;border:1px solid var(--line)}
-  .win{color:var(--green)} .loss{color:var(--red)} .wait{color:var(--gold)}
-  a.back{color:var(--muted);text-decoration:none;font-size:13px}
-  @media(max-width:620px){.two{grid-template-columns:1fr}}
+  th{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+  th,td{text-align:left;padding:9px 6px;border-bottom:1px solid var(--line)}
+  tr:last-child td{border-bottom:none}
+  .tag{font-size:11.5px;font-weight:700;padding:4px 9px;border-radius:999px;border:1px solid var(--line);background:var(--panel)}
+  .tag.win{color:var(--green);border-color:rgba(56,224,165,.4)}
+  .tag.loss{color:var(--red);border-color:rgba(255,107,129,.4)}
+  .tag.wait{color:var(--gold);border-color:rgba(255,202,95,.4)}
+  .tag.suit{color:var(--violet);border-color:rgba(167,139,250,.4)}
+  .tag.live{color:var(--gold)} .tag.done{color:var(--muted)} .tag.info{color:var(--blue)}
+  .kpi{padding:14px;border-radius:16px;border:1px solid var(--line);background:var(--panel)}
+  .kpi .n{font-family:Sora;font-size:26px;font-weight:700;line-height:1.1}
+  .kpi .l{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;font-weight:700;margin-top:4px}
+  .bar{height:7px;border-radius:99px;background:rgba(255,255,255,.09);overflow:hidden;margin-top:10px}
+  .bar>i{display:block;height:100%;background:linear-gradient(90deg,var(--green),var(--gold))}
+  .back{display:inline-block;color:var(--muted);text-decoration:none;font-size:13px;font-weight:600;margin-bottom:6px}
+  .hero{
+    position:relative;overflow:hidden;border-radius:26px;border:1px solid var(--line);padding:30px;
+    background:linear-gradient(140deg,rgba(255,202,95,.12),rgba(106,164,255,.10) 45%,rgba(56,224,165,.10));
+  }
+  .hero h1{font-size:clamp(26px,4.4vw,40px);margin:10px 0 8px;line-height:1.12}
+  .hero .cards{position:absolute;right:-10px;top:-10px;font-size:110px;opacity:.10;transform:rotate(-12deg)}
+  .gamecard{border:1px solid var(--line);border-radius:16px;padding:13px;background:var(--panel)}
+  .gamecard.livenow{border-color:rgba(255,202,95,.55);background:rgba(255,202,95,.07)}
+  .gamecard .n{font-family:Sora;font-weight:700;font-size:15px}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+  .chip{font-size:11.5px;padding:4px 8px;border-radius:9px;border:1px solid var(--line);background:rgba(3,6,14,.5)}
+  .chip b{color:var(--txt)} .chip span{color:var(--muted);font-weight:600;margin-right:4px}
+  @media(max-width:760px){.g2{grid-template-columns:1fr}main{padding:16px 13px 60px}.hero{padding:22px}}
 </style>
 </head>
 <body>
 <header>
-  <h1>🎴 Baccara 1xbet — Stratégies</h1>
+  <div class="brand"><span class="logo">🎴</span> Baccara 1xbet</div>
+  <span id="pLive" class="pill live"><i class="dot"></i>live…</span>
   <span id="pBot" class="pill">bot…</span>
   <span id="pDb" class="pill">base…</span>
-  <span id="pLive" class="pill">live…</span>
-  <span style="flex:1"></span>
-  <button class="ghost" onclick="go('#/')">🏠 Accueil</button>
-  <button class="ghost" onclick="go('#/reglages')">⚙️ Réglages</button>
-  <button class="ghost" onclick="go('#/base')">🗄️ Base</button>
+  <nav>
+    <button id="nHome" onclick="go('#/')">Accueil</button>
+    <button id="nSet" onclick="go('#/reglages')">Réglages</button>
+    <button id="nDb" onclick="go('#/base')">Base de données</button>
+  </nav>
 </header>
 <main id="view"></main>
 
 <script>
 const $ = (s,r=document)=>r.querySelector(s);
-const esc = (t)=>String(t==null?'':t).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const esc = (t)=>String(t==null?'':t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 let ST = null;
 
 async function api(url, method, body){
@@ -77,115 +152,211 @@ async function refreshHeader(){
     $('#pBot').textContent = ST.bot.running ? '🤖 @'+(ST.bot.username||'bot') : '🤖 bot arrêté';
     $('#pDb').className = 'pill ' + (ST.db.ready?'on':'off');
     $('#pDb').textContent = ST.db.ready ? '🗄️ base connectée' : '🗄️ base non connectée';
-    $('#pLive').className = 'pill on';
-    $('#pLive').textContent = ST.live ? '🔴 tour #N'+ST.live.number : '⏳ aucun tour';
+    $('#pLive').innerHTML = '<i class="dot"></i>' + (ST.live ? 'Tour #N'+ST.live.number : 'aucun tour');
   }catch(e){}
+}
+
+function chips(cats){
+  return '<div class="chips">' + (cats||[]).map(c=>
+    `<span class="chip"><span>${esc(c.label)}</span><b class="${c.tone?('tag '+c.tone):''}" style="border:none;background:none;padding:0">${esc(c.value)}</b></span>`
+  ).join('') + '</div>';
+}
+function gameCard(g, live){
+  return `<div class="gamecard ${live?'livenow':''}">
+    <div class="row" style="justify-content:space-between">
+      <span class="n">${live?'🔴 ':'#'}N${g.number}</span>
+      ${g.prediction?`<span class="tag ${g.prediction.status==='gagné'?'win':g.prediction.status==='perdu'?'loss':'wait'}">${g.prediction.badge||'⌛'} ${esc(g.prediction.label||'')}</span>`:''}
+    </div>
+    ${chips(g.categories)}
+  </div>`;
 }
 
 // ---------------------------------------------------------------- Accueil
 async function viewHome(){
+  const s = ST || await api('/api/state');
   const data = await api('/api/strategies');
-  const cards = data.strategies.map(s=>`
-    <div class="card click" onclick="go('#/strategie/${s.key}')">
-      <h3>${s.config.enabled?'🟢':'🔴'} ${esc(s.name)}</h3>
-      <div class="muted">${esc(s.about)}</div>
-      <div class="row">
-        <span class="badge">format ${s.config.format}</span>
-        <span class="badge">+${s.config.maxR} rattrapage(s)</span>
-        ${s.usesB?`<span class="badge">B = ${s.config.b}</span>`:''}
-        ${s.key==='parite'?`<span class="badge">départ ${s.config.startGame}</span><span class="badge">VAR ${s.config.varStep}</span><span class="badge">décalage ${s.config.decalage}</span>`:`<span class="badge">tour +${s.config.lead}</span>`}
+  const st = s.stats || {win:0,loss:0,pending:0,rate:0};
+  const live = s.live;
+  const cards = data.strategies.map(x=>`
+    <div class="card click" onclick="go('#/strategie/${x.key}')">
+      <div class="row" style="justify-content:space-between">
+        <span class="eyebrow">${x.config.enabled?'🟢 active':'🔴 en pause'}</span>
+        <span class="tag">${x.stats.rate}%</span>
       </div>
-      <div class="row">
-        <span class="badge win">${s.stats.win} ✅</span>
-        <span class="badge loss">${s.stats.loss} ❌</span>
-        <span class="badge wait">${s.stats.pending} ⌛</span>
-        <span class="badge">${s.stats.rate}%</span>
+      <h3 style="margin-top:8px">${esc(x.name)}</h3>
+      <div class="muted" style="min-height:66px">${esc(x.about).slice(0,180)}…</div>
+      <div class="row mt">
+        <span class="tag win">${x.stats.win} ✅</span>
+        <span class="tag loss">${x.stats.loss} ❌</span>
+        <span class="tag wait">${x.stats.pending} ⌛</span>
+        <span class="tag ${x.tokenSet?'win':'info'}">${x.tokenSet?'token dédié':'token global'}</span>
+        <span class="tag ${x.channels.length?'win':'wait'}">${x.channels.length?x.channels.length+' canal(aux)':'canal à configurer'}</span>
       </div>
-      <pre>${esc(s.preview.pending)}</pre>
-      <div class="row"><button class="gold">Configurer →</button></div>
+      <div class="bar"><i style="width:${x.stats.rate}%"></i></div>
+      <div class="row mt"><button class="btn gold">Ouvrir la stratégie →</button></div>
     </div>`).join('');
+
   $('#view').innerHTML = `
-    <h2>🧠 Stratégies disponibles</h2>
-    <div class="muted">Chaque stratégie a sa propre configuration (format du message, rattrapages, canaux). Tout est enregistré dans la base de données : après un redémarrage, le bot repart avec les mêmes réglages.</div>
-    <div class="grid" style="margin-top:14px">${cards}</div>`;
+    <section class="hero">
+      <div class="cards">🂡🂱</div>
+      <span class="eyebrow">Console de prédiction Baccara · main du joueur</span>
+      <h1>Vos stratégies, vos canaux,<br>vos jeux en direct.</h1>
+      <div class="muted" style="max-width:620px">Chaque stratégie a son propre token de bot, son canal Telegram, son format de message et son bilan automatique. Tout est enregistré dans la base de données et rechargé au redémarrage.</div>
+      <div class="row mt">
+        <button class="btn gold" onclick="go('#/reglages')">⚙️ Réglages & base</button>
+        <button class="btn ghost" onclick="go('#/base')">🗄️ Voir les données</button>
+      </div>
+    </section>
+
+    <h2>📡 Jeu en direct</h2>
+    <div class="card">
+      ${live?`<div class="row" style="justify-content:space-between">
+          <div><span class="eyebrow">Tour en cours</span><div class="num" style="font-size:24px">#N${live.number}</div></div>
+          <span class="pill live"><i class="dot"></i>${esc(live.finished?'terminé':live.dealing?'distribution':'attente')}</span>
+        </div>
+        ${chips(s.liveCategories)}`:'<div class="muted">Aucun tour détecté pour le moment — le flux 1xbet est en cours de lecture.</div>'}
+      ${s.error?`<div class="muted mt">⚠️ ${esc(s.error)}</div>`:''}
+    </div>
+
+    <h2>📈 Bilan global</h2>
+    <div class="grid g4">
+      <div class="kpi"><div class="n" style="color:var(--green)">${st.win}</div><div class="l">Gains</div></div>
+      <div class="kpi"><div class="n" style="color:var(--red)">${st.loss}</div><div class="l">Pertes</div></div>
+      <div class="kpi"><div class="n" style="color:var(--gold)">${st.pending}</div><div class="l">En attente</div></div>
+      <div class="kpi"><div class="n">${st.rate}%</div><div class="l">Réussite</div></div>
+    </div>
+
+    <h2>🧠 Stratégies</h2>
+    <div class="grid g3">${cards}</div>`;
 }
 
 // ------------------------------------------------------- Détail stratégie
 async function viewStrategy(key){
   const s = await api('/api/strategies/'+key);
   const opts = (sel)=>Array.from({length:83},(_,i)=>i+1).map(n=>`<option value="${n}" ${n==sel?'selected':''}>Format ${n}</option>`).join('');
+  const known = (ST&&ST.channels||[]).map(c=>`<option value="${c.id}">${esc(c.title)} (${c.id})</option>`).join('');
   $('#view').innerHTML = `
-    <a class="back" href="#/">← retour aux stratégies</a>
-    <h2>${s.config.enabled?'🟢':'🔴'} ${esc(s.name)}</h2>
-    <div class="card"><div class="muted">${esc(s.about)}</div></div>
-
-    <div class="two" style="margin-top:14px">
-      <div class="card">
-        <h3>⚙️ Configuration</h3>
-        <div class="row">
-          <div style="flex:1"><label>Format du message</label><select id="f">${opts(s.config.format)}</select></div>
-          <div style="flex:1"><label>Rattrapages (+n)</label><input id="r" type="number" min="0" max="9" value="${s.config.maxR}"></div>
-        </div>
-        <div class="row">
-          ${s.usesB?`<div style="flex:1"><label>Compteur B</label><input id="b" type="number" min="0" max="20" value="${s.config.b}"></div>`:''}
-          <div style="flex:1"><label>Prédire au tour +</label><input id="l" type="number" min="1" max="9" value="${s.config.lead}"></div>
-          ${s.key==='parite'?`
-          <div style="flex:1"><label>Jeu de départ</label><input id="sg" type="number" min="1" value="${s.config.startGame}"></div>
-          <div style="flex:1"><label>VAR</label><input id="vs" type="number" min="0" max="99" value="${s.config.varStep}"></div>
-          <div style="flex:1"><label>Décalage</label><input id="dc" type="number" min="1" max="99" value="${s.config.decalage}"></div>`:''}
-          ${s.config.formatDistribution?`<div style="flex:1"><label>Format distribution</label><select id="fd">${opts(s.config.formatDistribution)}</select></div>`:''}
-        </div>
-        <div class="row"><div style="flex:1"><label>Canaux (ids séparés par des virgules — vide = canaux actifs globaux)</label>
-          <input id="ch" value="${(s.config.channels||[]).join(', ')}"></div></div>
-        <div class="row"><div style="flex:1"><label>Template personnalisé (optionnel) — {game} {emoji} {suit} {status} {maxR}</label>
-          <textarea id="tpl">${esc(s.config.template||'')}</textarea></div></div>
-        <div class="row">
-          <button onclick="saveStrategy('${s.key}')">💾 Enregistrer en base</button>
-          <button class="ghost" onclick="toggleStrategy('${s.key}',${s.config.enabled?'false':'true'})">${s.config.enabled?'⏸️ Désactiver':'▶️ Activer'}</button>
-          <button class="ghost" onclick="resetStrategy('${s.key}')">♻️ Par défaut</button>
-          <button class="danger" onclick="deleteStrategy('${s.key}')">🗑️ Supprimer la config</button>
-        </div>
-        <div id="msg" class="muted"></div>
-      </div>
-
-      <div class="card">
-        <h3>👁️ Aperçu du message</h3>
-        <div class="muted">En cours</div><pre>${esc(s.preview.pending)}</pre>
-        ${s.preview.distribution?`<div class="muted">Distribution</div><pre>${esc(s.preview.distribution)}</pre>`:''}
-        <div class="muted">Gagné</div><pre>${esc(s.preview.win)}</pre>
-        <div class="muted">Perdu</div><pre>${esc(s.preview.loss)}</pre>
+    <a class="back" href="#/">← toutes les stratégies</a>
+    <div class="hero" style="padding:22px">
+      <span class="eyebrow">${s.config.enabled?'🟢 stratégie active':'🔴 stratégie en pause'}</span>
+      <h1 style="font-size:26px">${esc(s.name)}</h1>
+      <div class="muted" style="max-width:700px">${esc(s.about)}</div>
+      <div class="row mt">
+        <span class="tag win">${s.stats.win} ✅</span><span class="tag loss">${s.stats.loss} ❌</span>
+        <span class="tag wait">${s.stats.pending} ⌛</span><span class="tag">${s.stats.rate}% de réussite</span>
       </div>
     </div>
 
-    <div class="card" style="margin-top:14px">
-      <h3>📊 Prédictions de cette stratégie — ${s.stats.win}✅ / ${s.stats.loss}❌ / ${s.stats.pending}⌛ (${s.stats.rate}%)</h3>
+    <h2>🔌 Envoi Telegram de cette stratégie</h2>
+    <div class="card">
+      <div class="grid g2">
+        <div>
+          <label>API token du bot (vide = bot principal)</label>
+          <input id="tok" placeholder="${esc(s.tokenMasked||'123456789:AA…')}">
+          <div class="muted">${s.tokenSet?'🟢 token dédié enregistré : '+esc(s.tokenMasked):'⚪ utilise le bot principal des réglages'}</div>
+        </div>
+        <div>
+          <label>ID du canal où envoyer les prédictions (plusieurs = séparés par des virgules)</label>
+          <input id="ch" value="${(s.channels||[]).join(', ')}" placeholder="-1001234567890">
+          ${known?`<select onchange="if(this.value){$('#ch').value=($('#ch').value?$('#ch').value+', ':'')+this.value}"><option value="">↳ ajouter un canal détecté…</option>${known}</select>`:''}
+        </div>
+      </div>
+      <div class="row mt">
+        <label style="margin:0"><input type="checkbox" id="bil" ${s.bilan?'checked':''} style="width:auto"> Envoyer le bilan quand le jeu reprend</label>
+      </div>
+      <div class="row mt">
+        <button class="btn" onclick="saveStrategy('${s.key}')">💾 Enregistrer en base</button>
+        <button class="btn ghost" onclick="api('/api/strategies/${s.key}/bilan','POST',{}).then(()=>alert('Bilan envoyé'))">📤 Tester le bilan</button>
+      </div>
+      <div class="mt"><span class="eyebrow">Aperçu du bilan</span><pre>${esc(s.bilanPreview)}</pre></div>
+      <div id="msg" class="muted mt"></div>
+    </div>
+
+    <h2>🎴 Jeux en live vus par cette stratégie</h2>
+    <div class="card">
+      <div id="liveWrap">${renderLive(s.live)}</div>
+    </div>
+
+    <h2>⚙️ Configuration</h2>
+    <div class="grid g2">
+      <div class="card">
+        <div class="grid g2">
+          <div><label>Format du message</label><select id="f">${opts(s.config.format)}</select></div>
+          <div><label>Rattrapages (+n)</label><input id="r" type="number" min="0" max="9" value="${s.config.maxR}"></div>
+          ${s.usesB?`<div><label>Compteur B</label><input id="b" type="number" min="0" max="20" value="${s.config.b}"></div>`:''}
+          <div><label>Prédire au tour +</label><input id="l" type="number" min="1" max="9" value="${s.config.lead}"></div>
+          ${s.key==='parite'?`
+          <div><label>Jeu de départ</label><input id="sg" type="number" min="1" value="${s.config.startGame}"></div>
+          <div><label>VAR</label><input id="vs" type="number" min="0" max="99" value="${s.config.varStep}"></div>
+          <div><label>Décalage</label><input id="dc" type="number" min="1" max="99" value="${s.config.decalage}"></div>`:''}
+          ${s.config.formatDistribution?`<div><label>Format distribution</label><select id="fd">${opts(s.config.formatDistribution)}</select></div>`:''}
+        </div>
+        <label>Template personnalisé (optionnel) — {game} {emoji} {suit} {status} {maxR}</label>
+        <textarea id="tpl">${esc(s.config.template||'')}</textarea>
+        <div class="row mt">
+          <button class="btn" onclick="saveStrategy('${s.key}')">💾 Enregistrer</button>
+          <button class="btn ghost" onclick="toggleStrategy('${s.key}',${s.config.enabled?'false':'true'})">${s.config.enabled?'⏸️ Désactiver':'▶️ Activer'}</button>
+          <button class="btn ghost" onclick="resetStrategy('${s.key}')">♻️ Par défaut</button>
+          <button class="btn danger" onclick="deleteStrategy('${s.key}')">🗑️ Supprimer</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>👁️ Aperçu des messages</h3>
+        <span class="eyebrow">En cours</span><pre>${esc(s.preview.pending)}</pre>
+        ${s.preview.distribution?`<span class="eyebrow">Distribution</span><pre>${esc(s.preview.distribution)}</pre>`:''}
+        <span class="eyebrow">Gagné</span><pre>${esc(s.preview.win)}</pre>
+        <span class="eyebrow">Perdu</span><pre>${esc(s.preview.loss)}</pre>
+      </div>
+    </div>
+
+    <h2>📊 Prédictions</h2>
+    <div class="card">
       <table><thead><tr><th>Tour</th><th>Prédiction</th><th>État</th><th>Raison</th></tr></thead><tbody>
-      ${s.predictions.map(p=>`<tr><td>#N${p.target}</td><td>${esc(p.label)}</td>
-        <td class="${p.status==='gagné'?'win':p.status==='perdu'?'loss':'wait'}">${p.badge||'⌛'} ${esc(p.status)}</td>
-        <td class="muted">${esc(p.reason||'')}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">Aucune prédiction pour le moment.</td></tr>'}
+      ${s.predictions.map(p=>`<tr><td class="num">#N${p.target}</td><td>${esc(p.label)}</td>
+        <td><span class="tag ${p.status==='gagné'?'win':p.status==='perdu'?'loss':'wait'}">${p.badge||'⌛'} ${esc(p.status)}</span></td>
+        <td class="muted">${esc(p.reason||'')}</td></tr>`).join('') || '<tr><td class="muted">Aucune prédiction pour le moment.</td></tr>'}
       </tbody></table>
-      <div class="row"><button class="danger" onclick="clearPreds('${s.key}')">🗑️ Effacer les prédictions</button></div>
+      <div class="row mt"><button class="btn ghost" onclick="clearPreds('${s.key}')">🧹 Effacer les prédictions</button></div>
     </div>`;
+  clearInterval(window.__liveTimer);
+  window.__liveTimer = setInterval(async ()=>{
+    if(!location.hash.startsWith('#/strategie/')) return clearInterval(window.__liveTimer);
+    try{ const d = await api('/api/strategies/'+key+'/games?limit=12');
+      const w = $('#liveWrap'); if(w) w.innerHTML = renderLive(d); }catch(e){}
+  }, 4000);
 }
 
-function collect(key){
-  const body = {
-    format: $('#f').value, maxR: $('#r').value, lead: $('#l').value,
-    template: $('#tpl').value.trim() || null,
-    channels: $('#ch').value.split(',').map(x=>x.trim()).filter(Boolean).map(Number),
-  };
-  if($('#b')) body.b = $('#b').value;
-  if($('#sg')) body.startGame = $('#sg').value;
-  if($('#vs')) body.varStep = $('#vs').value;
-  if($('#dc')) body.decalage = $('#dc').value;
-  if($('#fd')) body.formatDistribution = $('#fd').value;
-  return body;
+function renderLive(d){
+  if(!d) return '<div class="muted">—</div>';
+  const live = d.live;
+  return `
+    ${live?`<div class="gamecard livenow"><div class="row" style="justify-content:space-between">
+        <span class="n">🔴 Tour #N${live.number} — ${esc(live.finished?'terminé':live.dealing?'distribution en cours':'attente des cartes')}</span>
+        <span class="pill live"><i class="dot"></i>live</span></div>${chips(live.categories)}</div>`
+      :'<div class="muted">Aucun tour live détecté.</div>'}
+    <div class="grid g3 mt">${(d.games||[]).map(g=>gameCard(g,false)).join('')}</div>`;
 }
+
 async function saveStrategy(key){
-  try{ const r = await api('/api/strategies/'+key,'POST',collect(key));
-    $('#msg').textContent = r.saved ? '✅ Configuration enregistrée dans la base de données.' : '✅ Enregistré localement (base non connectée).';
-    setTimeout(()=>viewStrategy(key),600);
-  }catch(e){ $('#msg').textContent = '❌ '+e.message; }
+  const body = {
+    format: $('#f')?+$('#f').value:undefined,
+    maxR: $('#r')?+$('#r').value:undefined,
+    lead: $('#l')?+$('#l').value:undefined,
+    template: $('#tpl')?$('#tpl').value:undefined,
+    channels: $('#ch')?$('#ch').value:undefined,
+    bilan: $('#bil')?$('#bil').checked:undefined,
+  };
+  if($('#b')) body.b = +$('#b').value;
+  if($('#fd')) body.formatDistribution = +$('#fd').value;
+  if($('#sg')) body.startGame = +$('#sg').value;
+  if($('#vs')) body.varStep = +$('#vs').value;
+  if($('#dc')) body.decalage = +$('#dc').value;
+  if($('#tok') && $('#tok').value.trim()) body.token = $('#tok').value.trim();
+  try{
+    const r = await api('/api/strategies/'+key,'POST',body);
+    if($('#msg')) $('#msg').textContent = r.saved ? '✅ Enregistré dans la base de données.' : '✅ Enregistré (base non connectée : sauvegarde locale).';
+    setTimeout(()=>viewStrategy(key), 500);
+  }catch(e){ if($('#msg')) $('#msg').textContent = '❌ '+e.message; else alert(e.message); }
 }
 async function toggleStrategy(key,on){ await api('/api/strategies/'+key,'POST',{enabled:on==='true'||on===true}); viewStrategy(key); }
 async function resetStrategy(key){ await api('/api/strategies/'+key+'/reset','POST',{}); viewStrategy(key); }
@@ -197,31 +368,35 @@ async function clearPreds(key){ if(!confirm('Effacer les prédictions de cette s
 // ---------------------------------------------------------------- Réglages
 async function viewSettings(){
   const s = ST || await api('/api/state');
+  let ov=null; try{ ov = await api('/api/db/overview'); }catch(e){}
   $('#view').innerHTML = `
-    <a class="back" href="#/">← retour</a>
-    <h2>⚙️ Réglages généraux</h2>
-    <div class="two">
+    <a class="back" href="#/">← accueil</a>
+    <h2>⚙️ Réglages</h2>
+    <div class="grid g2">
       <div class="card">
-        <h3>🤖 Bot Telegram</h3>
-        <label>Token</label><input id="tk" placeholder="${esc(s.bot.tokenMasked||'123456:ABC…')}">
-        <div class="row"><button onclick="setToken()">Enregistrer</button>
-          <button class="ghost" onclick="api('/api/bot/restart','POST',{}).then(()=>location.reload())">Redémarrer</button></div>
+        <h3>🤖 Bot Telegram principal</h3>
+        <div class="muted">${s.bot.running?'🟢 en ligne @'+esc(s.bot.username||''):'🔴 arrêté'} ${s.bot.error?('— ⚠️ '+esc(s.bot.error)):''}</div>
+        <label>API token</label><input id="tk" placeholder="${esc(s.bot.tokenMasked||'123456789:AA…')}">
+        <div class="row mt"><button class="btn" onclick="setToken()">Enregistrer</button>
+          <button class="btn ghost" onclick="api('/api/bot/restart','POST',{}).then(()=>location.reload())">Redémarrer</button></div>
         <label>ID administrateur</label><input id="adm" value="${s.bot.adminId||''}">
-        <div class="row"><button onclick="api('/api/bot/admin','POST',{adminId:$('#adm').value}).then(()=>alert('Enregistré'))">Enregistrer</button></div>
-        <div class="muted">${s.bot.error?('⚠️ '+esc(s.bot.error)):''}</div>
+        <div class="row mt"><button class="btn ghost" onclick="api('/api/bot/admin','POST',{adminId:$('#adm').value}).then(()=>alert('Enregistré'))">Enregistrer</button></div>
+        <div class="muted mt">Chaque stratégie peut utiliser son propre token et son propre canal depuis sa page.</div>
       </div>
       <div class="card">
-        <h3>🗄️ Base de données</h3>
-        <div class="muted">${s.db.ready?'🟢 connectée — '+esc(s.db.url):'🔴 non connectée'}</div>
-        <label>Lien PostgreSQL (Render)</label><input id="dburl" placeholder="postgresql://user:pass@host/db">
-        <div class="row"><button onclick="api('/api/db','POST',{url:$('#dburl').value}).then(()=>location.reload())">Connecter</button></div>
-        <div class="muted">Toutes les configurations de stratégies sont enregistrées ici et rechargées automatiquement au redémarrage.</div>
+        <h3>🗄️ Lien de la base de données</h3>
+        <div class="muted">${s.db.ready?'🟢 connectée — '+esc(s.db.url):'🔴 non connectée'+(s.db.error?' — '+esc(s.db.error):'')}</div>
+        <label>URL PostgreSQL (Render — External Database URL)</label>
+        <input id="dburl" placeholder="postgresql://user:motdepasse@host:5432/base">
+        <div class="row mt"><button class="btn gold" onclick="api('/api/db','POST',{url:$('#dburl').value}).then(()=>location.reload()).catch(e=>alert(e.message))">Connecter</button>
+          <button class="btn ghost" onclick="go('#/base')">Voir les données</button></div>
+        ${ov?`<div class="row mt"><span class="tag">${ov.overview.games} jeux</span><span class="tag">${ov.overview.predictions} prédictions</span><span class="tag">dernier #N${ov.overview.dernier_jeu||'—'}</span></div>`:'<div class="muted mt">Connecte la base pour voir tout ce qui est déjà enregistré.</div>'}
       </div>
     </div>
-    <div class="card" style="margin-top:14px">
-      <h3>📡 Canaux</h3>
-      <table><tbody>${(s.channels||[]).map(c=>`<tr><td>${c.active?'✅':'⚪'} ${esc(c.title)}</td><td class="muted">${c.id}</td>
-        <td><button class="ghost" onclick="api('/api/channels/${c.active?'deactivate':'activate'}','POST',{id:${c.id}}).then(()=>viewSettings())">${c.active?'Désactiver':'Activer'}</button></td></tr>`).join('') || '<tr><td class="muted">Aucun canal détecté.</td></tr>'}</tbody></table>
+    <h2>📡 Canaux détectés</h2>
+    <div class="card">
+      <table><tbody>${(s.channels||[]).map(c=>`<tr><td>${c.active?'✅':'⚪'} ${esc(c.title)}</td><td class="muted num">${c.id}</td>
+        <td style="text-align:right"><button class="btn ghost" onclick="api('/api/channels/${c.active?'deactivate':'activate'}','POST',{id:${c.id}}).then(()=>viewSettings())">${c.active?'Désactiver':'Activer'}</button></td></tr>`).join('') || '<tr><td class="muted">Aucun canal détecté — ajoute le bot comme administrateur d’un canal.</td></tr>'}</tbody></table>
     </div>`;
 }
 async function setToken(){ try{ await api('/api/bot/token','POST',{token:$('#tk').value.trim()}); location.reload(); }catch(e){ alert(e.message); } }
@@ -230,28 +405,49 @@ async function setToken(){ try{ await api('/api/bot/token','POST',{token:$('#tk'
 async function viewDb(){
   let ov=null, err=null;
   try{ ov = await api('/api/db/overview'); }catch(e){ err = e.message; }
-  let games=[]; if(ov){ games=(await api('/api/db/games?limit=20')).games; }
+  let games=[], preds=null, strat=null;
+  if(ov){
+    games=(await api('/api/db/games?limit=20')).games;
+    try{ preds=await api('/api/db/predictions'); }catch(e){}
+    try{ strat=await api('/api/db/strategies'); }catch(e){}
+  }
   $('#view').innerHTML = `
-    <a class="back" href="#/">← retour</a>
-    <h2>🗄️ Vérification de la base de données</h2>
-    ${err?`<div class="card muted">❌ ${esc(err)} — configure le lien dans ⚙️ Réglages.</div>`:`
-    <div class="card">
-      <div class="row"><span class="badge">${ov.overview.games} jeux</span>
-        <span class="badge">${ov.overview.predictions} prédictions</span>
-        <span class="badge">dernier #N${ov.overview.dernier_jeu||'—'}</span></div>
-      <h3 style="margin-top:14px">Dates enregistrées</h3>
-      <table><tbody>${ov.dates.map(d=>`<tr><td>${String(d.played_on).slice(0,10)}</td><td class="muted">${d.total} jeux</td></tr>`).join('')}</tbody></table>
+    <a class="back" href="#/">← accueil</a>
+    <h2>🗄️ Tout ce qui est enregistré</h2>
+    ${err?`<div class="card"><div class="muted">❌ ${esc(err)} — configure le lien dans ⚙️ Réglages.</div>
+      <div class="row mt"><button class="btn gold" onclick="go('#/reglages')">Aller aux réglages</button></div></div>`:`
+    <div class="grid g4">
+      <div class="kpi"><div class="n">${ov.overview.games}</div><div class="l">Jeux</div></div>
+      <div class="kpi"><div class="n">${ov.overview.predictions}</div><div class="l">Prédictions</div></div>
+      <div class="kpi"><div class="n">#N${ov.overview.dernier_jeu||'—'}</div><div class="l">Dernier tour</div></div>
+      <div class="kpi"><div class="n">${(ov.dates||[]).length}</div><div class="l">Dates</div></div>
     </div>
-    <div class="card" style="margin-top:14px">
+    <div class="grid g2 mt">
+      <div class="card">
+        <h3>📅 Dates enregistrées</h3>
+        <table><tbody>${(ov.dates||[]).map(d=>`<tr><td>${String(d.played_on).slice(0,10)}</td><td class="muted">${d.total} jeux</td></tr>`).join('')||'<tr><td class="muted">—</td></tr>'}</tbody></table>
+      </div>
+      <div class="card">
+        <h3>🧠 Stratégies enregistrées</h3>
+        <table><tbody>${strat?Object.entries(strat.details).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="muted">${v.stats?`${v.stats.gagne||0}✅ / ${v.stats.perdu||0}❌`:'—'}</td></tr>`).join(''):'<tr><td class="muted">—</td></tr>'}</tbody></table>
+      </div>
+    </div>
+    <div class="card mt">
       <h3>🧾 Derniers jeux (main du joueur)</h3>
       <table><thead><tr><th>Tour</th><th>Cartes joueur</th><th>Points</th><th>Résultat</th></tr></thead><tbody>
-      ${games.map(g=>`<tr><td>#N${g.number}</td><td>${esc((g.player_cards||[]).join(' '))}</td><td>${g.player_value??'—'}</td><td class="muted">${esc(g.winner||'')}</td></tr>`).join('')}
+      ${games.map(g=>`<tr><td class="num">#N${g.number}</td><td>${esc((g.player_cards||[]).join(' '))}</td><td>${g.player_value??'—'}</td><td class="muted">${esc(g.winner||'')}</td></tr>`).join('')}
       </tbody></table>
     </div>
-    <div class="card" style="margin-top:14px">
+    ${preds?`<div class="card mt">
+      <h3>📊 Prédictions enregistrées</h3>
+      <table><thead><tr><th>Stratégie</th><th>Tour</th><th>Pari</th><th>État</th></tr></thead><tbody>
+      ${(preds.predictions||[]).slice(0,25).map(p=>`<tr><td>${esc(p.strategy||'')}</td><td class="num">#N${p.target}</td><td>${esc(p.label||p.suit||'')}</td>
+        <td><span class="tag ${p.status==='gagne'?'win':p.status==='perdu'?'loss':'wait'}">${esc(p.status||'')}</span></td></tr>`).join('')||'<tr><td class="muted">—</td></tr>'}
+      </tbody></table></div>`:''}
+    <div class="card mt">
       <h3>🔎 Requête SELECT (lecture seule)</h3>
       <textarea id="sql">SELECT number, player_cards, player_value, winner FROM games ORDER BY number DESC LIMIT 10</textarea>
-      <div class="row"><button onclick="runSql()">Exécuter</button></div>
+      <div class="row mt"><button class="btn" onclick="runSql()">Exécuter</button></div>
       <pre id="sqlOut" class="muted">—</pre>
     </div>`}`;
 }
@@ -264,12 +460,15 @@ async function runSql(){
 // ------------------------------------------------------------------ Router
 async function route(){
   const h = location.hash || '#/';
+  $('#nHome').className = h==='#/'||h===''?'on':'';
+  $('#nSet').className = h==='#/reglages'?'on':'';
+  $('#nDb').className = h==='#/base'?'on':'';
   try{
     if(h.startsWith('#/strategie/')) await viewStrategy(h.split('/')[2]);
     else if(h==='#/reglages') await viewSettings();
     else if(h==='#/base') await viewDb();
     else await viewHome();
-  }catch(e){ $('#view').innerHTML = `<div class="card">❌ ${esc(e.message)}</div>`; }
+  }catch(e){ $('#view').innerHTML = `<div class="card muted">❌ ${esc(e.message)}</div>`; }
 }
 window.addEventListener('hashchange', route);
 refreshHeader().then(route);
