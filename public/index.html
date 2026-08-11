@@ -164,6 +164,35 @@
   .score .rate{background:linear-gradient(160deg,#0f6b64,#0b4d52)}
   @media(max-width:860px){.board{grid-template-columns:1fr}.hands{grid-template-columns:1fr}.hand.bank{text-align:left}.hand.bank .cardsrow{justify-content:flex-start}}
   @media(max-width:760px){.g2{grid-template-columns:1fr}main{padding:16px 13px 60px}.hero{padding:22px}}
+
+  /* ---------- canal Telegram ---------- */
+  .chanbox{display:flex;gap:14px;align-items:flex-start;padding:16px;border-radius:var(--r);
+    border:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.02))}
+  .chanbox+.chanbox{margin-top:10px}
+  .chanbox.ok{border-color:rgba(56,224,165,.45);box-shadow:0 0 0 1px rgba(56,224,165,.12) inset}
+  .chanbox.ko{border-color:rgba(255,107,129,.45)}
+  .chanbox.empty{border-style:dashed}
+  .chan-ico{font-size:26px;line-height:1;width:46px;height:46px;flex:0 0 46px;display:flex;align-items:center;
+    justify-content:center;border-radius:14px;background:rgba(255,255,255,.07);border:1px solid var(--line)}
+  .chan-title{font-family:Sora;font-size:18px;font-weight:700;margin-bottom:8px}
+  .chan-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+  .chan-grid.big{margin-top:14px}
+  .chan-grid>div{padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.05);border:1px solid var(--line)}
+  .chan-grid .l{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+  .chan-grid .v{display:block;margin-top:4px;font-weight:700;font-family:Sora;font-size:15px;word-break:break-all}
+
+  /* ---------- fenêtres ---------- */
+  .modal-back{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;padding:18px;
+    background:rgba(4,7,15,.72);backdrop-filter:blur(6px);animation:fade .18s ease}
+  .modal{width:min(560px,100%);max-height:90vh;overflow:auto;padding:22px;border-radius:22px;
+    border:1px solid var(--line2);background:linear-gradient(180deg,#121a30,#0b1120);
+    box-shadow:0 30px 80px rgba(0,0,0,.6);animation:pop .2s ease}
+  .modal-head{display:flex;gap:14px;align-items:flex-start;margin-bottom:14px}
+  .steps{margin:0 0 14px;padding-left:20px;color:var(--muted);line-height:1.7;font-size:14px}
+  .steps b{color:var(--txt)}
+  .steps code{background:rgba(255,255,255,.08);padding:1px 6px;border-radius:6px}
+  @keyframes fade{from{opacity:0}to{opacity:1}}
+  @keyframes pop{from{opacity:0;transform:translateY(12px) scale(.98)}to{opacity:1;transform:none}}
 </style>
 </head>
 <body>
@@ -301,8 +330,8 @@ async function viewHome(){
         <span class="tag win">${x.stats.win} ✅</span>
         <span class="tag loss">${x.stats.loss} ❌</span>
         <span class="tag wait">${x.stats.pending} ⌛</span>
-        <span class="tag ${x.tokenSet?'win':'info'}">${x.tokenSet?'token dédié':'token global'}</span>
-        <span class="tag ${x.channels.length?'win':'wait'}">${x.channels.length?x.channels.length+' canal(aux)':'canal à configurer'}</span>
+        <span class="tag ${x.channels.length?'win':'wait'}">${x.channels.length?'📡 '+esc(channelName(x)):'canal à configurer'}</span>
+        <span class="tag info">📨 ${x.sentCount||0} message(s)</span>
       </div>
       <div class="bar"><i style="width:${x.stats.rate}%"></i></div>
       <div class="row mt"><button class="btn gold">Ouvrir la stratégie →</button></div>
@@ -313,7 +342,7 @@ async function viewHome(){
       <div class="cards">🂡🂱</div>
       <span class="eyebrow">Console de prédiction Baccara · main du joueur</span>
       <h1>Vos stratégies, vos canaux,<br>vos jeux en direct.</h1>
-      <div class="muted" style="max-width:620px">Chaque stratégie a son propre token de bot, son canal Telegram, son format de message et son bilan automatique. Tout est enregistré dans la base de données et rechargé au redémarrage.</div>
+      <div class="muted" style="max-width:620px">Un seul token API dans les réglages ; chaque stratégie choisit simplement son canal Telegram, son format de message et son bilan automatique. Tout est enregistré dans la base de données et rechargé au redémarrage.</div>
       <div class="row mt">
         <button class="btn gold" onclick="go('#/reglages')">⚙️ Réglages & base</button>
         <button class="btn ghost" onclick="go('#/base')">🗄️ Voir les données</button>
@@ -359,29 +388,18 @@ async function viewStrategy(key){
       </div>
     </div>
 
-    <h2>🔌 Envoi Telegram de cette stratégie</h2>
+    <h2>🔌 Canal Telegram de cette stratégie</h2>
     <div class="card">
-      <div class="grid g2">
-        <div>
-          <label>API token du bot (vide = bot principal)</label>
-          <input id="tok" placeholder="${esc(s.tokenMasked||'123456789:AA…')}">
-          <div class="muted">${s.tokenSet?'🟢 token dédié enregistré : '+esc(s.tokenMasked):'⚪ utilise le bot principal des réglages'}</div>
-        </div>
-        <div>
-          <label>ID du canal où envoyer les prédictions (plusieurs = séparés par des virgules)</label>
-          <input id="ch" value="${(s.channels||[]).join(', ')}" placeholder="-1001234567890">
-          ${known?`<select onchange="if(this.value){$('#ch').value=($('#ch').value?$('#ch').value+', ':'')+this.value}"><option value="">↳ ajouter un canal détecté…</option>${known}</select>`:''}
-        </div>
+      ${renderChannelBox(s)}
+      <div class="row mt">
+        <button class="btn gold" onclick="openChannelDialog('${s.key}')">${(s.channels||[]).length?'♻️ Changer le canal':'📡 Configurer le canal'}</button>
+        <button class="btn ghost" onclick="testSend('${s.key}')">📨 Tester l'envoi</button>
+        <button class="btn ghost" onclick="api('/api/strategies/${s.key}/bilan','POST',{}).then(()=>alert('Bilan envoyé')).catch(e=>alert(e.message))">📤 Tester le bilan</button>
+        ${(s.channels||[]).length?`<button class="btn danger" onclick="removeChannel('${s.key}')">🗑️ Retirer le canal</button>`:''}
       </div>
       <div class="row mt">
         <label style="margin:0"><input type="checkbox" id="bil" ${s.bilan?'checked':''} style="width:auto"> Envoyer le bilan quand le jeu reprend</label>
       </div>
-      <div class="row mt">
-        <button class="btn" onclick="saveStrategy('${s.key}')">💾 Enregistrer en base</button>
-        <button class="btn ghost" onclick="testSend('${s.key}')">📨 Tester l'envoi dans le canal</button>
-        <button class="btn ghost" onclick="api('/api/strategies/${s.key}/bilan','POST',{}).then(()=>alert('Bilan envoyé'))">📤 Tester le bilan</button>
-      </div>
-      <div class="mt"><span class="eyebrow">Aperçu du bilan</span><pre>${esc(s.bilanPreview)}</pre></div>
       ${s.sendError?`<div class="mt"><span class="tag loss">Dernier envoi en échec : ${esc(s.sendError)}</span></div>`:''}
       <div id="msg" class="muted mt"></div>
     </div>
@@ -452,7 +470,6 @@ async function saveStrategy(key){
     maxR: $('#r')?+$('#r').value:undefined,
     lead: $('#l')?+$('#l').value:undefined,
     template: $('#tpl')?$('#tpl').value:undefined,
-    channels: $('#ch')?$('#ch').value:undefined,
     bilan: $('#bil')?$('#bil').checked:undefined,
   };
   if($('#b')) body.b = +$('#b').value;
@@ -461,7 +478,6 @@ async function saveStrategy(key){
   if($('#vs')) body.varStep = +$('#vs').value;
   if($('#dc')) body.decalage = +$('#dc').value;
   if($('#st')) body.streak = +$('#st').value;
-  if($('#tok') && $('#tok').value.trim()) body.token = $('#tok').value.trim();
   try{
     const r = await api('/api/strategies/'+key,'POST',body);
     let txt = r.saved ? '✅ Enregistré dans la base de données.' : '✅ Enregistré (base non connectée : sauvegarde locale).';
@@ -472,11 +488,132 @@ async function saveStrategy(key){
   }catch(e){ if($('#msg')) $('#msg').textContent = '❌ '+e.message; else alert(e.message); }
 }
 async function testSend(key){
+  const box = $('#msg');
+  if(box) box.textContent = '⏳ Envoi du message de test…';
   try{
     const r = await api('/api/strategies/'+key+'/test','POST',{});
-    if($('#msg')) $('#msg').textContent = '📨 Message envoyé dans : '+(r.sent||[]).join(', ');
-  }catch(e){ if($('#msg')) $('#msg').textContent = '❌ '+e.message; else alert(e.message); }
+    if(box) box.textContent = '✅ Message de test envoyé dans : '+(r.sent||[]).join(', ');
+    setTimeout(()=>viewStrategy(key), 800);
+  }catch(e){ if(box) box.textContent = '❌ '+e.message; else alert(e.message); }
 }
+
+// nom lisible du canal d'une stratégie
+function channelName(s){
+  const info = (s.channelInfos||[])[0];
+  if(info && info.title) return info.title;
+  return String((s.channels||[])[0]||'');
+}
+
+// jolie fiche du canal configuré
+function renderChannelBox(s){
+  const ids = s.channels||[];
+  if(!ids.length){
+    return `<div class="chanbox empty">
+      <div class="chan-ico">📡</div>
+      <div>
+        <div class="chan-title">Aucun canal configuré</div>
+        <div class="muted">Ajoute le bot <b>@${esc((s.bot&&s.bot.username)||'ton_bot')}</b> comme administrateur de ton canal
+        (droit « Publier des messages »), puis renseigne l'ID du canal ci-dessous.
+        Le token API des réglages se charge de l'envoi.</div>
+      </div></div>`;
+  }
+  return ids.map((id,i)=>{
+    const info = (s.channelInfos||[])[i] || {id:id, title:String(id)};
+    const ok = info.error ? false : true;
+    return `<div class="chanbox ${ok?'ok':'ko'}">
+      <div class="chan-ico">${ok?'✅':'⚠️'}</div>
+      <div style="flex:1">
+        <div class="chan-title">${esc(info.title||String(id))}</div>
+        <div class="chan-grid">
+          <div><span class="l">ID du canal</span><span class="v num">${esc(String(info.id||id))}</span></div>
+          <div><span class="l">Type</span><span class="v">${esc(info.type||'canal')}</span></div>
+          <div><span class="l">Abonnés</span><span class="v">${info.memberCount!=null?info.memberCount:'—'}</span></div>
+          <div><span class="l">Messages envoyés</span><span class="v">${s.sentCount||0}</span></div>
+          <div><span class="l">Bot expéditeur</span><span class="v">@${esc((s.bot&&s.bot.username)||'—')}</span></div>
+          <div><span class="l">Dernier envoi</span><span class="v">${s.lastSentAt?new Date(s.lastSentAt).toLocaleString('fr-FR'):'—'}</span></div>
+        </div>
+        ${info.error?`<div class="mt"><span class="tag loss">${esc(info.error)}</span></div>`:''}
+      </div></div>`;
+  }).join('');
+}
+
+// fenêtre de configuration du canal
+function openChannelDialog(key){
+  const known = (ST&&ST.channels||[]).map(c=>`<option value="${c.id}">${esc(c.title)} (${c.id})</option>`).join('');
+  const wrap = document.createElement('div');
+  wrap.className = 'modal-back';
+  wrap.innerHTML = `<div class="modal">
+    <div class="modal-head">
+      <div class="chan-ico">📡</div>
+      <div><h3 style="margin:0">Configurer le canal Telegram</h3>
+      <div class="muted">Le token API des réglages enverra les prédictions de cette stratégie vers ce canal.</div></div>
+    </div>
+    <ol class="steps">
+      <li>Ajoute <b>@${esc((ST&&ST.bot&&ST.bot.username)||'ton_bot')}</b> comme <b>administrateur</b> du canal.</li>
+      <li>Active le droit <b>Publier des messages</b>.</li>
+      <li>Colle ici l'<b>ID du canal</b> (ex : <code>-1001234567890</code>) ou son <b>@nom</b>.</li>
+    </ol>
+    <label>ID du canal</label>
+    <input id="chdlg" placeholder="-1001234567890 ou @moncanal" autocomplete="off">
+    ${known?`<select onchange="if(this.value)document.getElementById('chdlg').value=this.value"><option value="">↳ choisir un canal détecté…</option>${known}</select>`:''}
+    <div id="chdlgmsg" class="muted mt"></div>
+    <div class="row mt" style="justify-content:flex-end">
+      <button class="btn ghost" onclick="closeModal()">Annuler</button>
+      <button class="btn gold" id="chdlgok">✅ Vérifier et configurer</button>
+    </div>
+  </div>`;
+  document.body.appendChild(wrap);
+  wrap.addEventListener('click', (e)=>{ if(e.target===wrap) closeModal(); });
+  const btn = wrap.querySelector('#chdlgok');
+  btn.onclick = async ()=>{
+    const msg = wrap.querySelector('#chdlgmsg');
+    const val = wrap.querySelector('#chdlg').value.trim();
+    if(!val){ msg.textContent = "⚠️ Renseigne l'ID du canal."; return; }
+    btn.disabled = true; msg.textContent = '⏳ Vérification du canal et envoi du message de confirmation…';
+    try{
+      const r = await api('/api/strategies/'+key+'/channel','POST',{channelId:val});
+      closeModal();
+      showChannelSuccess(r);
+      viewStrategy(key);
+    }catch(e){ msg.textContent = '❌ '+e.message; btn.disabled = false; }
+  };
+  setTimeout(()=>{ const i = wrap.querySelector('#chdlg'); if(i) i.focus(); }, 50);
+}
+
+function closeModal(){ const m = document.querySelector('.modal-back'); if(m) m.remove(); }
+
+// jolie fenêtre de confirmation après configuration
+function showChannelSuccess(r){
+  const c = r.channel||{};
+  const ok = r.notice && r.notice.ok;
+  const wrap = document.createElement('div');
+  wrap.className = 'modal-back';
+  wrap.innerHTML = `<div class="modal">
+    <div class="modal-head"><div class="chan-ico">${ok?'🎉':'⚠️'}</div>
+      <div><h3 style="margin:0">${ok?'Canal configuré avec succès':'Canal enregistré'}</h3>
+      <div class="muted">${ok?'Un message de confirmation vient d\'être publié dans le canal.':'Le canal est enregistré mais la confirmation n\'a pas pu être publiée.'}</div></div>
+    </div>
+    <div class="chan-grid big">
+      <div><span class="l">Nom du canal</span><span class="v">${esc(c.title||'—')}</span></div>
+      <div><span class="l">ID du canal</span><span class="v num">${esc(String(c.id||'—'))}</span></div>
+      <div><span class="l">Type</span><span class="v">${esc(c.type||'—')}</span></div>
+      <div><span class="l">Abonnés</span><span class="v">${c.memberCount!=null?c.memberCount:'—'}</span></div>
+      <div><span class="l">Bot expéditeur</span><span class="v">@${esc((r.bot&&r.bot.username)||(ST&&ST.bot&&ST.bot.username)||'—')}</span></div>
+      <div><span class="l">Messages envoyés</span><span class="v">${r.sentCount||0}</span></div>
+    </div>
+    ${ok?'':`<div class="mt"><span class="tag loss">${esc((r.notice&&r.notice.error)||'Confirmation non envoyée')}</span></div>`}
+    <div class="row mt" style="justify-content:flex-end"><button class="btn gold" onclick="closeModal()">Parfait 👍</button></div>
+  </div>`;
+  document.body.appendChild(wrap);
+  wrap.addEventListener('click', (e)=>{ if(e.target===wrap) closeModal(); });
+}
+
+async function removeChannel(key){
+  if(!confirm('Retirer le canal configuré pour cette stratégie ?')) return;
+  try{ await api('/api/strategies/'+key+'/channel','DELETE'); viewStrategy(key); }
+  catch(e){ alert(e.message); }
+}
+
 async function toggleStrategy(key,on){ await api('/api/strategies/'+key,'POST',{enabled:on==='true'||on===true}); viewStrategy(key); }
 async function resetStrategy(key){ await api('/api/strategies/'+key+'/reset','POST',{}); viewStrategy(key); }
 async function deleteStrategy(key){ if(!confirm('Supprimer la configuration enregistrée de cette stratégie ?'))return;
@@ -500,7 +637,7 @@ async function viewSettings(){
           <button class="btn ghost" onclick="api('/api/bot/restart','POST',{}).then(()=>location.reload())">Redémarrer</button></div>
         <label>ID administrateur</label><input id="adm" value="${s.bot.adminId||''}">
         <div class="row mt"><button class="btn ghost" onclick="api('/api/bot/admin','POST',{adminId:$('#adm').value}).then(()=>alert('Enregistré'))">Enregistrer</button></div>
-        <div class="muted mt">Chaque stratégie peut utiliser son propre token et son propre canal depuis sa page.</div>
+        <div class="muted mt">Ce token API envoie les prédictions de toutes les stratégies. Chaque stratégie choisit seulement son ID de canal.</div>
       </div>
       <div class="card">
         <h3>🗄️ Lien de la base de données</h3>
