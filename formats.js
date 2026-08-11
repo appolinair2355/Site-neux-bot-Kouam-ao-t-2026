@@ -7,7 +7,7 @@
 
 const tg = require('./tg-formats');
 
-const FORMAT_COUNT = 83;
+const FORMAT_COUNT = 86;
 
 // costumes utilisés par le moteur (avec sélecteur emoji) -> clés de tg-formats
 function normalizeSuit(suit) {
@@ -89,10 +89,11 @@ function finalize(text, parseMode) {
 // aperçu complet d'un style, avec des données d'exemple
 function formatPreview(id, opts = {}) {
   const parityFormat = id >= 80 && id <= 83;
+  const shadowFormat = id >= 84 && id <= 86;
   const out = renderMessage(id, {
     cardsLabel: opts.cardsLabel || (id === 79 ? '2/2' : id === 78 ? '3/3' : null),
     gameNumber: opts.gameNumber || 1234,
-    suit: opts.suit || (parityFormat ? 'impair' : '♦️'),
+    suit: opts.suit || (parityFormat ? 'impair' : shadowFormat ? '❤️' : '♦️'),
     maxR: opts.maxR != null ? opts.maxR : 2,
     status: opts.status !== undefined ? opts.status : null,
     rattrapage: opts.rattrapage || 0,

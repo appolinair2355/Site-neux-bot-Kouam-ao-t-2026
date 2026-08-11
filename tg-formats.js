@@ -1,4 +1,4 @@
-// tg-formats.js — Formats de messages Telegram pour Baccarat Pro (N°1 à N°83)
+// tg-formats.js — Formats de messages Telegram pour Baccarat Pro (N°1 à N°86)
 // Fichier dédié aux 77 formats de prédiction — aucun saut de numéro.
 // Importer avec : const { buildTgMessage, buildPredictionMsg, buildResultMsg, ... } = require('./tg-formats');
 
@@ -970,6 +970,48 @@ function buildTgMessage(formatId, {
           `├ Point du joueur\n` +
           `└ ${p83}\n` +
           `${sl83}`,
+        parse_mode: null,
+      };
+    }
+
+
+    // ── Formats 84 à 86 : Prédiction dans l'ombre (retour de carte) ────────
+    case 84: {
+      let sl84;
+      if (status === null)         sl84 = '⏳ En cours';
+      else if (status === 'gagne') sl84 = `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}`;
+      else                         sl84 = '❌';
+      return {
+        text:
+          `🕯️ PRÉDICTION DANS L'OMBRE\n` +
+          `🔢 Jeu : #N${gameNumber}\n` +
+          `🎯 Carte : ${emoji} ${name}\n` +
+          `🔁 Rattrapage : +${maxR}\n` +
+          `📊 Statut : ${sl84}`,
+        parse_mode: null,
+      };
+    }
+
+    case 85: {
+      let sl85;
+      if (status === null)         sl85 = '⌛';
+      else if (status === 'gagne') sl85 = `✅${RATR_EMOJI[rattrapage] ?? rattrapage}`;
+      else                         sl85 = '❌';
+      return { text: `🌑 #N${gameNumber} ${emoji} ombre +${sup}\n◾ Statut ${sl85}`, parse_mode: null };
+    }
+
+    case 86: {
+      let sl86;
+      if (status === null)         sl86 = '🎁 En cours ⏳';
+      else if (status === 'gagne') sl86 = `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}`;
+      else                         sl86 = '❌';
+      return {
+        text:
+          `⚜️ Baccara — Ombre ⚜️\n` +
+          `┌ Jeu № ${gameNumber}\n` +
+          `├ Retour de carte\n` +
+          `└ ${emoji} ${name}\n` +
+          `${sl86}`,
         parse_mode: null,
       };
     }

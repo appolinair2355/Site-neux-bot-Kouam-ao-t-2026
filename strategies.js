@@ -267,10 +267,11 @@ const parite = {
     if (!game || !game.finished) return null;
     const { start, varN, dec } = normParity(cfg);
     if (game.number < start) return null;                 // pas encore démarré
-    const trig = lastTriggerAtOrBefore(game.number, start, varN);
-    if (trig == null) return null;
-    const src = trig === game.number ? game : (ctx && ctx.games ? ctx.games.get(trig) : null);
-    if (!src || !src.finished) return null;               // déclencheur manquant → on saute
+    // Règle : la prédiction part IMMÉDIATEMENT sur le jeu déclencheur lui-même.
+    // Si le jeu terminé n'appartient pas à la séquence, on n'invente rien.
+    if (triggerIndexOf(game.number, start, varN) < 0) return null;
+    const trig = game.number;
+    const src = game;
     const pv = src.playerValue;
     if (pv == null) return null;
     const pair = pv % 2 === 0;
@@ -375,14 +376,113 @@ const absente = {
   },
 };
 
-const LIST = [costume, dominant, matchnul, parite, absente];
+
+// ---------------------------------------------------------------------------
+// 6) Prédiction dans l'ombre — retour d'une carte après une longue absence
+// ---------------------------------------------------------------------------
+// Règle : on surveille les 4 costumes en silence. Dès qu'un costume est absent
+// pendant AU MOINS `absence` jeux consécutifs (4 par défaut), il passe en état
+// « surveillé ». Aucune prédiction n'est émise tant qu'il ne revient pas.
+// Le jeu où il RÉAPPARAÎT devient le déclencheur : on prédit ce même costume
+// au jeu déclencheur + `lead` (4 par défaut).
+//   ❤️ absent aux jeux 1-2-3-4 → rien … ❤️ revient au jeu 8 → prédiction ❤️
+//   sur le jeu 12 (8 + 4), vérifiée sur la main du joueur + rattrapages.
+function suitPresent(g, suit, scope) {
+  const ps = suitsOf(g.playerSuits);
+  const bs = suitsOf(g.bankerSuits);
+  if (scope === 'joueur') return ps.includes(suit);
+  return ps.includes(suit) || bs.includes(suit);
+}
+
+// nombre de jeux consécutifs terminés, juste avant `number`, sans le costume
+function absenceBefore(games, number, suit, scope, max = 60) {
+  let count = 0;
+  for (let n = number - 1; n >= 1 && count < max; n--) {
+    const g = games.get(n);
+    if (!g || !g.finished) break;                  // trou dans le flux → on arrête
+    const ps = suitsOf(g.playerSuits);
+    const bs = suitsOf(g.bankerSuits);
+    if (!ps.length && !bs.length) break;           // cartes non lisibles
+    if (suitPresent(g, suit, scope)) break;        // le costume était là
+    count += 1;
+  }
+  return count;
+}
+
+const ombre = {
+  key: 'ombre',
+  name: "Prédiction dans l'ombre",
+  about:
+    "Surveillance silencieuse des 4 costumes. Un costume absent pendant au " +
+    "moins 4 jeux consécutifs (réglable) est mis sous surveillance. Aucune " +
+    "prédiction n'est émise pendant l'absence : le bot attend son RETOUR, " +
+    "aussi longtemps qu'il faut. Le jeu du retour devient le déclencheur et " +
+    "le même costume est prédit au jeu +4 (réglable). Exemple : ❤️ absent aux " +
+    "jeux 1 à 4, retour au jeu 8 → prédiction ❤️ sur le jeu 12.",
+  defaults: {
+    enabled: true,
+    format: 84,
+    maxR: 2,
+    b: 0,
+    lead: 4,
+    absence: 4,
+    scope: 'tous',        // 'tous' = joueur + banquier, 'joueur' = main du joueur
+    silent: true,         // mode silencieux : envoi seulement après double perte
+    lossWindow: 3,
+    resetOnWin: true,
+    template: null,
+    channels: [],
+  },
+  usesB: false,
+  source: 'finished',
+  detect(game, cfg, ctx) {
+    if (!game || !game.finished) return null;
+    const games = (ctx && ctx.games) || new Map();
+    const need = Math.max(1, Math.min(30, parseInt(cfg && cfg.absence, 10) || 4));
+    const lead = Math.max(1, Math.min(20, parseInt(cfg && cfg.lead, 10) || 4));
+    const scope = cfg && cfg.scope === 'joueur' ? 'joueur' : 'tous';
+    const present = SUITS.filter((s) => suitPresent(game, s, scope));
+    if (!present.length) return null;
+    let best = null;
+    for (const suit of present) {
+      const gap = absenceBefore(games, game.number, suit, scope);
+      if (gap >= need && (!best || gap > best.gap)) best = { suit, gap };
+    }
+    if (!best) return null;
+    return {
+      kind: 'suit',
+      target: game.number + lead,
+      suit: best.suit,
+      label: best.suit,
+      trigger: game.number,
+      reason:
+        `${best.suit} absent pendant ${best.gap} jeux consécutifs ` +
+        `(#N${game.number - best.gap} → #N${game.number - 1}), retour au jeu ` +
+        `#N${game.number} → prédiction ${best.suit} sur #N${game.number + lead} (+${lead})`,
+      meta: { absence: best.gap, need, lead, scope, returnedAt: game.number },
+    };
+  },
+};
+
+const LIST = [costume, dominant, matchnul, parite, absente, ombre];
 const BY_KEY = Object.fromEntries(LIST.map((s) => [s.key, s]));
 
 function defaultsFor(key) {
   const s = BY_KEY[key];
   if (!s) return null;
   // token / canal / bilan : réglables stratégie par stratégie
-  return { token: null, bilan: true, ...JSON.parse(JSON.stringify(s.defaults)) };
+  // réglages communs à TOUTES les stratégies :
+  //   silent      → mode silencieux (envoi seulement après confirmation par 2 pertes)
+  //   lossWindow  → nombre MAX de prédictions attendues après une perte
+  //   resetOnWin  → après activation, une prédiction gagnée referme l'envoi
+  return {
+    token: null,
+    bilan: true,
+    silent: false,
+    lossWindow: 3,
+    resetOnWin: true,
+    ...JSON.parse(JSON.stringify(s.defaults)),
+  };
 }
 
 function catalog() {

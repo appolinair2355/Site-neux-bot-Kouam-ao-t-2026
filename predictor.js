@@ -35,6 +35,7 @@ const state = {
   lastFinished: null,
   lastError: null,
   sendErrors: {},          // clé de stratégie -> dernière erreur d'envoi Telegram
+  gates: {},               // clé de stratégie -> filtre d'envoi « double perte »
   startedAt: Date.now(),
 };
 
@@ -109,6 +110,13 @@ function setStrategyConfig(key, patch = {}) {
   if (patch.decalage !== undefined) next.decalage = Math.max(1, Math.min(99, parseInt(patch.decalage, 10) || 1));
   // stratégie « Carte absente » : nombre de jeux consécutifs sans le costume
   if (patch.streak !== undefined) next.streak = Math.max(2, Math.min(10, parseInt(patch.streak, 10) || 3));
+  // stratégie « Prédiction dans l'ombre » : jeux d'absence minimum + périmètre
+  if (patch.absence !== undefined) next.absence = Math.max(1, Math.min(30, parseInt(patch.absence, 10) || 4));
+  if (patch.scope !== undefined) next.scope = patch.scope === 'joueur' ? 'joueur' : 'tous';
+  // mode silencieux (commun à toutes les stratégies)
+  if (patch.silent !== undefined) next.silent = !!patch.silent;
+  if (patch.lossWindow !== undefined) next.lossWindow = Math.max(1, Math.min(20, parseInt(patch.lossWindow, 10) || 3));
+  if (patch.resetOnWin !== undefined) next.resetOnWin = !!patch.resetOnWin;
   if (patch.template !== undefined) next.template = patch.template ? String(patch.template) : null;
   if (patch.channels !== undefined || patch.channelId !== undefined) {
     const before = JSON.stringify(next.channels || []);
@@ -136,6 +144,88 @@ function strategyChannels(key) {
   const c = state.strategies[key];
   if (c && Array.isArray(c.channels) && c.channels.length) return c.channels;
   return state.activeChannels;
+}
+
+
+// ---------------------------------------------------------------------------
+// Filtre d'envoi « double perte » (mode silencieux)
+// ---------------------------------------------------------------------------
+// Tant que le mode silencieux est actif, la stratégie travaille dans l'ombre :
+// elle calcule et vérifie ses prédictions SANS rien envoyer dans le canal.
+//   1) une 1ʳᵉ perte ouvre une fenêtre de vérification ;
+//   2) la fenêtre autorise au MAXIMUM `lossWindow` prédictions terminées ;
+//   3) si une 2ᵉ perte tombe dans cette fenêtre → l'envoi est ACTIVÉ
+//      (perte+perte = 1 prédiction dans la fenêtre, perte/gagné/perte = 2…) ;
+//   4) si la fenêtre est dépassée sans 2ᵉ perte → tout repart à zéro ;
+//   5) une fois l'envoi activé, une prédiction gagnée referme l'envoi
+//      (réglage `resetOnWin`, activé par défaut) et on repart à zéro.
+function gate(key) {
+  if (!state.gates[key]) state.gates[key] = { armed: false, losses: 0, window: 0, since: null };
+  return state.gates[key];
+}
+
+function resetGate(key) {
+  state.gates[key] = { armed: false, losses: 0, window: 0, since: null };
+  return state.gates[key];
+}
+
+function windowSize(cfg) {
+  return Math.max(1, Math.min(20, parseInt(cfg && cfg.lossWindow, 10) || 3));
+}
+
+// mise à jour du filtre à chaque prédiction terminée
+function noteClosed(pred) {
+  const cfg = state.strategies[pred.strategy];
+  if (!cfg) return;
+  const g = gate(pred.strategy);
+  const win = pred.status === 'gagné';
+  const max = windowSize(cfg);
+
+  if (g.armed) {
+    if (win && cfg.resetOnWin !== false) resetGate(pred.strategy);
+    else if (!win) { g.losses = 2; g.window = 0; }
+    return;
+  }
+  if (g.losses === 0) {
+    if (!win) { g.losses = 1; g.window = 0; g.since = pred.target; }
+    return;
+  }
+  // fenêtre ouverte après la 1ʳᵉ perte
+  g.window += 1;
+  if (!win) { g.losses = 2; g.armed = true; g.window = 0; return; }
+  if (g.window >= max) resetGate(pred.strategy);
+}
+
+// une prédiction de cette stratégie peut-elle partir dans le canal ?
+function canSend(key) {
+  const cfg = state.strategies[key];
+  if (!cfg) return true;
+  if (!cfg.silent) return true;
+  return !!gate(key).armed;
+}
+
+// état lisible du filtre (panel web / Telegram)
+function gateView(key) {
+  const cfg = state.strategies[key] || {};
+  const g = gate(key);
+  const max = windowSize(cfg);
+  return {
+    silent: !!cfg.silent,
+    lossWindow: max,
+    resetOnWin: cfg.resetOnWin !== false,
+    armed: !!g.armed,
+    losses: g.losses,
+    used: g.window,
+    left: g.losses === 1 ? Math.max(0, max - g.window) : null,
+    sending: canSend(key),
+    label: !cfg.silent
+      ? 'Envoi direct (mode silencieux désactivé)'
+      : g.armed
+        ? "Envoi ACTIF : deux pertes confirmées"
+        : g.losses === 1
+          ? `Fenêtre ouverte : ${g.window}/${max} prédiction(s) — on attend une 2ᵉ perte`
+          : "Silence : on attend une première perte",
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -335,6 +425,7 @@ function verify() {
             p.status = 'perdu';
             p.badge = '❌';
             p.hitNumber = num;
+            noteClosed(p);
             closed.push(p);
             break;
           }
@@ -349,6 +440,7 @@ function verify() {
         p.result = resultText(p, g);
         p.hitNumber = num;
         p.game = g;
+        noteClosed(p);
         closed.push(p);
         break;
       }
@@ -358,6 +450,7 @@ function verify() {
         p.result = resultText(p, g);
         p.hitNumber = num;
         p.game = g;
+        noteClosed(p);
         closed.push(p);
         break;
       }
@@ -521,7 +614,7 @@ function strategyGames(key, limit = 12) {
     .sort((a, b) => a.number - b.number)
     .slice(0, 4)
     .map((g) => gameView(g, key));
-  return { live, upcoming, games: rows, counters: counterView(), stats: stats(key), bilan: bilanText(key) };
+  return { live, upcoming, games: rows, counters: counterView(), stats: stats(key), bilan: bilanText(key), gate: gateView(key) };
 }
 
 function stats(key) {
@@ -534,6 +627,38 @@ function stats(key) {
     loss: done.length - win,
     pending: list.length - done.length,
     rate: done.length ? Math.round((win / done.length) * 100) : 0,
+  };
+}
+
+
+// état courant de la stratégie « Prédiction dans l'ombre » (costumes surveillés)
+function shadowRuntime() {
+  const cfg = state.strategies.ombre || strategies.defaultsFor('ombre');
+  const need = Math.max(1, parseInt(cfg.absence, 10) || 4);
+  const scope = cfg.scope === 'joueur' ? 'joueur' : 'tous';
+  const last = maxFinishedNumber();
+  const suits = SUITS.map((suit) => {
+    let gap = 0;
+    for (let n = last; n >= 1; n--) {
+      const g = state.games.get(n);
+      if (!g || !g.finished) break;
+      const list = scope === 'joueur'
+        ? strategies.suitsOf(g.playerSuits)
+        : [...strategies.suitsOf(g.playerSuits), ...strategies.suitsOf(g.bankerSuits)];
+      if (list.includes(suit)) break;
+      gap += 1;
+    }
+    return { suit, absence: gap, watched: gap >= need };
+  });
+  return {
+    enabled: !!cfg.enabled,
+    absence: need,
+    lead: cfg.lead,
+    scope,
+    lastGame: last || null,
+    suits,
+    gate: gateView('ombre'),
+    prediction: state.predictions.find((p) => p.strategy === 'ombre' && p.status === 'en attente') || null,
   };
 }
 
@@ -567,6 +692,11 @@ module.exports = {
   counterView,
   bilanText,
   parseChannels,
+  canSend,
+  gateView,
+  resetGate,
+  noteClosed,
+  shadowRuntime,
   syncCostume,
   pullCostume,
 };

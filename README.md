@@ -160,3 +160,37 @@ passé n'est rejoué, le bot attend simplement le jeu 695.
 Tous les styles acceptent pair/impair, et **4 styles dédiés** ont été ajoutés :
 `80` (carte complète), `81` (style ⚜ classique), `82` (ligne 🌈), `83` (encadré ⚜️).
 Total : **83 formats** (`/formats`, `/apercu <n>`).
+
+
+## Nouveautés
+
+### Pair / Impair (VAR) — déclenchement immédiat
+La prédiction part **dès que le jeu déclencheur est terminé** : point du joueur pair
+→ prédiction IMPAIR, point impair → prédiction PAIR, sur le jeu déclencheur + décalage.
+
+### Prédiction dans l'ombre (`ombre`)
+Surveillance silencieuse des 4 costumes. Un costume absent pendant au moins
+`absence` jeux (4 par défaut) est mis sous surveillance ; **aucune prédiction**
+tant qu'il n'est pas revenu. Le jeu du retour devient le déclencheur et le même
+costume est prédit au jeu **+ `lead`** (4 par défaut).
+Exemple : ❤️ absent aux jeux 1→4, retour au jeu 8 → prédiction ❤️ sur le jeu 12.
+Formats de message dédiés : **84, 85, 86**.
+
+### Mode silencieux « double perte » (toutes les stratégies)
+- `silent` : la stratégie calcule et vérifie ses prédictions sans rien envoyer.
+- Une **1ʳᵉ perte** ouvre une fenêtre de `lossWindow` prédictions maximum.
+- Une **2ᵉ perte** dans cette fenêtre → l'envoi vers le canal est activé.
+  (perte+perte = 1 ; perte/gagné/perte = 2 …)
+- Fenêtre dépassée sans 2ᵉ perte → le compteur repart à zéro.
+- `resetOnWin` (activé par défaut) : après activation, un gain referme l'envoi.
+
+### Configurations en base de données
+- `/sauverconfig` (Telegram) ou « 💾 Tout enregistrer en base » (panel) : enregistre
+  tous les réglages et toutes les stratégies.
+- `/configs` ou `GET /api/configs` : lit les configurations enregistrées.
+- Au démarrage le bot lit la base ; toute configuration absente y est ajoutée
+  automatiquement.
+
+### Commandes ajoutées
+`/ombre`, `/silence <clé> <on|off> [fenêtre]`, `/filtres`, `/sauverconfig`, `/configs`,
+et `/setstrat <clé> <absence|scope|silence|fenetre|resetgain> <valeur>`.

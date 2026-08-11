@@ -9,9 +9,9 @@ const strategies = require('./strategies');
 const {
   state, stats, predictionMessage, recentGames, SUITS,
   setStrategyConfig, resetStrategy, initStrategies, parityRuntime,
-  strategyGames, bilanText, gameCategories,
+  strategyGames, bilanText, gameCategories, gateView, shadowRuntime,
 } = require('./predictor');
-const { startLoop, startBot, botStatus, activate, deactivate, persist, sendBilan, dropSender, announceConfig, announceMainBot, resolveChat, testSend } = require('./bot');
+const { startLoop, startBot, botStatus, activate, deactivate, persist, sendBilan, dropSender, announceConfig, announceMainBot, resolveChat, testSend, saveConfigsToDb, applyDbConfigs } = require('./bot');
 
 const app = express();
 app.use(express.json());
@@ -200,6 +200,8 @@ function strategyPayload(key) {
     bilan: cfg.bilan !== false,
     bilanPreview: bilanText(d.key),
     sendError: state.sendErrors ? state.sendErrors[d.key] || null : null,
+    gate: gateView(d.key),
+    shadow: d.key === 'ombre' ? shadowRuntime() : null,
     live: strategyGames(d.key, 12),
     stats: stats(d.key),
     preview: {
@@ -211,6 +213,7 @@ function strategyPayload(key) {
     predictions: state.predictions.filter((p) => p.strategy === key).slice(0, 25).map((p) => ({
       target: p.target, label: p.label, status: p.status, badge: p.badge,
       step: p.step, maxR: p.maxR, reason: p.reason, text: predictionMessage(p),
+      silent: !!p.silent,
     })),
   };
 }
@@ -227,6 +230,37 @@ app.post('/api/strategies/:key/bilan', async (req, res) => {
   if (!strategies.BY_KEY[req.params.key]) return res.status(404).json({ error: 'Stratégie inconnue' });
   await sendBilan(req.params.key);
   res.json({ ok: true, text: bilanText(req.params.key) });
+});
+
+// état de la stratégie « Prédiction dans l'ombre »
+app.get('/api/ombre', (req, res) => res.json(shadowRuntime()));
+
+// ---- configurations enregistrées en base ----------------------------------
+app.get('/api/configs', async (req, res) => {
+  if (!db.ready) return res.json({ ready: false, strategies: {}, settings: {} });
+  const rows = await db.loadStrategies();
+  res.json({
+    ready: true,
+    strategies: rows,
+    settings: {
+      B: await db.getSetting('B'),
+      maxR: await db.getSetting('maxR'),
+      format: await db.getSetting('format'),
+      template: await db.getSetting('template'),
+    },
+  });
+});
+
+// enregistrer TOUTES les configurations en cours
+app.post('/api/configs/save', async (req, res) => {
+  const r = await saveConfigsToDb();
+  res.status(r.ok ? 200 : 400).json(r);
+});
+
+// relire les configurations depuis la base (et compléter si elle est vide)
+app.post('/api/configs/load', async (req, res) => {
+  const r = await applyDbConfigs();
+  res.status(r.ok ? 200 : 400).json(r);
 });
 
 app.get('/api/strategies', (req, res) => {

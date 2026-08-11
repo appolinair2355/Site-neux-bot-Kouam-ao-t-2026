@@ -10,7 +10,7 @@ const {
   state, evaluate, verify, registerGames, setOnFinished,
   predictionText, predictionMessage, liveText, stats, SUITS,
   initStrategies, setStrategyConfig, resetStrategy, strategyChannels, parityRuntime,
-  bilanText,
+  bilanText, canSend, gateView, shadowRuntime,
 } = require('./predictor');
 
 let bot = null;
@@ -104,7 +104,12 @@ const HELP =
   '/strategie <clé> — détail + configuration d\'une stratégie\n' +
   '/activerstrat <clé> — activer une stratégie\n' +
   '/desactiverstrat <clé> — désactiver une stratégie\n' +
-  '/setstrat <clé> <format|maxr|b|lead|depart|var|decalage|template> <valeur>\n' +
+  '/setstrat <clé> <format|maxr|b|lead|depart|var|decalage|streak|absence|silence|fenetre|template> <valeur>\n' +
+  '/ombre — état de la stratégie « Prédiction dans l\'ombre »\n' +
+  '/silence <clé> <on|off> [fenêtre] — mode silencieux + nb max de prédictions après une perte\n' +
+  '/filtres — état du filtre « double perte » de chaque stratégie\n' +
+  '/sauverconfig — enregistrer toutes les configurations en base\n' +
+  '/configs — lire les configurations enregistrées en base\n' +
   '/parite — état complet de la stratégie Pair/Impair (VAR)\n' +
   '/setparite <départ> <var> <décalage> <rattrapage> — configuration rapide\n' +
   '/resetstrat <clé> — remettre la configuration par défaut\n' +
@@ -442,11 +447,86 @@ function wire(b) {
       depart: 'startGame', start: 'startGame', jeudepart: 'startGame',
       var: 'varStep', decalage: 'decalage', rattrapage: 'maxR',
       streak: 'streak', jeux: 'streak', consecutifs: 'streak',
+      absence: 'absence', ombre: 'absence', scope: 'scope', main: 'scope',
+      silence: 'silent', silencieux: 'silent', silent: 'silent',
+      fenetre: 'lossWindow', intervalle: 'lossWindow', perte: 'lossWindow',
+      resetgain: 'resetOnWin',
     };
-    if (!map[field]) return b.sendMessage(msg.chat.id, '⚠️ Champ inconnu (format, formatdistribution, maxr, b, lead, depart, var, decalage, streak, template).');
-    const cfg = setStrategyConfig(key, { [map[field]]: value });
+    if (!map[field]) return b.sendMessage(msg.chat.id, '⚠️ Champ inconnu (format, formatdistribution, maxr, b, lead, depart, var, decalage, streak, absence, scope, silence, fenetre, resetgain, template).');
+    const target = map[field];
+    let parsed = value;
+    if (target === 'silent' || target === 'resetOnWin') parsed = /^(1|oui|on|true|actif)$/i.test(value);
+    const cfg = setStrategyConfig(key, { [target]: parsed });
     persist();
-    b.sendMessage(msg.chat.id, `✅ ${strategies.BY_KEY[key].name} → ${field} = ${cfg[map[field]]}\n\n${fmt.formatPreview(cfg.format, { maxR: cfg.maxR })}`);
+    b.sendMessage(msg.chat.id, `✅ ${strategies.BY_KEY[key].name} → ${field} = ${cfg[target]}\n\n${fmt.formatPreview(cfg.format, { maxR: cfg.maxR })}`);
+  });
+
+  b.onText(/^\/ombre\b/, (msg) => {
+    const r = shadowRuntime();
+    const lines = r.suits.map((x) => `${x.suit} absent depuis ${x.absence} jeu(x)${x.watched ? ' 👁️ surveillé' : ''}`);
+    b.sendMessage(
+      msg.chat.id,
+      `🕯️ *Prédiction dans l'ombre*\n` +
+        `• État : ${r.enabled ? '🟢 active' : '🔴 arrêtée'}\n` +
+        `• Absence minimum : *${r.absence}* jeux\n` +
+        `• Prédiction au retour : *+${r.lead}*\n` +
+        `• Périmètre : ${r.scope === 'joueur' ? 'main du joueur' : 'joueur + banquier'}\n` +
+        `• Dernier jeu terminé : ${r.lastGame ? '#N' + r.lastGame : '—'}\n\n` +
+        lines.join('\n') +
+        `\n\n📡 ${r.gate.label}` +
+        (r.prediction ? `\n🎯 En attente : ${r.prediction.label} sur #N${r.prediction.target}` : ''),
+      { parse_mode: 'Markdown' }
+    );
+  });
+
+  b.onText(/^\/silence(?:\s+(\w+))?(?:\s+(\w+))?(?:\s+(\d+))?/, (msg, m) => {
+    if (!isAdmin(msg)) return deny(msg.chat.id);
+    const key = (m[1] || '').toLowerCase();
+    if (!strategies.BY_KEY[key])
+      return b.sendMessage(msg.chat.id, 'ℹ️ Usage : /silence <clé> <on|off> [nombre max de prédictions après une perte]');
+    const patch = {};
+    if (m[2]) patch.silent = /^(on|oui|1|actif|true)$/i.test(m[2]);
+    if (m[3]) patch.lossWindow = parseInt(m[3], 10);
+    const cfg = setStrategyConfig(key, patch);
+    persist();
+    b.sendMessage(
+      msg.chat.id,
+      `🔕 ${strategies.BY_KEY[key].name}\n` +
+        `• Mode silencieux : ${cfg.silent ? 'activé' : 'désactivé'}\n` +
+        `• Prédictions max après une perte : ${cfg.lossWindow}\n` +
+        `• Retour au silence après un gain : ${cfg.resetOnWin === false ? 'non' : 'oui'}\n\n` +
+        gateView(key).label
+    );
+  });
+
+  b.onText(/^\/filtres\b/, (msg) => {
+    const lines = strategies.LIST.map((d) => {
+      const g = gateView(d.key);
+      return `${g.sending ? '🟢' : '🔕'} *${d.name}* — ${g.label}`;
+    });
+    b.sendMessage(msg.chat.id, `📡 *Filtres d'envoi*\n\n${lines.join('\n')}`, { parse_mode: 'Markdown' });
+  });
+
+  b.onText(/^\/sauverconfig\b/, async (msg) => {
+    if (!isAdmin(msg)) return deny(msg.chat.id);
+    const r = await saveConfigsToDb();
+    b.sendMessage(msg.chat.id, r.ok
+      ? `💾 Configurations enregistrées en base : ${r.saved.join(', ')}`
+      : `⚠️ ${r.error}`);
+  });
+
+  b.onText(/^\/configs\b/, async (msg) => {
+    if (!db.ready) return b.sendMessage(msg.chat.id, '⚠️ Base de données non connectée.');
+    const rows = await db.loadStrategies();
+    const keys = Object.keys(rows);
+    if (!keys.length) return b.sendMessage(msg.chat.id, 'ℹ️ Aucune configuration enregistrée en base pour le moment.');
+    const lines = keys.map((k) => {
+      const c = rows[k] || {};
+      const name = strategies.BY_KEY[k] ? strategies.BY_KEY[k].name : k;
+      return `• *${name}* — ${c.enabled ? 'active' : 'arrêtée'} • format ${c.format} • +${c.maxR} • ` +
+        `silence ${c.silent ? 'oui' : 'non'} (${c.lossWindow || 3}) • canal ${(c.channels || []).join(', ') || '—'}`;
+    });
+    b.sendMessage(msg.chat.id, `🗄️ *Configurations en base*\n\n${lines.join('\n')}`, { parse_mode: 'Markdown' });
   });
 
   b.onText(/^\/resetstrat(?:\s+(\w+))?/, (msg, m) => {
@@ -740,6 +820,14 @@ async function announceMainBot() {
 // ---------------------------------------------------------------------------
 async function broadcast(pred) {
   if (db.ready) db.savePrediction(pred, state.B);
+  // Mode silencieux : la prédiction est calculée et vérifiée dans l'ombre,
+  // mais elle ne part dans le canal qu'après la confirmation « double perte ».
+  if (!canSend(pred.strategy)) {
+    pred.silent = true;
+    pred.gate = gateView(pred.strategy).label;
+    return;
+  }
+  pred.silent = false;
   const sender = senderFor();
   if (!sender) { state.sendErrors[pred.strategy] = 'Aucun token Telegram configuré'; return; }
   const ids = strategyChannels(pred.strategy);
@@ -805,26 +893,63 @@ async function tick() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Configurations <-> base de données
+// ---------------------------------------------------------------------------
+// Enregistre TOUTES les configurations existantes (réglages globaux + chaque
+// stratégie) dans la base de données.
+async function saveConfigsToDb() {
+  if (!db.ready) return { ok: false, error: 'Base de données non connectée' };
+  await db.setSetting('B', state.B);
+  await db.setSetting('maxR', state.maxR);
+  await db.setSetting('format', state.format);
+  await db.setSetting('template', state.template || '');
+  const keys = [];
+  for (const def of strategies.LIST) {
+    const cfg = state.strategies[def.key];
+    if (!cfg) continue;
+    await db.saveStrategy(def.key, def.name, cfg);
+    keys.push(def.key);
+  }
+  return { ok: true, saved: keys };
+}
+
+// Lit les configurations enregistrées. Si la base est vide (première
+// connexion), les configurations en cours y sont écrites automatiquement.
+async function applyDbConfigs() {
+  if (!db.ready) return { ok: false, error: 'Base de données non connectée' };
+  const B = await db.getSetting('B');
+  const maxR = await db.getSetting('maxR');
+  const tpl = await db.getSetting('template');
+  const fmtId = await db.getSetting('format');
+  if (B) state.B = parseInt(B, 10) || state.B;
+  if (maxR != null) state.maxR = parseInt(maxR, 10);
+  if (fmtId) state.format = parseInt(fmtId, 10) || state.format;
+  if (tpl !== null) state.template = tpl ? tpl : null;
+  const rows = await db.loadStrategies();
+  const loaded = [];
+  for (const [key, cfg] of Object.entries(rows)) {
+    if (!strategies.BY_KEY[key]) continue;
+    state.strategies[key] = { ...strategies.defaultsFor(key), ...cfg };
+    loaded.push(key);
+  }
+  initStrategies();
+  // base vide OU nouvelles stratégies absentes → on les enregistre tout de suite
+  const missing = strategies.LIST.filter((d) => !loaded.includes(d.key)).map((d) => d.key);
+  if (missing.length) await saveConfigsToDb();
+  store.patch({ strategies: state.strategies });
+  return { ok: true, loaded, added: missing };
+}
+
 async function startLoop() {
   // base de données : chaque jeu terminé est archivé par date
   setOnFinished((round) => { if (db.ready) db.saveGame(round); });
   const s = await db.connect();
   console.log(s.ready ? '🗄️ Base de données connectée' : `🗄️ Base non connectée : ${s.error}`);
   if (s.ready) {
-    const B = await db.getSetting('B');
-    const maxR = await db.getSetting('maxR');
-    const tpl = await db.getSetting('template');
-    const fmtId = await db.getSetting('format');
-    if (B) state.B = parseInt(B, 10) || state.B;
-    if (maxR != null) state.maxR = parseInt(maxR, 10);
-    if (fmtId) state.format = parseInt(fmtId, 10) || state.format;
-    state.template = tpl ? tpl : null;
-    const rows = await db.loadStrategies();
-    for (const [key, cfg] of Object.entries(rows)) {
-      if (strategies.BY_KEY[key]) state.strategies[key] = { ...strategies.defaultsFor(key), ...cfg };
-    }
-    initStrategies();
-    console.log('🧠 Stratégies chargées depuis la base : ' + Object.keys(rows).join(', ') || 'aucune');
+    const r = await applyDbConfigs();
+    console.log('🧠 Configurations lues en base : ' + ((r.loaded || []).join(', ') || 'aucune') +
+      ((r.added || []).length ? ' • ajoutées : ' + r.added.join(', ') : ''));
   } else {
     initStrategies();
   }
@@ -836,4 +961,4 @@ async function startLoop() {
   startBot();
 }
 
-module.exports = { startLoop, startBot, botStatus, activate, deactivate, persist, listChannels, sendBilan, dropSender, announceConfig, announceMainBot, resolveChat, testSend, senderFor };
+module.exports = { startLoop, startBot, botStatus, activate, deactivate, persist, listChannels, sendBilan, dropSender, announceConfig, announceMainBot, resolveChat, testSend, senderFor, saveConfigsToDb, applyDbConfigs };
