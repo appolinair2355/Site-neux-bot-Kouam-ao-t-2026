@@ -11,7 +11,7 @@ const {
   setStrategyConfig, resetStrategy, initStrategies, parityRuntime,
   strategyGames, bilanText, gameCategories,
 } = require('./predictor');
-const { startLoop, startBot, botStatus, activate, deactivate, persist, sendBilan, dropSender, announceConfig, announceMainBot } = require('./bot');
+const { startLoop, startBot, botStatus, activate, deactivate, persist, sendBilan, dropSender, announceConfig, announceMainBot, resolveChat, testSend } = require('./bot');
 
 const app = express();
 app.use(express.json());
@@ -192,9 +192,11 @@ function strategyPayload(key) {
     about: d.about,
     usesB: !!d.usesB,
     config: { ...cfg, token: undefined },
-    tokenSet: !!cfg.token,
-    tokenMasked: cfg.token ? cfg.token.slice(0, 8) + '••••••' + cfg.token.slice(-4) : null,
     channels: cfg.channels || [],
+    channelInfos: cfg.channelInfos || [],
+    sentCount: cfg.sentCount || 0,
+    lastSentAt: cfg.lastSentAt || null,
+    bot: botStatus(),
     bilan: cfg.bilan !== false,
     bilanPreview: bilanText(d.key),
     sendError: state.sendErrors ? state.sendErrors[d.key] || null : null,
@@ -240,20 +242,57 @@ app.get('/api/strategies/:key', (req, res) => {
 
 // modification (administrateur) — enregistrée en base de données
 app.post('/api/strategies/:key', async (req, res) => {
-  const before = (state.strategies[req.params.key] || {}).token || null;
-  if (req.body && req.body.token !== undefined && String(req.body.token || '').trim()
-      && !/^\d+:[\w-]{20,}$/.test(String(req.body.token).trim())) {
-    return res.status(400).json({ error: 'Token Telegram invalide pour cette stratégie' });
-  }
   const cfg = setStrategyConfig(req.params.key, req.body || {});
-  if (before) dropSender(before);
   if (!cfg) return res.status(404).json({ error: 'Stratégie inconnue' });
   persist();
   if (db.ready) await db.saveStrategy(req.params.key, strategies.BY_KEY[req.params.key].name, cfg);
   // token API et/ou ID de canal configurés → on prévient le canal
-  const touched = req.body && (req.body.token !== undefined || req.body.channels !== undefined || req.body.enabled === true || req.body.channelId !== undefined);
+  const touched = req.body && (req.body.channels !== undefined || req.body.channelId !== undefined);
   const notice = touched ? await announceConfig(req.params.key) : null;
   res.json({ ok: true, saved: db.ready, notice, ...strategyPayload(req.params.key) });
+});
+
+// --- canal d'une stratégie : vérification + confirmation dans le canal ------
+app.post('/api/strategies/:key/channel', async (req, res) => {
+  const key = req.params.key;
+  if (!strategies.BY_KEY[key]) return res.status(404).json({ error: 'Stratégie inconnue' });
+  const raw = String(req.body.channelId || '').trim();
+  if (!raw) return res.status(400).json({ error: "Renseigne l'ID du canal (ex : -1001234567890 ou @moncanal)" });
+  if (!botStatus().tokenSet) {
+    return res.status(400).json({ error: "Configure d'abord le token API du bot dans les réglages." });
+  }
+  const check = await resolveChat(raw);
+  if (!check.ok) return res.status(400).json({ error: check.error });
+  const isChannel = ['channel', 'supergroup', 'group'].includes(check.chat.type);
+  if (isChannel && check.chat.canPost === false) {
+    return res.status(400).json({
+      error: `Le bot n'est pas administrateur de « ${check.chat.title} » avec le droit « Publier des messages ».`,
+    });
+  }
+  const cfg = setStrategyConfig(key, { channelId: String(check.chat.id) });
+  const notice = await announceConfig(key);
+  cfg.channelInfos = notice.channels || [check.chat];
+  persist();
+  if (db.ready) await db.saveStrategy(key, strategies.BY_KEY[key].name, cfg);
+  res.json({ ok: true, channel: check.chat, notice, ...strategyPayload(key) });
+});
+
+// retirer le canal d'une stratégie
+app.delete('/api/strategies/:key/channel', async (req, res) => {
+  if (!strategies.BY_KEY[req.params.key]) return res.status(404).json({ error: 'Stratégie inconnue' });
+  const cfg = setStrategyConfig(req.params.key, { channels: [], channelInfos: [] });
+  persist();
+  if (db.ready) await db.saveStrategy(req.params.key, strategies.BY_KEY[req.params.key].name, cfg);
+  res.json({ ok: true, ...strategyPayload(req.params.key) });
+});
+
+// test d'envoi réel dans le canal configuré
+app.post('/api/strategies/:key/test', async (req, res) => {
+  if (!strategies.BY_KEY[req.params.key]) return res.status(404).json({ error: 'Stratégie inconnue' });
+  const r = await testSend(req.params.key);
+  persist();
+  if (!r.ok) return res.status(400).json({ error: r.error || (r.failed || []).map((f) => `${f.id} : ${f.error}`).join(' / ') });
+  res.json(r);
 });
 
 app.post('/api/strategies/:key/reset', async (req, res) => {

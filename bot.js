@@ -578,16 +578,56 @@ const senders = new Map(); // token -> instance TelegramBot (sans polling)
 // Renvoie TOUJOURS un expéditeur si un token est disponible : le bot principal
 // quand il tourne, sinon une instance d'envoi seul (sans polling). Ainsi les
 // prédictions partent même si le polling du bot principal est en erreur.
-function senderFor(key) {
-  const cfg = state.strategies[key] || {};
-  const token = (cfg.token || '').trim() || (state.botToken || '').trim();
+function senderFor() {
+  const token = (state.botToken || '').trim();
   if (!token) return null;
-  if (bot && token === (state.botToken || '').trim()) return bot;
+  if (bot) return bot;                      // bot principal (polling actif)
   if (!senders.has(token)) {
     try { senders.set(token, new TelegramBot(token, { polling: false })); }
-    catch (e) { console.error('Token Telegram invalide', key, e.message); senders.set(token, null); }
+    catch (e) { console.error('Token Telegram invalide :', e.message); senders.set(token, null); }
   }
   return senders.get(token) || null;
+}
+
+// Résout un canal (ID numérique ou @nom) : titre, type, abonnés, droit de publier.
+async function resolveChat(chatId) {
+  const sender = senderFor();
+  if (!sender) return { ok: false, error: "Aucun token API configuré dans les réglages." };
+  try {
+    const chat = await sender.getChat(chatId);
+    let memberCount = null;
+    try { memberCount = await sender.getChatMemberCount(chat.id); } catch (_) {}
+    let canPost = null;
+    try {
+      const me = await sender.getMe();
+      const m = await sender.getChatMember(chat.id, me.id);
+      canPost = m.status === 'creator' || (m.status === 'administrator' && m.can_post_messages !== false);
+    } catch (_) {}
+    return {
+      ok: true,
+      chat: {
+        id: chat.id,
+        title: chat.title || chat.username || String(chat.id),
+        type: chat.type,
+        username: chat.username || null,
+        memberCount,
+        canPost,
+      },
+    };
+  } catch (e) {
+    const msg = /chat not found/i.test(e.message)
+      ? "Canal introuvable : ajoute d'abord le bot comme administrateur du canal, puis réessaie."
+      : e.message;
+    return { ok: false, error: msg };
+  }
+}
+
+// compteur de messages envoyés par stratégie
+function countSent(key, n = 1) {
+  const cfg = state.strategies[key];
+  if (!cfg) return;
+  cfg.sentCount = (cfg.sentCount || 0) + n;
+  cfg.lastSentAt = Date.now();
 }
 
 function dropSender(token) {
@@ -601,11 +641,11 @@ let lastLiveNumber = null;
 async function sendBilan(key) {
   const cfg = state.strategies[key] || {};
   if (cfg.bilan === false) return;
-  const sender = senderFor(key);
+  const sender = senderFor();
   if (!sender) return;
   const text = bilanText(key);
   for (const id of strategyChannels(key)) {
-    try { await sender.sendMessage(id, text); }
+    try { await sender.sendMessage(id, text); countSent(key); }
     catch (e) { console.error('Bilan non envoyé', id, e.message); }
   }
 }
@@ -617,29 +657,68 @@ async function announceConfig(key) {
   const cfg = state.strategies[key] || {};
   const ids = strategyChannels(key);
   if (!def) return { ok: false, error: 'Stratégie inconnue' };
-  if (!ids.length) return { ok: false, error: 'Aucun canal configuré' };
-  const sender = senderFor(key);
-  if (!sender) return { ok: false, error: 'Aucun bot Telegram configuré' };
-  const text =
-    '✅ CONFIGURATION ENREGISTRÉE\n\n' +
-    `🧠 Stratégie : ${def.name}\n` +
-    `🤖 Bot : ${cfg.token ? 'token dédié' : 'bot principal'}\n` +
-    `📡 Canal : ${ids.join(', ')}\n` +
-    `🎯 Format ${cfg.format}${key === 'matchnul' ? '/' + (cfg.formatDistribution || 79) : ''} • +${cfg.maxR} rattrapage(s)\n` +
-    `📊 Bilan automatique : ${cfg.bilan === false ? 'non' : 'oui'}\n\n` +
-    'Ce canal est bien relié : les prédictions arriveront ici. 🚀';
+  if (!ids.length) return { ok: false, error: 'Aucun canal configuré pour cette stratégie' };
+  const sender = senderFor();
+  if (!sender) return { ok: false, error: "Aucun token API configuré dans les réglages" };
+
+  const sent = [];
+  const failed = [];
+  const infos = [];
+  for (const id of ids) {
+    const r = await resolveChat(id);
+    const info = r.ok ? r.chat : { id, title: String(id), type: '?', memberCount: null, canPost: null };
+    if (!r.ok) info.error = r.error;
+    const text =
+      '✅ CANAL CONFIGURÉ\n\n' +
+      `🧠 Stratégie : ${def.name}\n` +
+      `📡 Canal : ${info.title}\n` +
+      `🆔 ID : ${info.id}\n` +
+      (info.memberCount != null ? `👥 Abonnés : ${info.memberCount}\n` : '') +
+      `🤖 Bot : @${state.botUsername || 'bot'} (token des réglages)\n` +
+      `🎯 Format ${cfg.format} • +${cfg.maxR} rattrapage(s)\n` +
+      `📊 Bilan automatique : ${cfg.bilan === false ? 'non' : 'oui'}\n\n` +
+      'Ce canal recevra désormais les prédictions de cette stratégie. 🚀';
+    try {
+      await sender.sendMessage(id, text);
+      sent.push(id);
+      countSent(key);
+      info.confirmed = true;
+    } catch (e) {
+      failed.push({ id, error: e.message });
+      info.confirmed = false;
+      info.error = e.message;
+    }
+    infos.push(info);
+  }
+  cfg.channelInfos = infos;
+  return { ok: sent.length > 0, sent, failed, channels: infos };
+}
+
+// envoi d'un message de test dans le(s) canal(aux) d'une stratégie
+async function testSend(key) {
+  const def = strategies.BY_KEY[key];
+  if (!def) return { ok: false, error: 'Stratégie inconnue' };
+  const sender = senderFor();
+  if (!sender) return { ok: false, error: "Aucun token API configuré dans les réglages" };
+  const ids = strategyChannels(key);
+  if (!ids.length) return { ok: false, error: 'Aucun canal configuré pour cette stratégie' };
+  const cfg = state.strategies[key] || {};
+  const preview = fmt.formatPreview(cfg.format, { maxR: cfg.maxR });
+  const text = `🧪 TEST D'ENVOI\n\n🧠 ${def.name}\n\n${preview}\n\nSi tu vois ce message, les prédictions arriveront bien ici. ✅`;
   const sent = [];
   const failed = [];
   for (const id of ids) {
-    try { await sender.sendMessage(id, text); sent.push(id); }
+    try { await sender.sendMessage(id, text); sent.push(id); countSent(key); }
     catch (e) { failed.push({ id, error: e.message }); }
   }
+  state.sendErrors[key] = failed.length ? `${failed[0].id} : ${failed[0].error}` : null;
   return { ok: sent.length > 0, sent, failed, text };
 }
 
 // confirmation pour le bot principal (réglages)
 async function announceMainBot() {
-  if (!bot) return { ok: false, error: 'Bot principal non démarré' };
+  const sender = senderFor();
+  if (!sender) return { ok: false, error: 'Aucun token API configuré' };
   const ids = state.activeChannels || [];
   if (!ids.length) return { ok: false, error: 'Aucun canal actif' };
   const text =
@@ -650,7 +729,7 @@ async function announceMainBot() {
   const sent = [];
   const failed = [];
   for (const id of ids) {
-    try { await bot.sendMessage(id, text); sent.push(id); }
+    try { await sender.sendMessage(id, text); sent.push(id); }
     catch (e) { failed.push({ id, error: e.message }); }
   }
   return { ok: sent.length > 0, sent, failed, text };
@@ -661,7 +740,7 @@ async function announceMainBot() {
 // ---------------------------------------------------------------------------
 async function broadcast(pred) {
   if (db.ready) db.savePrediction(pred, state.B);
-  const sender = senderFor(pred.strategy);
+  const sender = senderFor();
   if (!sender) { state.sendErrors[pred.strategy] = 'Aucun token Telegram configuré'; return; }
   const ids = strategyChannels(pred.strategy);
   if (!ids.length) { state.sendErrors[pred.strategy] = 'Aucun canal configuré'; return; }
@@ -671,6 +750,7 @@ async function broadcast(pred) {
     try {
       const m = await sender.sendMessage(id, text, parse_mode ? { parse_mode } : {});
       pred.messages.push({ chatId: id, messageId: m.message_id });
+      countSent(pred.strategy);
     } catch (e) {
       state.sendErrors[pred.strategy] = `${id} : ${e.message}`;
       console.error('Envoi échoué', id, e.message);
@@ -680,7 +760,7 @@ async function broadcast(pred) {
 
 async function updateResult(pred) {
   if (db.ready) db.closePrediction(pred);
-  const sender = senderFor(pred.strategy);
+  const sender = senderFor();
   if (!sender) return;
   const { text, parse_mode } = predictionText(pred);
   for (const m of pred.messages) {
@@ -753,4 +833,4 @@ async function startLoop() {
   startBot();
 }
 
-module.exports = { startLoop, startBot, botStatus, activate, deactivate, persist, listChannels, sendBilan, dropSender, announceConfig, announceMainBot };
+module.exports = { startLoop, startBot, botStatus, activate, deactivate, persist, listChannels, sendBilan, dropSender, announceConfig, announceMainBot, resolveChat, testSend, senderFor };

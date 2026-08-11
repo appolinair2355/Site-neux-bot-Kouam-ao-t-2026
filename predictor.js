@@ -110,9 +110,15 @@ function setStrategyConfig(key, patch = {}) {
   // stratégie « Carte absente » : nombre de jeux consécutifs sans le costume
   if (patch.streak !== undefined) next.streak = Math.max(2, Math.min(10, parseInt(patch.streak, 10) || 3));
   if (patch.template !== undefined) next.template = patch.template ? String(patch.template) : null;
-  if (patch.channels !== undefined) next.channels = parseChannels(patch.channels);
-  if (patch.channelId !== undefined) next.channels = parseChannels(patch.channelId);
-  if (patch.token !== undefined) next.token = patch.token ? String(patch.token).trim() : null;
+  if (patch.channels !== undefined || patch.channelId !== undefined) {
+    const before = JSON.stringify(next.channels || []);
+    next.channels = parseChannels(patch.channels !== undefined ? patch.channels : patch.channelId);
+    // le canal a changé → les informations affichées sont recalculées
+    if (JSON.stringify(next.channels) !== before) next.channelInfos = [];
+  }
+  if (patch.channelInfos !== undefined) next.channelInfos = patch.channelInfos || [];
+  // un seul token API pour toute l'application (réglages) : plus de token par stratégie
+  delete next.token;
   if (patch.bilan !== undefined) next.bilan = !!patch.bilan;
   state.strategies[key] = next;
   if (key === 'costume') pullCostume();
