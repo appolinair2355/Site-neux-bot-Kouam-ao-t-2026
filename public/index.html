@@ -421,10 +421,34 @@ async function viewStrategy(key){
           <div><label>Décalage</label><input id="dc" type="number" min="1" max="99" value="${s.config.decalage}"></div>`:''}
           ${s.key==='absente'?`
           <div><label>Jeux consécutifs sans la carte</label><input id="st" type="number" min="2" max="10" value="${s.config.streak||3}"></div>`:''}
+          ${s.key==='ombre'?`
+          <div><label>Absence minimum (jeux)</label><input id="ab" type="number" min="1" max="30" value="${s.config.absence||4}"></div>
+          <div><label>Cartes surveillées</label><select id="sc">
+            <option value="tous" ${s.config.scope!=='joueur'?'selected':''}>Joueur + Banquier</option>
+            <option value="joueur" ${s.config.scope==='joueur'?'selected':''}>Main du joueur</option>
+          </select></div>`:''}
           ${s.config.formatDistribution?`<div><label>Format distribution</label><select id="fd">${opts(s.config.formatDistribution)}</select></div>`:''}
         </div>
         <label>Template personnalisé (optionnel) — {game} {emoji} {suit} {status} {maxR}</label>
         <textarea id="tpl">${esc(s.config.template||'')}</textarea>
+        <div class="card mt" style="background:rgba(255,255,255,.03)">
+          <h3>🔕 Mode silencieux (filtre double perte)</h3>
+          <div class="muted">Les prédictions sont calculées et vérifiées dans l'ombre. L'envoi vers le canal
+          s'active seulement après une <b>première perte</b> puis une <b>seconde perte</b> survenue dans
+          l'intervalle configuré (nombre maximum de prédictions attendues après la première perte).
+          Si l'intervalle est dépassé sans seconde perte, le compteur repart à zéro.</div>
+          <div class="row mt">
+            <label style="margin:0"><input type="checkbox" id="sil" ${s.config.silent?'checked':''} style="width:auto"> Activer le mode silencieux</label>
+          </div>
+          <div class="grid g2 mt">
+            <div><label>Prédictions max après une perte</label><input id="lw" type="number" min="1" max="20" value="${s.config.lossWindow||3}"></div>
+            <div><label>Après un gain</label><select id="row">
+              <option value="1" ${s.config.resetOnWin!==false?'selected':''}>Retour au silence</option>
+              <option value="0" ${s.config.resetOnWin===false?'selected':''}>Continuer d'envoyer</option>
+            </select></div>
+          </div>
+          <div class="mt"><span class="tag ${s.gate&&s.gate.sending?'win':'wait'}">${esc((s.gate&&s.gate.label)||'—')}</span></div>
+        </div>
         <div class="row mt">
           <button class="btn" onclick="saveStrategy('${s.key}')">💾 Enregistrer</button>
           <button class="btn ghost" onclick="toggleStrategy('${s.key}',${s.config.enabled?'false':'true'})">${s.config.enabled?'⏸️ Désactiver':'▶️ Activer'}</button>
@@ -478,6 +502,11 @@ async function saveStrategy(key){
   if($('#vs')) body.varStep = +$('#vs').value;
   if($('#dc')) body.decalage = +$('#dc').value;
   if($('#st')) body.streak = +$('#st').value;
+  if($('#ab')) body.absence = +$('#ab').value;
+  if($('#sc')) body.scope = $('#sc').value;
+  if($('#sil')) body.silent = $('#sil').checked;
+  if($('#lw')) body.lossWindow = +$('#lw').value;
+  if($('#row')) body.resetOnWin = $('#row').value === '1';
   try{
     const r = await api('/api/strategies/'+key,'POST',body);
     let txt = r.saved ? '✅ Enregistré dans la base de données.' : '✅ Enregistré (base non connectée : sauvegarde locale).';
@@ -649,11 +678,49 @@ async function viewSettings(){
         ${ov?`<div class="row mt"><span class="tag">${ov.overview.games} jeux</span><span class="tag">${ov.overview.predictions} prédictions</span><span class="tag">dernier #N${ov.overview.dernier_jeu||'—'}</span></div>`:'<div class="muted mt">Connecte la base pour voir tout ce qui est déjà enregistré.</div>'}
       </div>
     </div>
+    <h2>🗂️ Configurations enregistrées</h2>
+    <div class="card">
+      <div class="muted">Toutes les configurations (réglages généraux + chaque stratégie) sont enregistrées
+      dans la base de données. Au démarrage, le bot lit automatiquement la base ; si une configuration
+      n'y existe pas encore, elle y est ajoutée toute seule.</div>
+      <div class="row mt">
+        <button class="btn gold" onclick="saveConfigs()">💾 Tout enregistrer en base</button>
+        <button class="btn ghost" onclick="loadConfigs()">📥 Relire depuis la base</button>
+      </div>
+      <div id="cfgBox" class="mt"><div class="muted">Chargement…</div></div>
+    </div>
+
     <h2>📡 Canaux détectés</h2>
     <div class="card">
       <table><tbody>${(s.channels||[]).map(c=>`<tr><td>${c.active?'✅':'⚪'} ${esc(c.title)}</td><td class="muted num">${c.id}</td>
         <td style="text-align:right"><button class="btn ghost" onclick="api('/api/channels/${c.active?'deactivate':'activate'}','POST',{id:${c.id}}).then(()=>viewSettings())">${c.active?'Désactiver':'Activer'}</button></td></tr>`).join('') || '<tr><td class="muted">Aucun canal détecté — ajoute le bot comme administrateur d’un canal.</td></tr>'}</tbody></table>
     </div>`;
+  renderConfigs();
+}
+
+async function renderConfigs(){
+  const box = $('#cfgBox'); if(!box) return;
+  try{
+    const d = await api('/api/configs');
+    if(!d.ready) return box.innerHTML = '<div class="muted">Base non connectée — les configurations restent en mémoire.</div>';
+    const keys = Object.keys(d.strategies||{});
+    if(!keys.length) return box.innerHTML = '<div class="muted">Aucune configuration en base pour le moment — clique sur « Tout enregistrer en base ».</div>';
+    box.innerHTML = `<table><thead><tr><th>Stratégie</th><th>État</th><th>Format</th><th>Rattrapages</th><th>Silencieux</th><th>Canal</th></tr></thead><tbody>` +
+      keys.map(k=>{ const c=d.strategies[k]||{}; return `<tr><td>${esc(k)}</td>
+        <td>${c.enabled?'🟢 active':'🔴 arrêtée'}</td><td class="num">${c.format||'—'}</td>
+        <td class="num">+${c.maxR!=null?c.maxR:'—'}</td>
+        <td>${c.silent?('🔕 oui ('+(c.lossWindow||3)+')'):'📨 non'}</td>
+        <td class="num">${esc((c.channels||[]).join(', ')||'—')}</td></tr>`; }).join('') +
+      `</tbody></table>`;
+  }catch(e){ box.innerHTML = '<div class="muted">❌ '+esc(e.message)+'</div>'; }
+}
+async function saveConfigs(){
+  try{ const r = await api('/api/configs/save','POST',{}); alert('💾 Configurations enregistrées : '+(r.saved||[]).join(', ')); renderConfigs(); }
+  catch(e){ alert(e.message); }
+}
+async function loadConfigs(){
+  try{ const r = await api('/api/configs/load','POST',{}); alert('📥 Configurations lues : '+((r.loaded||[]).join(', ')||'aucune')+((r.added||[]).length?' • ajoutées : '+r.added.join(', '):'')); location.reload(); }
+  catch(e){ alert(e.message); }
 }
 async function setToken(){ try{
   const r = await api('/api/bot/token','POST',{token:$('#tk').value.trim()});
