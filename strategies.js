@@ -189,8 +189,8 @@ function triggerAt(n, start, varN) {
 // index du déclencheur si `number` appartient à la séquence, sinon -1
 function triggerIndexOf(number, start, varN) {
   if (number < start) return -1;
-  const cycle = varN >= 1 ? 10 * varN - 1 : 10 * 1; // avance par cycle complet
-  let n = varN >= 1 ? Math.max(0, Math.floor(((number - start) / cycle) * varN) - varN - 2) : Math.max(0, Math.floor((number - start) / 10) - 1);
+  // borne basse sûre : triggerAt(n) >= start + 9n  →  n <= (number - start) / 9
+  let n = 0;
   let guard = 0;
   while (guard++ < 100000) {
     const v = triggerAt(n, start, varN);
@@ -204,8 +204,7 @@ function triggerIndexOf(number, start, varN) {
 // dernier déclencheur <= number (null si la séquence n'a pas encore commencé)
 function lastTriggerAtOrBefore(number, start, varN) {
   if (number < start) return null;
-  const cycle = varN >= 1 ? 10 * varN - 1 : 10;
-  let n = varN >= 1 ? Math.max(0, Math.floor(((number - start) / cycle) * varN) - varN - 2) : Math.max(0, Math.floor((number - start) / 10) - 1);
+  let n = 0;
   let last = start;
   let guard = 0;
   while (guard++ < 100000) {

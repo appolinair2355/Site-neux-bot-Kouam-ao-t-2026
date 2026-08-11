@@ -784,11 +784,14 @@ async function tick() {
       bilanPending.add(p.strategy);           // bilan dès que le jeu reprend
     }
 
-    // le jeu reprend (nouveau tour) → on publie le bilan des stratégies closes
+    // Le bilan n'est publié QUE lorsque le jeu en live revient au jeu n°1
+    // (nouveau sabot), et non à chaque vérification.
     const liveNumber = state.live ? state.live.number : null;
     if (liveNumber && liveNumber !== lastLiveNumber) {
+      const prev = lastLiveNumber;
       lastLiveNumber = liveNumber;
-      if (bilanPending.size) {
+      const nouveauSabot = liveNumber === 1 || (prev != null && liveNumber < prev);
+      if (nouveauSabot && bilanPending.size) {
         const keys = [...bilanPending];
         bilanPending.clear();
         for (const k of keys) await sendBilan(k);
