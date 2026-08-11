@@ -398,7 +398,7 @@ async function viewStrategy(key){
         ${(s.channels||[]).length?`<button class="btn danger" onclick="removeChannel('${s.key}')">🗑️ Retirer le canal</button>`:''}
       </div>
       <div class="row mt">
-        <label style="margin:0"><input type="checkbox" id="bil" ${s.bilan?'checked':''} style="width:auto"> Envoyer le bilan quand le jeu reprend</label>
+        <label style="margin:0"><input type="checkbox" id="bil" ${s.bilan?'checked':''} style="width:auto"> Envoyer le bilan au nouveau sabot (retour au jeu n°1)</label>
       </div>
       ${s.sendError?`<div class="mt"><span class="tag loss">Dernier envoi en échec : ${esc(s.sendError)}</span></div>`:''}
       <div id="msg" class="muted mt"></div>
