@@ -118,6 +118,19 @@
     table { width: 100%; border-collapse: collapse; font-size: 12px; }
     th, td { padding: 11px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
     th { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .1em; }
+    .modal-backdrop { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 20px;
+      background: rgba(4,7,12,.72); backdrop-filter: blur(8px); animation: fade .18s ease; }
+    @keyframes fade { from { opacity: 0 } to { opacity: 1 } }
+    @keyframes rise { from { opacity: 0; transform: translateY(14px) scale(.985) } to { opacity: 1; transform: none } }
+    .modal { width: min(560px, 100%); max-height: 86vh; overflow: auto; padding: 26px; border-radius: 22px;
+      border: 1px solid rgba(112,225,229,.28); background: linear-gradient(150deg, rgba(22,33,47,.98), rgba(11,16,25,.98));
+      box-shadow: 0 40px 110px rgba(0,0,0,.55); animation: rise .22s ease; }
+    .modal h3 { font-size: 20px; letter-spacing: -.04em; margin-bottom: 4px; }
+    .modal dl { display: grid; grid-template-columns: 150px 1fr; gap: 10px 14px; margin: 20px 0 0; font-size: 13px; }
+    .modal dt { color: var(--muted); font-weight: 700; }
+    .modal dd { margin: 0; color: var(--soft); word-break: break-all; }
+    .modal-actions { display: flex; gap: 9px; flex-wrap: wrap; margin-top: 24px; }
+    .modal-head { display: flex; gap: 14px; align-items: flex-start; justify-content: space-between; }
     .empty { padding: 36px 20px; color: var(--muted); text-align: center; border: 1px dashed var(--line); border-radius: 14px; }
     .loading { min-height: 160px; display: grid; place-items: center; color: var(--muted); }
     footer { margin-top: 50px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
@@ -140,6 +153,7 @@
         <a href="#/ai" data-nav="ai">Analyseur IA</a>
         <a href="#/ai-strategies" data-nav="ai">Stratégies IA</a>
         <a href="#/diagnostics" data-nav="settings">Envois</a>
+        <a href="#/database" data-nav="database">Base de données</a>
         <a href="#/formats" data-nav="formats">Formats</a>
         <a href="#/settings" data-nav="settings">Configuration</a>
       </nav>
@@ -180,6 +194,55 @@
       return (snapshot.strategies || []).map(s => `<button class="strategy-button" onclick="location.hash='#/strategy/${encodeURIComponent(s.key)}'">
         <span class="eyebrow">${s.config?.enabled ? 'Active' : 'En pause'}</span><b>${esc(s.name)}</b><span>${esc((s.about || '').slice(0, 92))}...</span><em>Ouvrir la configuration →</em></button>`).join('');
     }
+    function closeModal() { document.getElementById('modalRoot')?.remove(); }
+    function openModal(html) {
+      closeModal();
+      const root = document.createElement('div');
+      root.id = 'modalRoot'; root.className = 'modal-backdrop';
+      root.innerHTML = `<div class="modal" role="dialog" aria-modal="true">${html}</div>`;
+      root.addEventListener('click', (e) => { if (e.target === root) closeModal(); });
+      document.body.appendChild(root);
+    }
+    function channelModal(strategy, mode, payload) {
+      const chat = payload.channel || {};
+      const bot = snapshot?.bot || {};
+      const notice = payload.notice || {};
+      const ok = !!notice.ok;
+      openModal(`<div class="modal-head"><div><span class="eyebrow">Canal ${mode === 'shadow' ? 'silencieux' : 'public'} configuré</span>
+          <h3 style="margin-top:8px">${esc(chat.title || chat.username || chat.id)}</h3>
+          <p class="small" style="margin:0">Ce canal est maintenant relié à la stratégie « ${esc(strategy.name || strategy.key)} ».</p></div>
+        <span class="tag ${ok ? 'good' : 'warn'}">${ok ? 'Message envoyé' : 'Envoi à vérifier'}</span></div>
+        <dl>
+          <dt>Stratégie</dt><dd>${esc(strategy.name || strategy.key)}</dd>
+          <dt>Type de sortie</dt><dd>${mode === 'shadow' ? 'Canal silencieux (signaux en observation)' : 'Canal public (prédictions activées)'}</dd>
+          <dt>Nom du canal</dt><dd>${esc(chat.title || '—')}</dd>
+          <dt>Identifiant</dt><dd class="mono">${esc(chat.id ?? '—')}</dd>
+          <dt>Lien / @nom</dt><dd>${chat.username ? '@' + esc(chat.username) : '<span class="muted">Canal privé</span>'}</dd>
+          <dt>Type</dt><dd>${esc(chat.type || '—')}</dd>
+          <dt>Droit de publier</dt><dd>${chat.canPost === false ? '<span class="tag bad">Non autorisé</span>' : '<span class="tag good">Autorisé</span>'}</dd>
+          <dt>Bot</dt><dd>${bot.username ? '@' + esc(bot.username) : '<span class="muted">Nom inconnu</span>'}</dd>
+          <dt>Token du bot</dt><dd class="mono">${esc(bot.tokenMasked || 'Non configuré')}</dd>
+          <dt>Confirmation</dt><dd>${ok ? 'Un message de confirmation a été publié dans le canal.' : esc(notice.error || 'Message non envoyé : vérifie que le bot est administrateur du canal.')}</dd>
+        </dl>
+        <div class="modal-actions">
+          <button class="button small primary" onclick="closeModal()">Terminé</button>
+          <button class="button small ghost" onclick="testStrategy('${esc(strategy.key)}','${mode}')">Envoyer un test</button>
+        </div>`);
+    }
+    function predictionRows(list) {
+      return list.map(p => `<tr><td class="mono">#N${esc(p.target)}</td><td>${esc(p.strategyName || p.strategy || '')}</td>
+        <td>${esc(p.label || '')} ${esc(p.suit || '')}</td><td class="mono">${esc(p.step ?? 0)}/${esc(p.maxR ?? 0)}</td>
+        <td><span class="tag ${p.status === 'gagné' ? 'good' : p.status === 'perdu' ? 'bad' : 'warn'}">${esc(p.status)}</span></td>
+        <td>${esc(p.badge || (p.silent ? 'Silencieux' : 'Public'))}</td></tr>`).join('');
+    }
+    function predictionsSection() {
+      const list = (snapshot.predictions || []).slice(0, 20);
+      return `<section class="section"><div class="section-head"><div><span class="eyebrow">Panneau des prédictions</span>
+          <h2 style="margin-top:7px">Les 20 dernières prédictions</h2><p class="small">Toutes stratégies confondues, mises à jour en direct.</p></div>
+          <button class="button small ghost" onclick="reloadView()">Actualiser</button></div>
+        <div class="panel">${list.length ? `<table><thead><tr><th>Tour</th><th>Stratégie</th><th>Signal</th><th>Étape</th><th>État</th><th>Routage</th></tr></thead><tbody>${predictionRows(list)}</tbody></table>` : '<div class="empty">Aucune prédiction pour le moment.</div>'}</div></section>`;
+    }
+    async function reloadView() { await refresh(); route(); }
     function home() {
       setNav('home');
       const ai = snapshot.ai || {};
@@ -189,9 +252,10 @@
         <section class="section"><div class="strategy-grid">
           <button class="strategy-button" onclick="location.hash='#/ai'"><span class="eyebrow">Analyse continue</span><b>Analyseur IA</b><span>Il analyse les jeux lui-même en temps réel et écrit ses constats dans Résultats.</span><em>Ouvrir l’analyseur →</em></button>
           <button class="strategy-button" onclick="location.hash='#/ai-strategies'"><span class="eyebrow">${created} enregistrée(s)</span><b>Stratégies IA créées</b><span>Les stratégies trouvées ou créées par l’analyseur arrivent ici.</span><em>Voir les stratégies IA →</em></button>
-        </div></section>`;
+        </div></section>
+        ${predictionsSection()}`;
     }
-    function strategiesPage() { setNav('strategies'); $('#app').innerHTML = `<div class="section-head" style="padding-top:38px"><div><span class="eyebrow">Catalogue</span><h2 style="margin-top:7px">Choisir une stratégie</h2></div><a class="button small ghost" href="#/">Retour accueil</a></div><div class="strategy-grid">${strategyButtons()}</div>`; }
+    function strategiesPage() { setNav('strategies'); $('#app').innerHTML = `<div class="section-head" style="padding-top:38px"><div><span class="eyebrow">Catalogue</span><h2 style="margin-top:7px">Choisir une stratégie</h2></div><a class="button small ghost" href="#/">Retour accueil</a></div><div class="strategy-grid">${strategyButtons()}</div>${predictionsSection()}`; }
     function routeRows(s) {
       const pub = s.publishedChannels || s.channels || [], shadow = s.shadowChannels || [];
       return `<div class="two-col"><div class="route-card public"><div class="route-title"><i></i><strong>Canal public</strong></div><p>Prédictions directes ou activées après deux pertes. Jamais mélangé avec le canal silencieux.</p>
@@ -199,8 +263,11 @@
         <div class="route-card shadow"><div class="route-title"><i></i><strong>Canal silencieux</strong></div><p>Signaux calculés pendant le mode silencieux. Il peut être différent du canal public et ne reçoit jamais de publication publique.</p>
         <div class="field"><label>ID ou @nom du canal</label><input id="shadowChannel" value="${esc(shadow.join(', '))}" placeholder="-1009876543210"></div><div class="toolbar"><button class="button small primary" onclick="saveChannel('${s.key}','shadow')">Vérifier et enregistrer</button><button class="button small danger" onclick="removeChannel('${s.key}','shadow')">Retirer</button></div></div></div>`;
     }
-    function strategyPage(key) {
-      const s = snapshot.strategies.find(x => x.key === key); if (!s) return home();
+    const strategyDetails = {};
+    async function strategyPage(key) {
+      let s = snapshot.strategies.find(x => x.key === key); if (!s) return home();
+      try { const full = await api('/api/strategies/' + encodeURIComponent(key)); strategyDetails[key] = full; s = { ...s, ...full }; }
+      catch (e) { s = { ...s, ...(strategyDetails[key] || {}) }; }
       setNav('strategies'); const c = s.config || {};
       $('#app').innerHTML = `<div class="back"><a href="#/strategies">← Retour aux stratégies</a></div><div class="section-head"><div><span class="eyebrow">Configuration stratégie</span><h2 style="margin-top:7px">${esc(s.name)}</h2><p class="small">${esc(s.about)}</p></div><span class="tag ${c.enabled ? 'good' : 'bad'}">${c.enabled ? 'Active' : 'En pause'}</span></div>
         <div class="two-col"><div class="panel"><h3>Règles de calcul</h3><div class="three-col"><div class="field"><label>Format</label><input id="cfgFormat" type="number" min="1" max="${snapshot.formatCount}" value="${c.format || 1}"></div><div class="field"><label>Rattrapages</label><input id="cfgMaxR" type="number" min="0" max="9" value="${c.maxR ?? 2}"></div><div class="field"><label>Avance</label><input id="cfgLead" type="number" min="1" max="9" value="${c.lead ?? 2}"></div></div>
@@ -213,24 +280,50 @@
         <div class="panel"><h3>Filtre après pertes</h3><p class="small">Le mode silencieux calcule et vérifie chaque signal dans l’ombre. Après une première perte, une fenêtre s’ouvre ; après une deuxième perte dans cette fenêtre, les prochaines prédictions sont activées vers le canal public.</p>
           <label class="check"><input id="cfgSilent" type="checkbox" ${c.silent ? 'checked' : ''}> Activer le mode silencieux</label><div class="field" style="margin-top:18px"><label>Nombre maximum de prédictions après la première perte</label><input id="cfgLossWindow" type="number" min="1" max="20" value="${c.lossWindow ?? 3}"></div><div class="field"><label>Après un gain</label><select id="cfgReset"><option value="1" ${c.resetOnWin !== false ? 'selected' : ''}>Revenir au silence</option><option value="0" ${c.resetOnWin === false ? 'selected' : ''}>Continuer l’envoi</option></select></div><div class="notice">${esc(s.gate?.label || 'État du filtre indisponible')}</div><div class="split small"><span class="muted">Gagnées</span><b style="color:var(--green)">${s.stats?.win ?? 0}</b><span class="muted">Perdues</span><b style="color:var(--red)">${s.stats?.loss ?? 0}</b></div></div></div>
         <section class="section"><div class="section-head"><div><span class="eyebrow">Séparation des sorties</span><h2 style="margin-top:7px">Canaux de cette stratégie</h2></div><span class="tag">${(s.publishedChannels || s.channels || []).length ? 'Public configuré' : 'Public à configurer'} · ${s.shadowChannels?.length ? 'Silencieux configuré' : 'Silencieux à configurer'}</span></div>${routeRows(s)}</section>
+        ${liveGamesSection(s)}
         <section class="section"><div class="section-head"><div><span class="eyebrow">Historique court</span><h2 style="margin-top:7px">Prédictions récentes</h2></div></div><div class="panel">${(s.predictions || []).length ? `<table><thead><tr><th>Tour</th><th>Signal</th><th>État</th><th>Routage</th></tr></thead><tbody>${s.predictions.slice(0,20).map(p => `<tr><td class="mono">#N${esc(p.target)}</td><td>${esc(p.label || '')}</td><td><span class="tag ${p.status === 'gagné' ? 'good' : p.status === 'perdu' ? 'bad' : 'warn'}">${esc(p.status)}</span></td><td>${p.silent ? 'Silencieux' : 'Public'}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">Aucune prédiction enregistrée pour cette stratégie.</div>'}</div></section>`;
     }
+    function gameRow(g) {
+      const cards = (list) => (list || []).join(' ') || '—';
+      return `<tr><td class="mono">#N${esc(g.number)}</td><td>${esc(cards(g.player))}</td><td>${esc(cards(g.banker))}</td>
+        <td>${esc(g.playerValue ?? '—')} / ${esc(g.bankerValue ?? '—')}</td><td>${esc(g.winner || '—')}</td>
+        <td><span class="tag ${g.finished ? 'good' : 'warn'}">${esc(g.phaseLabel || '')}</span></td>
+        <td>${g.prediction ? `<span class="tag ${g.prediction.status === 'gagné' ? 'good' : g.prediction.status === 'perdu' ? 'bad' : 'warn'}">${esc(g.prediction.label || '')} · ${esc(g.prediction.status)}</span>` : '<span class="muted">—</span>'}</td></tr>`;
+    }
+    function liveGamesSection(s) {
+      const live = s.live || {};
+      const rows = [
+        ...(live.live ? [live.live] : []),
+        ...(live.upcoming || []),
+        ...(live.games || []),
+      ];
+      const counters = (live.counters || []).map(c => `<span class="tag">${esc(c.suit)} ${esc(c.count)}/${esc(c.b)}</span>`).join(' ');
+      return `<section class="section"><div class="section-head"><div><span class="eyebrow">Flux de la stratégie</span><h2 style="margin-top:7px">Jeux en live</h2><p class="small">Le jeu en cours, les tours à venir et les derniers jeux terminés, vus par cette stratégie.</p></div><button class="button small ghost" onclick="refreshStrategyLive('${s.key}')">Actualiser</button></div>
+        <div class="panel" id="liveBox">${counters ? `<div class="live-meta" style="margin-bottom:14px">${counters}</div>` : ''}
+        ${rows.length ? `<table><thead><tr><th>Tour</th><th>Joueur</th><th>Banquier</th><th>Points</th><th>Vainqueur</th><th>État</th><th>Prédiction</th></tr></thead><tbody>${rows.map(gameRow).join('')}</tbody></table>` : '<div class="empty">Aucun jeu reçu pour le moment.</div>'}</div></section>`;
+    }
+    async function refreshStrategyLive(key) { await refresh(); strategyPage(key); }
     function val(id) { return document.getElementById(id)?.value ?? ''; }
     async function saveStrategy(key) {
       const patch = { enabled: $('#cfgEnabled')?.checked, format: val('cfgFormat'), maxR: val('cfgMaxR'), lead: val('cfgLead'), b: val('cfgB'), silent: $('#cfgSilent')?.checked, lossWindow: val('cfgLossWindow'), resetOnWin: val('cfgReset') !== '0', startGame: val('cfgStart'), varStep: val('cfgVar'), decalage: val('cfgDec'), streak: val('cfgStreak'), absence: val('cfgAbsence'), scope: val('cfgScope'), publishedChannels: ids(val('pubChannel')), shadowChannels: ids(val('shadowChannel')) };
       const pub = new Set(patch.publishedChannels), shadow = new Set(patch.shadowChannels), overlap = [...pub].filter(id => shadow.has(id));
       if (overlap.length) return toast('Un même canal ne peut pas être public et silencieux pour la même stratégie.', 'error');
-      try { await api(`/api/strategies/${key}`, 'POST', patch); await refresh(); strategyPage(key); toast('Réglages enregistrés.'); } catch (e) { toast(e.message, 'error'); }
+      try { await api(`/api/strategies/${key}`, 'POST', patch); await refresh(); await strategyPage(key); toast('Réglages enregistrés.'); } catch (e) { toast(e.message, 'error'); }
     }
     async function saveChannel(key, mode) {
       const input = document.getElementById(mode === 'shadow' ? 'shadowChannel' : 'pubChannel'), values = ids(input?.value);
       if (!values.length) return toast('Renseigne un ID de canal.', 'error');
       const other = ids(document.getElementById(mode === 'shadow' ? 'pubChannel' : 'shadowChannel')?.value);
       if (values.some(v => other.includes(v))) return toast('Les deux canaux doivent être différents.', 'error');
-      try { await api(`/api/strategies/${key}/channel`, 'POST', { channelId: values[0], mode }); await refresh(); strategyPage(key); toast(`Canal ${mode === 'shadow' ? 'silencieux' : 'public'} vérifié et enregistré.`); } catch (e) { toast(e.message, 'error'); }
+      try {
+        const r = await api(`/api/strategies/${key}/channel`, 'POST', { channelId: values[0], mode });
+        await refresh(); await strategyPage(key);
+        const strategy = (snapshot.strategies || []).find(x => x.key === key) || { key };
+        channelModal(strategy, mode, r);
+      } catch (e) { toast(e.message, 'error'); }
     }
-    async function removeChannel(key, mode) { try { await api(`/api/strategies/${key}/channel`, 'DELETE', { mode }); await refresh(); strategyPage(key); } catch (e) { toast(e.message, 'error'); } }
-    async function resetStrategy(key) { if (!confirm('Réinitialiser cette stratégie ?')) return; try { await api(`/api/strategies/${key}/reset`, 'POST', {}); await refresh(); strategyPage(key); } catch(e) { toast(e.message, 'error'); } }
+    async function removeChannel(key, mode) { try { await api(`/api/strategies/${key}/channel`, 'DELETE', { mode }); await refresh(); await strategyPage(key); } catch (e) { toast(e.message, 'error'); } }
+    async function resetStrategy(key) { if (!confirm('Réinitialiser cette stratégie ?')) return; try { await api(`/api/strategies/${key}/reset`, 'POST', {}); await refresh(); await strategyPage(key); } catch(e) { toast(e.message, 'error'); } }
     async function testStrategy(key, mode) { try { const r = await api(`/api/strategies/${key}/test`, 'POST', { mode }); toast(`Message de test envoyé : ${(r.sent || []).join(', ')}`, ''); } catch(e) { toast(e.message, 'error'); } }
     function aiPage() {
       setNav('ai'); const aiState = snapshot.ai || {}; const auto = aiState.auto || {};
@@ -244,8 +337,10 @@
         <div class="field"><label>Remplacer la clé sans redéployer</label><input id="aiKey" type="password" autocomplete="off" placeholder="Clé Pollinations.ai"></div><button class="button ghost" onclick="saveAiKey()">Appliquer la clé</button>
         <div class="field" style="margin-top:16px"><label>Analyse ciblée (optionnel)</label><textarea id="aiObjective" placeholder="Ex. Compare les absences de costumes de la main du joueur."></textarea></div><button class="button orange" onclick="runAnalysis()">Analyse Pollinations.ai</button></div></div>
       <div class="section-head" style="margin-top:10px"><div><span class="eyebrow">Résultats</span><h2 style="margin-top:7px">Ce que l’analyseur constate</h2></div></div>
+      <div class="section-head" style="margin-top:10px"><div><span class="eyebrow">Découverte</span><h2 style="margin-top:7px">Nouvelles régularités trouvées</h2><p class="small">Au-delà des stratégies existantes : cartes précises suivies d’un costume (a+1, a+2, a+3), points du joueur, enchaînements, séquences de vainqueurs et journées qui se rejouent.</p></div><button class="button orange" onclick="loadPatterns()">Chercher de nouvelles stratégies</button></div>
+      <div id="aiPatterns" class="section"><div class="empty">Lance la recherche pour voir ce que l’analyseur découvre.</div></div>
       <div id="aiResult" class="section"></div>`;
-      renderAiResults();
+      renderAiResults(); loadPatterns();
     }
     function renderAiResults() {
       const list = (snapshot.ai?.results || []).filter(Boolean);
@@ -258,6 +353,20 @@
         ${(r.nextChecks || []).length ? `<div class="notice">${r.nextChecks.map(esc).join(' · ')}</div>` : ''}</div>`).join('');
     }
     function renderAiResult() { renderAiResults(); }
+    async function loadPatterns() {
+      const box = $('#aiPatterns'); if (!box) return;
+      box.innerHTML = '<div class="loading">Recherche de nouvelles régularités…</div>';
+      try {
+        const r = await api('/api/ai/patterns?limit=150');
+        if (r.note) { box.innerHTML = `<div class="notice warn">${esc(r.note)}</div>`; return; }
+        const disc = r.discoveries || [];
+        box.innerHTML = `<div class="panel"><div class="split"><b>${disc.length} règle(s) découverte(s)</b><span class="tag">${esc(r.sample)} jeux analysés · ${esc(r.pastDaysCount || 0)} journée(s) comparée(s)</span></div>
+          ${(r.findings || []).length ? `<ul class="small">${r.findings.map(f => `<li>${esc(f)}</li>`).join('')}</ul>` : '<div class="empty">Aucune régularité nette pour l’instant.</div>'}
+          ${(r.dayMatches || []).length ? `<div class="notice">Journées comparées : ${r.dayMatches.map(m => `${esc(String(m.date).slice(0,10))} (${esc(m.run)} jeux identiques)`).join(' · ')}</div>` : ''}</div>
+          ${(r.replacements || []).length ? `<div class="panel" style="margin-top:12px"><h3>Remplacements de costume conseillés</h3>${r.replacements.map(x => `<div class="notice">${esc(x.text)}</div>`).join('')}</div>` : ''}
+          ${disc.length ? `<div class="proposals">${disc.map(d => `<article class="proposal"><div class="split"><h3>${esc(d.proposal.name)}</h3><span class="tag">${esc(d.rate)}%</span></div><dl><dt>Logique</dt><dd>${esc(d.proposal.logic)}</dd><dt>Déclencheur</dt><dd>${esc(d.proposal.trigger)}</dd><dt>Cible</dt><dd>${esc(d.proposal.target)}</dd><dt>Preuve</dt><dd>${esc(d.proposal.evidence)}</dd><dt>Risque</dt><dd>${esc(d.proposal.risks)}</dd></dl><div class="toolbar" style="margin-top:12px"><button class="button small primary" onclick='saveProposal(${JSON.stringify(d.proposal).replace(/'/g, "&#39;")})'>Enregistrer dans Stratégies IA</button></div></article>`).join('')}</div>` : ''}`;
+      } catch (e) { box.innerHTML = `<div class="notice error">${esc(e.message)}</div>`; }
+    }
     function aiStrategiesPage() {
       setNav('ai'); const list = snapshot.ai?.savedStrategies || [];
       $('#app').innerHTML = `<div class="section-head" style="padding-top:38px"><div><span class="eyebrow">Créées par l’analyseur</span><h2 style="margin-top:7px">Stratégies IA</h2><p class="small">Enregistrées automatiquement, jamais activées seules : à tester d’abord en mode silencieux.</p></div><a class="button small ghost" href="#/ai">Retour analyseur</a></div>
@@ -281,15 +390,57 @@
           <div class="toolbar"><button class="button small ghost" onclick="testStrategy('${s.key}','published')">Tester public</button><button class="button small ghost" onclick="testStrategy('${s.key}','shadow')">Tester silencieux</button></div></div>`).join('')}`;
       } catch(e) { $('#app').innerHTML = `<div class="notice error">${esc(e.message)}</div>`; }
     }
+    async function databasePage() {
+      setNav('database'); $('#app').innerHTML = '<div class="loading">Lecture de la base de données…</div>';
+      let d;
+      try { d = await api('/api/db/dump?limit=25'); }
+      catch (e) {
+        $('#app').innerHTML = `<div class="section-head" style="padding-top:38px"><div><span class="eyebrow">Stockage</span><h2 style="margin-top:7px">Base de données</h2></div><a class="button small ghost" href="#/settings">Configuration</a></div><div class="notice error">${esc(e.message)}</div><p class="small">Renseigne l’URL PostgreSQL dans la page Configuration pour activer l’enregistrement permanent (token, canaux, jeux, prédictions).</p>`;
+        return;
+      }
+      const c = d.counts || {};
+      const table = (rows, cols) => rows.length
+        ? `<table><thead><tr>${cols.map(x => `<th>${esc(x[0])}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr>${cols.map(x => `<td>${esc(x[1](r))}</td>`).join('')}</tr>`).join('')}</tbody></table>`
+        : '<div class="empty">Aucune ligne enregistrée.</div>';
+      $('#app').innerHTML = `<div class="section-head" style="padding-top:38px"><div><span class="eyebrow">Stockage</span><h2 style="margin-top:7px">Base de données</h2><p class="small">Tout ce que le bot enregistre : jeux, prédictions, stratégies et configurations (token, ID de canal, réglages).</p></div><button class="button small ghost" onclick="databasePage()">Actualiser</button></div>
+        <div class="stat-grid"><div class="stat"><span>Jeux</span><b>${esc(c.games ?? 0)}</b></div><div class="stat"><span>Prédictions</span><b>${esc(c.predictions ?? 0)}</b></div><div class="stat"><span>Stratégies</span><b>${esc(c.strategies ?? 0)}</b></div><div class="stat"><span>Réglages</span><b>${esc(c.settings ?? 0)}</b></div></div>
+        <section class="section"><h2>Configurations enregistrées</h2><div class="panel">${table(d.settings || [], [['Clé', r => r.key], ['Valeur', r => String(r.value ?? '').slice(0, 220)]])}
+          <div class="toolbar" style="margin-top:14px"><button class="button primary" onclick="saveConfigs()">Enregistrer les configurations en base</button><button class="button ghost" onclick="loadConfigs()">Recharger depuis la base</button></div></div></section>
+        <section class="section"><h2>Stratégies enregistrées</h2><div class="panel">${table(d.strategies || [], [['Clé', r => r.key], ['Nom', r => r.name], ['Active', r => r.enabled ? 'oui' : 'non'], ['Canal public', r => (r.config?.publishedChannels || []).join(', ') || '—'], ['Canal silencieux', r => (r.config?.shadowChannels || []).join(', ') || '—'], ['Mise à jour', r => formatDate(r.updated_at)]])}</div></section>
+        <section class="section"><h2>Derniers jeux</h2><div class="panel">${table(d.games || [], [['Tour', r => '#N' + r.number], ['Date', r => String(r.played_on).slice(0,10)], ['Joueur', r => (r.player_cards||[]).join(' ')], ['Points', r => `${r.player_value ?? '—'} / ${r.banker_value ?? '—'}`], ['Vainqueur', r => r.winner || '—']])}</div></section>
+        <section class="section"><h2>Dernières prédictions</h2><div class="panel">${table(d.predictions || [], [['Stratégie', r => r.strategy], ['Tour', r => '#N' + r.target], ['Signal', r => r.label || r.suit], ['État', r => r.status], ['Rattrapage', r => r.rattrapage ?? '—'], ['Créée', r => formatDate(r.created_at)]])}</div></section>
+        <section class="section"><h2>Dates couvertes</h2><div class="panel">${table(d.dates || [], [['Date', r => String(r.played_on).slice(0,10)], ['Jeux', r => r.total]])}</div></section>
+        <section class="section"><h2>Requête de lecture</h2><div class="panel"><div class="field"><label>SELECT uniquement</label><input id="sqlQuery" placeholder="select * from games order by number desc limit 10"></div><button class="button ghost" onclick="runSql()">Exécuter</button><div id="sqlResult" style="margin-top:14px"></div></div></section>`;
+    }
+    async function saveConfigs() { try { const r = await api('/api/configs/save', 'POST', {}); toast('Configurations enregistrées en base : ' + (r.saved || []).join(', ')); await databasePage(); } catch(e) { toast(e.message, 'error'); } }
+    async function loadConfigs() { try { const r = await api('/api/configs/load', 'POST', {}); toast('Configurations relues : ' + ((r.loaded || []).join(', ') || 'aucune') + ((r.restored || []).length ? ' · restauré : ' + r.restored.join(', ') : '')); await refresh(); await databasePage(); } catch(e) { toast(e.message, 'error'); } }
+    async function runSql() {
+      const box = $('#sqlResult'); if (!box) return;
+      try {
+        const r = await api('/api/db/query', 'POST', { sql: val('sqlQuery') });
+        const rows = r.rows || [];
+        if (!rows.length) { box.innerHTML = '<div class="empty">Aucun résultat.</div>'; return; }
+        const cols = Object.keys(rows[0]);
+        box.innerHTML = `<table><thead><tr>${cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>${rows.map(row => `<tr>${cols.map(c => `<td>${esc(typeof row[c] === 'object' ? JSON.stringify(row[c]) : row[c])}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+      } catch (e) { box.innerHTML = `<div class="notice error">${esc(e.message)}</div>`; }
+    }
     async function runAnalysis() { const box = $('#aiMessage'); if (box) box.innerHTML = '<div class="notice">Analyse en cours…</div>'; try { await api('/api/ai/analyze', 'POST', { limit: 60, objective: val('aiObjective') }); await refresh(); aiPage(); } catch(e) { if (box) box.innerHTML = `<div class="notice error">${esc(e.message)}</div>`; } }
     async function saveProposal(proposal) { try { await api('/api/ai/strategies', 'POST', { proposal }); await refresh(); toast('Plan de stratégie enregistré, désactivé par sécurité.'); } catch(e) { toast(e.message, 'error'); } }
     async function formatsPage() { setNav('formats'); $('#app').innerHTML = '<div class="loading">Chargement des formats…</div>'; try { const r = await api('/api/formats'); $('#app').innerHTML = `<div class="section-head" style="padding-top:38px"><div><span class="eyebrow">Bibliothèque Telegram</span><h2 style="margin-top:7px">Formats de prédiction</h2><p class="small">${r.count} formats affichés avec leur aperçu réel.</p></div><input id="formatSearch" style="max-width:250px" placeholder="Rechercher un format..." oninput="filterFormats()"></div><div id="formatGrid" class="format-grid">${r.formats.map(f => `<article class="format-card" data-search="${esc(`${f.id} ${f.label} ${f.preview}`.toLowerCase())}"><b>FORMAT ${f.id}</b><pre>${esc(f.preview)}</pre></article>`).join('')}</div>`; } catch(e) { toast(e.message, 'error'); } }
     function filterFormats() { const q = val('formatSearch').toLowerCase(); document.querySelectorAll('.format-card').forEach(c => c.style.display = c.dataset.search.includes(q) ? '' : 'none'); }
-    function settingsPage() { setNav('settings'); const bot = snapshot.bot || {}, db = snapshot.db || {}; $('#app').innerHTML = `<div class="section-head" style="padding-top:38px"><div><span class="eyebrow">Système</span><h2 style="margin-top:7px">Configuration générale</h2><p class="small">Les réglages de chaque stratégie restent dans sa propre fiche.</p></div></div><div class="two-col"><div class="panel"><h3>Bot Telegram</h3><div class="notice ${bot.tokenSet ? '' : 'warn'}">${bot.tokenSet ? `Token enregistré : ${esc(bot.tokenMasked || 'masqué')}` : 'Aucun token Telegram configuré.'}</div><div class="field"><label>Token du bot</label><input id="botToken" type="password" autocomplete="off" placeholder="Coller le token Telegram pour le remplacer"></div><div class="field"><label>ID administrateur</label><input id="adminId" type="number" value="${esc(bot.adminId || '')}"></div><button class="button primary" onclick="saveBot()">Enregistrer et redémarrer</button><div id="settingsMessage"></div></div><div class="panel"><h3>Base de données</h3><div class="notice ${db.ready ? '' : 'warn'}">${db.ready ? 'PostgreSQL connectée et prête.' : 'Base non connectée : le bot peut fonctionner avec l’historique en mémoire.'}</div><div class="field"><label>DATABASE_URL (optionnel)</label><input id="dbUrl" type="password" autocomplete="off" placeholder="URL PostgreSQL Render"></div><button class="button ghost" onclick="saveDb()">Connecter la base</button><p class="small" style="margin-top:15px">Sur Render, préfère la variable d’environnement <code>DATABASE_URL</code>.</p></div></div><div class="section"><div class="panel"><h3>Réglages globaux historiques</h3><div class="three-col"><div class="field"><label>Compteur B</label><input id="globalB" type="number" min="1" value="${snapshot.b}"></div><div class="field"><label>Rattrapages</label><input id="globalR" type="number" min="0" max="9" value="${snapshot.maxR}"></div><div class="field"><label>Format par défaut</label><input id="globalF" type="number" min="1" max="${snapshot.formatCount}" value="${snapshot.format}"></div></div><button class="button primary" onclick="saveGlobals()">Enregistrer les réglages globaux</button> <a class="button ghost" href="#/diagnostics">Vérifier les envois</a></div></div>`; }
+    function settingsPage() { setNav('settings'); const bot = snapshot.bot || {}, db = snapshot.db || {}; $('#app').innerHTML = `<div class="section-head" style="padding-top:38px"><div><span class="eyebrow">Système</span><h2 style="margin-top:7px">Configuration générale</h2><p class="small">Les réglages de chaque stratégie restent dans sa propre fiche.</p></div></div><div class="two-col"><div class="panel"><h3>Bot Telegram</h3><div class="notice ${bot.tokenSet ? '' : 'warn'}">${bot.tokenSet ? `Token enregistré : ${esc(bot.tokenMasked || 'masqué')}` : 'Aucun token Telegram configuré.'}</div><div class="field"><label>Token du bot</label><input id="botToken" type="password" autocomplete="off" placeholder="Coller le token Telegram pour le remplacer"></div><div class="field"><label>ID administrateur</label><input id="adminId" type="number" value="${esc(bot.adminId || '')}"></div><div class="field"><label>ID du canal principal</label><input id="mainChannel" placeholder="-1001234567890 ou @moncanal" value="${esc((snapshot.channels || []).filter(c => c.active).map(c => c.id).join(', '))}"></div><div class="toolbar"><button class="button primary" onclick="saveBot()">Enregistrer et redémarrer</button><button class="button orange" onclick="saveMainChannel()">Vérifier le canal et envoyer un message</button></div><div id="settingsMessage"></div></div><div class="panel"><h3>Base de données</h3><div class="notice ${db.ready ? '' : 'warn'}">${db.ready ? 'PostgreSQL connectée et prête.' : 'Base non connectée : le bot peut fonctionner avec l’historique en mémoire.'}</div><div class="field"><label>DATABASE_URL (optionnel)</label><input id="dbUrl" type="password" autocomplete="off" placeholder="URL PostgreSQL Render"></div><button class="button ghost" onclick="saveDb()">Connecter la base</button><p class="small" style="margin-top:15px">Sur Render, préfère la variable d’environnement <code>DATABASE_URL</code>.</p></div></div><div class="section"><div class="panel"><h3>Réglages globaux historiques</h3><div class="three-col"><div class="field"><label>Compteur B</label><input id="globalB" type="number" min="1" value="${snapshot.b}"></div><div class="field"><label>Rattrapages</label><input id="globalR" type="number" min="0" max="9" value="${snapshot.maxR}"></div><div class="field"><label>Format par défaut</label><input id="globalF" type="number" min="1" max="${snapshot.formatCount}" value="${snapshot.format}"></div></div><button class="button primary" onclick="saveGlobals()">Enregistrer les réglages globaux</button> <a class="button ghost" href="#/diagnostics">Vérifier les envois</a> <a class="button ghost" href="#/database">Voir la base de données</a></div></div>`; }
     async function saveBot() { try { if (val('botToken')) await api('/api/bot/token', 'POST', { token: val('botToken') }); await api('/api/bot/admin', 'POST', { adminId: val('adminId') }); await refresh(); settingsPage(); toast('Configuration Telegram enregistrée.'); } catch(e) { toast(e.message, 'error'); } }
+    async function saveMainChannel() {
+      const box = $('#settingsMessage');
+      try {
+        const r = await api('/api/channels/main', 'POST', { channelId: val('mainChannel') });
+        await refresh(); settingsPage();
+        toast(`Canal ${r.chat?.title || r.id} configuré : message de confirmation envoyé.`);
+      } catch (e) { if (box) box.innerHTML = `<div class="notice error">${esc(e.message)}</div>`; toast(e.message, 'error'); }
+    }
     async function saveDb() { try { await api('/api/db', 'POST', { url: val('dbUrl') }); await refresh(); settingsPage(); toast('Base connectée.'); } catch(e) { toast(e.message, 'error'); } }
     async function saveGlobals() { try { await api('/api/setb', 'POST', { b: val('globalB') }); await api('/api/setmaxr', 'POST', { maxR: val('globalR') }); await api('/api/setformat', 'POST', { format: val('globalF') }); await refresh(); settingsPage(); toast('Réglages globaux enregistrés.'); } catch(e) { toast(e.message, 'error'); } }
-    async function route() { try { await refresh(); const h = location.hash || '#/'; if (h.startsWith('#/strategy/')) strategyPage(decodeURIComponent(h.split('/')[2])); else if (h === '#/strategies') strategiesPage(); else if (h === '#/ai') aiPage(); else if (h === '#/ai-strategies') aiStrategiesPage(); else if (h === '#/diagnostics') await diagnosticsPage(); else if (h === '#/formats') await formatsPage(); else if (h === '#/settings') settingsPage(); else home(); } catch(e) { $('#app').innerHTML = `<div class="notice error">${esc(e.message)}</div>`; } }
+    async function route() { try { await refresh(); const h = location.hash || '#/'; if (h.startsWith('#/strategy/')) await strategyPage(decodeURIComponent(h.split('/')[2])); else if (h === '#/strategies') strategiesPage(); else if (h === '#/ai') aiPage(); else if (h === '#/ai-strategies') aiStrategiesPage(); else if (h === '#/diagnostics') await diagnosticsPage(); else if (h === '#/database') await databasePage(); else if (h === '#/formats') await formatsPage(); else if (h === '#/settings') settingsPage(); else home(); } catch(e) { $('#app').innerHTML = `<div class="notice error">${esc(e.message)}</div>`; } }
     window.addEventListener('hashchange', route); route(); setInterval(() => { if (!location.hash || location.hash === '#/') route(); }, 8000);
   </script>
 </body>
