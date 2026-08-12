@@ -339,8 +339,10 @@
       <div class="section-head" style="margin-top:10px"><div><span class="eyebrow">Résultats</span><h2 style="margin-top:7px">Ce que l’analyseur constate</h2></div></div>
       <div class="section-head" style="margin-top:10px"><div><span class="eyebrow">Découverte</span><h2 style="margin-top:7px">Nouvelles régularités trouvées</h2><p class="small">Au-delà des stratégies existantes : cartes précises suivies d’un costume (a+1, a+2, a+3), points du joueur, enchaînements, séquences de vainqueurs et journées qui se rejouent.</p></div><button class="button orange" onclick="loadPatterns()">Chercher de nouvelles stratégies</button></div>
       <div id="aiPatterns" class="section"><div class="empty">Lance la recherche pour voir ce que l’analyseur découvre.</div></div>
+      <div class="section-head" style="margin-top:10px"><div><span class="eyebrow">Analyse cumulative</span><h2 style="margin-top:7px">Avis tous les 4 jeux (cumul 1 → 1440)</h2><p class="small">Jeux 1 à 4 : premier avis. Jeux 1 à 8 : l’avis reprend tout depuis le début. Puis 1 à 12, 1 à 16… jusqu’au jeu 1440. Tout est enregistré pour la date du jour ; si une stratégie est modifiée, les paliers qui ne sont plus justes sont effacés et recalculés.</p></div><div class="toolbar"><button class="button primary" onclick="runCumulative()">Mettre à jour</button><button class="button ghost" onclick="purgeCumulative()">Effacer l’incorrect</button></div></div>
+      <div id="aiCumulative" class="section"><div class="loading">Chargement des paliers…</div></div>
       <div id="aiResult" class="section"></div>`;
-      renderAiResults(); loadPatterns();
+      renderAiResults(); loadPatterns(); loadCumulative();
     }
     function renderAiResults() {
       const list = (snapshot.ai?.results || []).filter(Boolean);
@@ -372,6 +374,21 @@
       $('#app').innerHTML = `<div class="section-head" style="padding-top:38px"><div><span class="eyebrow">Créées par l’analyseur</span><h2 style="margin-top:7px">Stratégies IA</h2><p class="small">Enregistrées automatiquement, jamais activées seules : à tester d’abord en mode silencieux.</p></div><a class="button small ghost" href="#/ai">Retour analyseur</a></div>
       ${list.length ? `<div class="proposals">${list.map(p => `<article class="proposal"><div class="split"><h3>${esc(p.name)}</h3><span class="tag">${esc(p.origin === 'auto-pollinations' ? 'Pollinations.ai' : p.origin === 'auto-local' ? 'Analyse locale' : 'Manuelle')}</span></div><dl><dt>Logique</dt><dd>${esc(p.logic)}</dd>${p.trigger ? `<dt>Déclencheur</dt><dd>${esc(p.trigger)}</dd>` : ''}<dt>Preuve</dt><dd>${esc(p.evidence)}</dd><dt>Risque</dt><dd>${esc(p.risks)}</dd><dt>Créée le</dt><dd>${formatDate(p.createdAt)}</dd></dl><div class="toolbar" style="margin-top:14px">${p.compatibleExisting ? `<a class="button small ghost" href="#/strategy/${encodeURIComponent(p.compatibleExisting)}">Ouvrir la stratégie liée</a>` : ''}<button class="button small danger" onclick="deleteAiStrategy('${p.id}')">Supprimer</button></div></article>`).join('')}</div>` : '<div class="empty">Aucune stratégie créée pour l’instant. L’analyseur en ajoutera dès qu’un signal sera net.</div>'}`;
     }
+    async function loadCumulative() {
+      const box = $('#aiCumulative'); if (!box) return;
+      try {
+        const r = await api('/api/ai/cumulative');
+        const list = r.checkpoints || [];
+        if (!list.length) { box.innerHTML = '<div class="empty">Aucun palier pour l’instant : il faut au moins 4 jeux terminés aujourd’hui.</div>'; return; }
+        box.innerHTML = `<div class="panel"><div class="split"><b>Journée ${esc(r.date || '')}</b><span class="tag">${list.length} palier(s) · dernier cumul : ${esc(String(r.last?.upTo || 0))}/${esc(String(r.maxGames || 1440))} jeux${r.purged ? ' · ' + r.purged + ' effacé(s)' : ''}</span></div>
+          ${list.map(c => `<div class="notice"><div class="split"><b>Jeux 1 → ${esc(String(c.upTo))}</b><span class="tag">${esc(String(c.firstGame || '?'))} → ${esc(String(c.lastGame || '?'))} · ${formatDate(c.generatedAt)}</span></div>
+            <p class="small">${esc(c.verdict || '')}</p>
+            ${(c.findings || []).length ? `<ul class="small">${c.findings.slice(0, 6).map(f => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}
+            ${(c.strategies || []).length ? `<div class="small">Stratégies proposées : ${c.strategies.map(esc).join(' · ')}</div>` : ''}</div>`).join('')}</div>`;
+      } catch (e) { box.innerHTML = `<div class="notice error">${esc(e.message)}</div>`; }
+    }
+    async function runCumulative() { try { await api('/api/ai/cumulative/run', 'POST', {}); await loadCumulative(); toast('Paliers mis à jour.'); } catch(e) { toast(e.message, 'error'); } }
+    async function purgeCumulative() { try { const r = await api('/api/ai/cumulative/purge', 'POST', {}); await loadCumulative(); toast((r.removed || 0) + ' palier(s) effacé(s), ' + (r.recalculated || 0) + ' recalculé(s).'); } catch(e) { toast(e.message, 'error'); } }
     async function runAuto() { try { await api('/api/ai/auto/run', 'POST', {}); await refresh(); aiPage(); toast('Analyse effectuée.'); } catch(e) { toast(e.message, 'error'); } }
     async function toggleAuto(on) { try { await api('/api/ai/auto/toggle', 'POST', { enabled: on }); await refresh(); aiPage(); } catch(e) { toast(e.message, 'error'); } }
     async function saveAiKey() { try { await api('/api/ai/key', 'POST', { key: val('aiKey') }); await refresh(); aiPage(); toast('Clé appliquée.'); } catch(e) { toast(e.message, 'error'); } }
