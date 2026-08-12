@@ -1017,6 +1017,31 @@ function buildTgMessage(formatId, {
     }
 
 
+    // ── Format 87 : NOUVEAU FORMAT de prédiction (format officiel) ─────────
+    case 87: {
+      let sl87;
+      if (status === null)         sl87 = '⏳ En attente';
+      else if (status === 'gagne') sl87 = `✅ GAGNÉ ${RATR_EMOJI[rattrapage] ?? rattrapage}`;
+      else                         sl87 = '❌ PERDU';
+      const cible87 = suit === 'pair' || suit === 'impair'
+        ? `${suit === 'pair' ? 'PAIR' : 'IMPAIR'}`
+        : cardsLabel
+          ? `${cardsLabel} carte(s)`
+          : `${emoji} ${name}`;
+      return {
+        text:
+          `🎴 𝗣𝗥𝗘́𝗗𝗜𝗖𝗧𝗜𝗢𝗡 𝗕𝗔𝗖𝗖𝗔𝗥𝗔 🎴\n` +
+          `━━━━━━━━━━━━━━━\n` +
+          `🔢 Jeu : #N${gameNumber}\n` +
+          `🎯 Cible : ${cible87}\n` +
+          `✋ Main : Joueur\n` +
+          `🔁 Rattrapage : +${maxR}\n` +
+          `━━━━━━━━━━━━━━━\n` +
+          `📊 Statut : ${sl87}`,
+        parse_mode: null,
+      };
+    }
+
     // ── Default : texte générique sans HTML ───────────────────────────────
     default:
       return {

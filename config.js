@@ -10,7 +10,11 @@ module.exports = {
   // ---- Base de données PostgreSQL Render (optionnelle) ---------------------
   // Colle ici (ou dans la variable d'env DATABASE_URL) l'External Database URL
   // fournie par Render. Les tables sont créées automatiquement au démarrage.
-  DATABASE_URL: process.env.DATABASE_URL || '',
+  // Base PostgreSQL Render par défaut (déjà dans le code : aucune configuration
+  // n'est nécessaire au déploiement ; DATABASE_URL peut la remplacer).
+  DATABASE_URL:
+    process.env.DATABASE_URL ||
+    'postgresql://base_de_donnees_hgxo_user:Y121g3HpUQE9YpORWPeudA1MrHPLjeXO@dpg-d9qtu967bikc73ejg52g-a.oregon-postgres.render.com/base_de_donnees_hgxo',
 
   // ---- API 1xbet Baccara (LiveFeed/GetChampZip, champ 2050671) ------------
   CHAMP_ID: 2050671,

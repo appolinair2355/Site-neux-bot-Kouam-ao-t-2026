@@ -10,6 +10,7 @@ const {
   state, stats, predictionMessage, recentGames, SUITS,
   setStrategyConfig, resetStrategy, initStrategies, parityRuntime,
   strategyGames, bilanText, gameCategories, gateView, shadowRuntime,
+  predictionsPanel,
 } = require('./predictor');
 const { startLoop, startBot, botStatus, activate, deactivate, persist, sendBilan, dropSender, announceConfig, announceMainBot, resolveChat, testSend, saveConfigsToDb, applyDbConfigs } = require('./bot');
 
@@ -50,6 +51,7 @@ app.get('/api/state', (req, res) => {
       status: p.status, badge: p.badge, reason: p.reason, text: predictionMessage(p),
     })),
     parity: parityRuntime(),
+    panel: predictionsPanel(40),
     stats: stats(),
     uptime: Date.now() - state.startedAt,
   });
@@ -230,6 +232,11 @@ app.post('/api/strategies/:key/bilan', async (req, res) => {
   if (!strategies.BY_KEY[req.params.key]) return res.status(404).json({ error: 'Stratégie inconnue' });
   await sendBilan(req.params.key);
   res.json({ ok: true, text: bilanText(req.params.key) });
+});
+
+// panneau des prédictions : silencieuses et publiées, séparées
+app.get('/api/predictions', (req, res) => {
+  res.json(predictionsPanel(Math.min(200, parseInt(req.query.limit, 10) || 60)));
 });
 
 // état de la stratégie « Prédiction dans l'ombre »

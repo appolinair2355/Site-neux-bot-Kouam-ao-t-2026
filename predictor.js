@@ -44,7 +44,12 @@ const state = {
 // ---------------------------------------------------------------------------
 function initStrategies() {
   for (const s of strategies.LIST) {
-    if (!state.strategies[s.key]) state.strategies[s.key] = strategies.defaultsFor(s.key);
+    const def = strategies.defaultsFor(s.key);
+    const cur = state.strategies[s.key];
+    if (!cur) { state.strategies[s.key] = def; continue; }
+    // une configuration enregistrée avant l'ajout d'un réglage (mode silencieux,
+    // fenêtre de pertes…) est complétée sans écraser les choix de l'utilisateur
+    for (const [k, v] of Object.entries(def)) if (cur[k] === undefined) cur[k] = v;
   }
   syncCostume();
   return state.strategies;
@@ -260,7 +265,12 @@ let onFinishedHook = null;
 function setOnFinished(fn) { onFinishedHook = fn; }
 
 function registerGames(games) {
-  for (const g of games) {
+  // CORRECTIF : l'API renvoie les jeux du plus RÉCENT au plus ancien. Il faut les
+  // traiter dans l'ordre CROISSANT, sinon « lastFinished » devient le jeu le plus
+  // ancien : toutes les cibles calculées semblent déjà jouées et AUCUNE
+  // prédiction ne sort jamais.
+  const ordered = [...games].sort((a, b) => a.number - b.number);
+  for (const g of ordered) {
     const prev = state.games.get(g.number);
     state.games.set(g.number, g);
     if (g.finished && (!prev || !prev.finished)) onFinished(g);
@@ -268,6 +278,12 @@ function registerGames(games) {
   if (state.games.size > 600) {
     const keys = [...state.games.keys()].sort((a, b) => a - b);
     for (const k of keys.slice(0, state.games.size - 600)) state.games.delete(k);
+  }
+  // sécurité : le dernier tour terminé est TOUJOURS le plus grand numéro terminé
+  const maxDone = maxFinishedNumber();
+  if (maxDone && (!state.lastFinished || state.lastFinished.number !== maxDone)) {
+    const g = state.games.get(maxDone);
+    if (g) state.lastFinished = g;
   }
   state.live = detectLive();
   return state.live;
@@ -411,7 +427,11 @@ function resultText(pred, game) {
 function verify() {
   const closed = [];
   const maxDone = maxFinishedNumber();
-  for (const p of state.predictions) {
+  // CORRECTIF : state.predictions est trié du plus récent au plus ancien.
+  // Le filtre « double perte » doit voir les résultats dans l'ordre CHRONOLOGIQUE,
+  // sinon la fenêtre après une perte est comptée à l'envers.
+  const queue = [...state.predictions].sort((a, b) => a.target - b.target);
+  for (const p of queue) {
     if (p.status !== 'en attente') continue;
     let guard = 0;
     while (p.status === 'en attente' && guard++ <= p.maxR + 2) {
@@ -662,9 +682,70 @@ function shadowRuntime() {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Panneau « Prédictions » du site : chaque prédiction est listée séparément,
+// avec son mode (silencieuse = calculée dans l'ombre, publiée = envoyée dans le
+// canal Telegram). Les prédictions silencieuses restent donc VISIBLES sur le
+// site même si elles ne partent pas dans le canal.
+// ---------------------------------------------------------------------------
+function predictionRow(p) {
+  return {
+    id: p.id,
+    strategy: p.strategy,
+    strategyName: p.strategyName || p.strategy,
+    target: p.target,
+    trigger: p.trigger != null ? p.trigger : null,
+    label: p.label || p.suit || '',
+    suit: p.suit || null,
+    kind: p.kind,
+    status: p.status,
+    badge: p.badge,
+    step: p.step,
+    maxR: p.maxR,
+    reason: p.reason || '',
+    format: p.format,
+    silent: !!p.silent,
+    published: !p.silent && (p.messages || []).length > 0,
+    channels: (p.messages || []).map((m) => m.chatId),
+    gate: p.gate || null,
+    createdAt: p.sentAt || null,
+    text: predictionMessage(p),
+  };
+}
+
+function predictionsPanel(limit = 60) {
+  const all = state.predictions.map(predictionRow);
+  const byStrategy = {};
+  for (const def of strategies.LIST) {
+    const rows = all.filter((r) => r.strategy === def.key);
+    byStrategy[def.key] = {
+      key: def.key,
+      name: def.name,
+      silentMode: !!(state.strategies[def.key] && state.strategies[def.key].silent),
+      gate: gateView(def.key),
+      stats: stats(def.key),
+      silent: rows.filter((r) => r.silent).slice(0, limit),
+      published: rows.filter((r) => !r.silent).slice(0, limit),
+    };
+  }
+  return {
+    total: all.length,
+    silentCount: all.filter((r) => r.silent).length,
+    publishedCount: all.filter((r) => !r.silent).length,
+    pending: all.filter((r) => r.status === 'en attente'),
+    silent: all.filter((r) => r.silent).slice(0, limit),
+    published: all.filter((r) => !r.silent).slice(0, limit),
+    all: all.slice(0, limit),
+    byStrategy,
+    stats: stats(),
+  };
+}
+
 module.exports = {
   state,
   SUITS,
+  predictionRow,
+  predictionsPanel,
   evaluate,
   verify,
   registerGames,

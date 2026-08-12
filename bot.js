@@ -94,8 +94,8 @@ const HELP =
   '*Prédiction*\n' +
   '/setb <n> — compteur B (apparitions consécutives max)\n' +
   '/setmaxr <n> — nombre de rattrapages vérifiés\n' +
-  '/setformat <1-83> — style du message de prédiction\n' +
-  '/formats [page] — liste des 83 styles (80-83 = pair/impair)\n' +
+  '/setformat <1-87> — style du message de prédiction (87 = nouveau format)\n' +
+  '/formats [page] — liste des 87 styles (80-83 pair/impair, 84-86 ombre, 87 nouveau format)\n' +
   '/apercu <n> — aperçu complet d\'un style (⌛ / ✅ / ❌)\n' +
   '/settemplate <texte> — style personnalisé ({game} {emoji} {suit} {status} {maxR})\n' +
   '/notemplate — revenir au style numéroté\n\n' +
@@ -131,7 +131,7 @@ function settingsText() {
     `• Compteur B : *${state.B}*\n` +
     `• Rattrapages : *${state.maxR}*\n` +
     `• Main vérifiée : *joueur uniquement*\n` +
-    `• Format : *${state.format}/77*${state.template ? ' (template perso)' : ''}\n` +
+    `• Format : *${state.format}/${fmt.FORMAT_COUNT}*${state.template ? ' (template perso)' : ''}\n` +
     `• Compteurs : ${SUITS.map((s) => `${s}${state.counters[s]}`).join(' ')}\n` +
     `• Base de données : ${db.status().ready ? '🟢 connectée' : '🔴 non connectée'}`
   );
@@ -860,8 +860,24 @@ async function updateResult(pred) {
   }
 }
 
+// Reconnexion automatique de la base : si elle n'est pas joignable au démarrage
+// (ou tombe en panne), on retente régulièrement puis on relit les configurations.
+let dbRetryAt = 0;
+async function ensureDb() {
+  if (db.ready) return;
+  if (Date.now() - dbRetryAt < 30000) return;
+  dbRetryAt = Date.now();
+  const s = await db.connect();
+  if (s.ready) {
+    console.log('🗄️ Base de données reconnectée');
+    const r = await applyDbConfigs();
+    console.log('🧠 Configurations relues : ' + ((r.loaded || []).join(', ') || 'aucune'));
+  }
+}
+
 async function tick() {
   try {
+    await ensureDb();
     const games = await api.fetchGames();
     state.lastError = null;
     registerGames(games);
