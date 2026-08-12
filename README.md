@@ -16,7 +16,7 @@ des canaux Telegram et analyseur guidé par Pollinations.ai.
 | `BOT_TOKEN` | Oui pour Telegram | Token du bot Telegram |
 | `ADMIN_ID` | Recommandé | Identifiant Telegram de l'administrateur |
 | `DATABASE_URL` | Recommandé | PostgreSQL Render pour conserver l'historique |
-| `POLLINATIONS_API_KEY` | Oui pour l'IA | Clé secrète Pollinations.ai |
+
 | `POLLINATIONS_MODEL` | Non | Modèle Pollinations, valeur par défaut `openai` |
 
 Les clés et les URLs privées ne sont pas incluses dans le ZIP.
@@ -64,3 +64,25 @@ commandes de stratégie existantes restent disponibles.
 Les statistiques et les analyses IA décrivent uniquement un historique observé.
 Elles ne garantissent pas le résultat d'un jeu et ne doivent pas être présentées
 comme une certitude.
+
+## Analyseur IA (Pollinations.ai en dur)
+
+Toutes les adresses de l'API sont écrites en dur dans `config.js` :
+
+- Base : `https://gen.pollinations.ai`
+- Texte : `https://gen.pollinations.ai/v1/chat/completions`
+- Image : `https://gen.pollinations.ai/image/{PROMPT}?model=flux`
+- Vidéo : `https://gen.pollinations.ai/video/{PROMPT}?model=veo&duration=4`
+- Audio : `https://gen.pollinations.ai/audio/{TEXT}?voice=nova`
+- Modèles : `https://gen.pollinations.ai/v1/models`
+
+La clé se remplace dans `config.js` (`POLLINATIONS.API_KEY`) ou à chaud depuis
+la page « Analyseur IA ». Sans clé valide, le moteur local continue d'analyser
+seul, en temps réel.
+
+L'analyseur tourne automatiquement : analyse locale toutes les 15 s, enrichissement
+Pollinations.ai toutes les 3 min. Chaque constat apparaît dans « Résultats », chaque
+stratégie trouvée est enregistrée (désactivée) dans « Stratégies IA créées ».
+
+La page « Envois » vérifie, pour chaque stratégie, le token du bot, les canaux
+public et silencieux, le droit de publier et la dernière erreur d'envoi.

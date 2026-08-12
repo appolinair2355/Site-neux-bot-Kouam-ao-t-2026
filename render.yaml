@@ -13,7 +13,3 @@ services:
         sync: false
       - key: ADMIN_ID
         sync: false
-      - key: POLLINATIONS_API_KEY
-        sync: false
-      - key: POLLINATIONS_MODEL
-        value: openai

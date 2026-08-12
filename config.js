@@ -1,8 +1,27 @@
-// config.js — configuration surchargeable par variables d'environnement
+// config.js — configuration du bot Baccara
 'use strict';
 
+// ---------------------------------------------------------------------------
+// API IA Pollinations — ÉCRITE EN DUR DANS LE CODE (aucune variable Render)
+// ---------------------------------------------------------------------------
+const POLLINATIONS = {
+  BASE_URL: 'https://gen.pollinations.ai',
+  CHAT_URL: 'https://gen.pollinations.ai/v1/chat/completions',
+  MODELS_URL: 'https://gen.pollinations.ai/v1/models',
+  IMAGE_URL: (prompt, model = 'flux') =>
+    `https://gen.pollinations.ai/image/${encodeURIComponent(prompt)}?model=${model}`,
+  VIDEO_URL: (prompt, model = 'veo', duration = 4) =>
+    `https://gen.pollinations.ai/video/${encodeURIComponent(prompt)}?model=${model}&duration=${duration}`,
+  AUDIO_URL: (text, voice = 'nova') =>
+    `https://gen.pollinations.ai/audio/${encodeURIComponent(text)}?voice=${voice}`,
+  // 🔑 Clé API en dur. Remplace la valeur ci-dessous par ta clé Pollinations.
+  // Elle peut aussi être changée à chaud depuis la page « Analyseur IA ».
+  API_KEY: 'POLLINATIONS_KEY_A_REMPLACER',
+  MODEL: 'openai',
+};
+
 module.exports = {
-  // Les secrets ne sont jamais embarqués dans l'archive.
+  // Les secrets Telegram ne sont jamais embarqués dans l'archive.
   BOT_TOKEN: process.env.BOT_TOKEN || '',
   ADMIN_ID: Number(process.env.ADMIN_ID || 0),
   PORT: Number(process.env.PORT || 10000),
@@ -10,10 +29,16 @@ module.exports = {
   // Base PostgreSQL Render optionnelle.
   DATABASE_URL: process.env.DATABASE_URL || '',
 
-  // Analyseur IA Pollinations.ai.
-  POLLINATIONS_API_KEY: process.env.POLLINATIONS_API_KEY || '',
-  POLLINATIONS_BASE_URL: process.env.POLLINATIONS_BASE_URL || 'https://gen.pollinations.ai/v1',
-  POLLINATIONS_MODEL: process.env.POLLINATIONS_MODEL || 'openai',
+  // Analyseur IA Pollinations.ai (en dur).
+  POLLINATIONS,
+  POLLINATIONS_API_KEY: POLLINATIONS.API_KEY,
+  POLLINATIONS_BASE_URL: `${POLLINATIONS.BASE_URL}/v1`,
+  POLLINATIONS_MODEL: POLLINATIONS.MODEL,
+
+  // Analyse automatique en temps réel.
+  AI_AUTO_ENABLED: true,
+  AI_LOCAL_INTERVAL_MS: 15000,   // analyse locale (moteur interne)
+  AI_REMOTE_INTERVAL_MS: 180000, // enrichissement Pollinations.ai
 
   // API 1xbet Baccara (LiveFeed/GetChampZip).
   CHAMP_ID: 2050671,

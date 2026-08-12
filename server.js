@@ -7,11 +7,12 @@ const db = require('./db');
 const fmt = require('./formats');
 const strategies = require('./strategies');
 const ai = require('./ai-analyzer');
+const aiAuto = require('./ai-auto');
 const {
   state, stats, predictionMessage, recentGames, SUITS,
   setStrategyConfig, resetStrategy, initStrategies, parityRuntime,
   strategyGames, bilanText, gameCategories, gateView, shadowRuntime,
-  predictionsPanel,
+  predictionsPanel, strategyChannels,
 } = require('./predictor');
 const { startLoop, startBot, botStatus, activate, deactivate, persist, sendBilan, dropSender, announceConfig, announceMainBot, resolveChat, testSend, saveConfigsToDb, applyDbConfigs } = require('./bot');
 
@@ -42,9 +43,11 @@ app.get('/api/state', (req, res) => {
     apiUrl: api.endpoints()[0],
     champId: config.CHAMP_ID,
     ai: {
-      configured: !!config.POLLINATIONS_API_KEY,
-      model: config.POLLINATIONS_MODEL,
+      configured: ai.keyLooksValid(),
+      model: config.POLLINATIONS.MODEL,
+      auto: aiAuto.status(),
       lastAnalysis: state.aiAnalyses[0] || null,
+      results: state.aiAnalyses.slice(0, 6),
       savedStrategies: state.aiStrategies,
     },
     channels: state.channels.map((c) => ({ ...c, active: state.activeChannels.includes(c.id) })),
@@ -363,10 +366,12 @@ app.post('/api/strategies/:key/test', async (req, res) => {
 // --- analyse IA guidée ------------------------------------------------------
 app.get('/api/ai/status', (req, res) => {
   res.json({
-    configured: !!config.POLLINATIONS_API_KEY,
-    model: config.POLLINATIONS_MODEL,
-    baseUrl: config.POLLINATIONS_BASE_URL,
+    configured: ai.keyLooksValid(),
+    model: config.POLLINATIONS.MODEL,
+    baseUrl: config.POLLINATIONS.BASE_URL,
+    auto: aiAuto.status(),
     lastAnalysis: state.aiAnalyses[0] || null,
+    results: state.aiAnalyses.slice(0, 6),
     savedStrategies: state.aiStrategies,
   });
 });
@@ -445,7 +450,64 @@ app.get('/api/db/strategies', async (req, res) => {
   res.json({ saved: await db.loadStrategies(), details: out });
 });
 
+
+// --- analyseur automatique en temps réel ------------------------------------
+app.get('/api/ai/auto', (req, res) => res.json(aiAuto.status()));
+
+app.post('/api/ai/auto/run', (req, res) => {
+  const r = aiAuto.runLocal();
+  persist();
+  res.json({ ok: true, result: r.result, created: r.created, auto: aiAuto.status() });
+});
+
+app.post('/api/ai/auto/toggle', (req, res) => {
+  const on = req.body && req.body.enabled !== false;
+  aiAuto.auto.enabled = on;
+  if (on) aiAuto.start(persist); else aiAuto.stop();
+  res.json({ ok: true, auto: aiAuto.status() });
+});
+
+app.post('/api/ai/key', (req, res) => {
+  ai.setApiKey(req.body && req.body.key);
+  res.json({ ok: true, configured: ai.keyLooksValid() });
+});
+
+app.get('/api/ai/models', async (req, res) => {
+  try { res.json({ models: await ai.listModels() }); }
+  catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+app.delete('/api/ai/strategies/:id', (req, res) => {
+  state.aiStrategies = (state.aiStrategies || []).filter((s) => s.id !== req.params.id);
+  persist();
+  res.json({ ok: true, savedStrategies: state.aiStrategies });
+});
+
+// --- diagnostic complet des envois de prédictions ---------------------------
+app.get('/api/diagnostics/channels', async (req, res) => {
+  const bot = botStatus();
+  const out = [];
+  for (const def of strategies.LIST) {
+    const cfg = state.strategies[def.key] || {};
+    const entry = { key: def.key, name: def.name, enabled: !!cfg.enabled, silent: !!cfg.silent, published: [], shadow: [], sendError: state.sendErrors[def.key] || null, sentCount: cfg.sentCount || 0, lastSentAt: cfg.lastSentAt || null };
+    for (const mode of ['published', 'shadow']) {
+      const ids = strategyChannels(def.key, mode);
+      for (const id of ids) {
+        const check = bot.tokenSet ? await resolveChat(id) : { ok: false, error: 'Aucun token Telegram configuré' };
+        entry[mode === 'shadow' ? 'shadow' : 'published'].push(check.ok
+          ? { id, title: check.chat.title, type: check.chat.type, canPost: check.chat.canPost, ok: check.chat.canPost !== false }
+          : { id, ok: false, error: check.error });
+      }
+    }
+    entry.ready = !!bot.tokenSet && (entry.published.some((c) => c.ok) || entry.shadow.some((c) => c.ok));
+    out.push(entry);
+  }
+  res.json({ bot, strategies: out });
+});
+
 app.listen(config.PORT, '0.0.0.0', () => {
   console.log('Tableau de bord sur le port ' + config.PORT);
   startLoop();
+  aiAuto.start(persist);
+  console.log('🤖 Analyseur IA temps réel démarré (clé en dur : ' + (ai.keyLooksValid() ? 'oui' : 'à remplacer dans config.js') + ')');
 });
