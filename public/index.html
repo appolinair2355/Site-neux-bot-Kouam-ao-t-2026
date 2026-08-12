@@ -361,20 +361,70 @@ async function viewHome(){
       <div class="kpi"><div class="n">${st.rate}%</div><div class="l">Réussite</div></div>
     </div>
 
+    <h2>🎯 Panneau des prédictions</h2>
+    <div id="panelWrap">${renderPanel(s.panel)}</div>
+
     <h2>🧠 Stratégies</h2>
     <div class="grid g3">${cards}</div>`;
 
   clearInterval(window.__boardTimer);
   window.__boardTimer = setInterval(async ()=>{
     if(location.hash && location.hash!=='#/') return clearInterval(window.__boardTimer);
-    try{ const d = await api('/api/state'); const w = $('#boardWrap'); if(w) w.innerHTML = renderBoard(d.board); }catch(e){}
+    try{ const d = await api('/api/state'); const w = $('#boardWrap'); if(w) w.innerHTML = renderBoard(d.board);
+      const pw = $('#panelWrap'); if(pw) pw.innerHTML = renderPanel(d.panel); }catch(e){}
   }, 4000);
+}
+
+// ------------------------------------------------- Panneau des prédictions
+// Les prédictions SILENCIEUSES (mode silencieux activé) ne partent pas dans le
+// canal Telegram mais restent visibles ici, séparées des prédictions publiées.
+function predTable(rows, vide){
+  if(!rows || !rows.length) return `<div class="muted">${vide}</div>`;
+  return `<table><thead><tr><th>Tour</th><th>Stratégie</th><th>Prédiction</th><th>État</th><th>Message</th></tr></thead><tbody>`+
+    rows.map(p=>`<tr>
+      <td class="num">#N${p.target}</td>
+      <td>${esc(p.strategyName||p.strategy)}</td>
+      <td>${esc(p.label||'')}</td>
+      <td><span class="tag ${p.status==='gagné'?'win':p.status==='perdu'?'loss':'wait'}">${p.badge||'⌛'} ${esc(p.status)}</span></td>
+      <td class="muted"><pre style="margin:0;white-space:pre-wrap">${esc(p.text||'')}</pre></td>
+    </tr>`).join('')+`</tbody></table>`;
+}
+
+function renderPanel(panel){
+  if(!panel) return '<div class="card muted">Aucune prédiction pour le moment.</div>';
+  const perStrat = Object.values(panel.byStrategy||{}).map(x=>`
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <b>${esc(x.name)}</b>
+        <span class="tag ${x.silentMode?'wait':'win'}">${x.silentMode?'🔕 silencieux':'📢 envoi direct'}</span>
+      </div>
+      <div class="muted mt">${esc((x.gate&&x.gate.label)||'')}</div>
+      <div class="row mt">
+        <span class="tag win">${x.stats.win} ✅</span>
+        <span class="tag loss">${x.stats.loss} ❌</span>
+        <span class="tag wait">${x.stats.pending} ⌛</span>
+        <span class="tag info">🔕 ${x.silent.length} silencieuse(s)</span>
+        <span class="tag info">📨 ${x.published.length} publiée(s)</span>
+      </div>
+    </div>`).join('');
+  return `
+    <div class="grid g4">
+      <div class="kpi"><div class="n">${panel.total}</div><div class="l">Prédictions</div></div>
+      <div class="kpi"><div class="n" style="color:var(--gold)">${panel.silentCount}</div><div class="l">Silencieuses</div></div>
+      <div class="kpi"><div class="n" style="color:var(--green)">${panel.publishedCount}</div><div class="l">Publiées</div></div>
+      <div class="kpi"><div class="n">${(panel.pending||[]).length}</div><div class="l">En attente</div></div>
+    </div>
+    <div class="grid g3 mt">${perStrat}</div>
+    <h3 class="mt">🔕 Prédictions silencieuses (visibles ici uniquement)</h3>
+    <div class="card">${predTable(panel.silent,'Aucune prédiction silencieuse.')}</div>
+    <h3 class="mt">📨 Prédictions envoyées dans les canaux</h3>
+    <div class="card">${predTable(panel.published,'Aucune prédiction publiée.')}</div>`;
 }
 
 // ------------------------------------------------------- Détail stratégie
 async function viewStrategy(key){
   const s = await api('/api/strategies/'+key);
-  const opts = (sel)=>Array.from({length:83},(_,i)=>i+1).map(n=>`<option value="${n}" ${n==sel?'selected':''}>Format ${n}</option>`).join('');
+  const opts = (sel)=>Array.from({length:(ST&&ST.formatCount)||87},(_,i)=>i+1).map(n=>`<option value="${n}" ${n==sel?'selected':''}>Format ${n}</option>`).join('');
   const known = (ST&&ST.channels||[]).map(c=>`<option value="${c.id}">${esc(c.title)} (${c.id})</option>`).join('');
   $('#view').innerHTML = `
     <a class="back" href="#/">← toutes les stratégies</a>
@@ -467,8 +517,11 @@ async function viewStrategy(key){
 
     <h2>📊 Prédictions</h2>
     <div class="card">
-      <table><thead><tr><th>Tour</th><th>Prédiction</th><th>État</th><th>Raison</th></tr></thead><tbody>
+      <div class="row"><span class="tag wait">🔕 ${s.predictions.filter(p=>p.silent).length} silencieuse(s)</span>
+        <span class="tag win">📨 ${s.predictions.filter(p=>!p.silent).length} publiée(s)</span></div>
+      <table class="mt"><thead><tr><th>Tour</th><th>Prédiction</th><th>Mode</th><th>État</th><th>Raison</th></tr></thead><tbody>
       ${s.predictions.map(p=>`<tr><td class="num">#N${p.target}</td><td>${esc(p.label)}</td>
+        <td><span class="tag ${p.silent?'wait':'win'}">${p.silent?'🔕 silencieuse':'📨 envoyée'}</span></td>
         <td><span class="tag ${p.status==='gagné'?'win':p.status==='perdu'?'loss':'wait'}">${p.badge||'⌛'} ${esc(p.status)}</span></td>
         <td class="muted">${esc(p.reason||'')}</td></tr>`).join('') || '<tr><td class="muted">Aucune prédiction pour le moment.</td></tr>'}
       </tbody></table>
