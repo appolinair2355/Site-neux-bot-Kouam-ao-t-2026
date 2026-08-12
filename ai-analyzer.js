@@ -70,7 +70,8 @@ function localSummary(games) {
 function pct(a, b) { return b ? Math.round((a / b) * 1000) / 10 : 0; }
 
 function localAnalysis(rawGames = [], options = {}) {
-  const games = rawGames.map(compactGame).filter((g) => g.n != null).slice(0, MAX_GAMES);
+  const cap = Number(options.maxGames) > 0 ? Number(options.maxGames) : MAX_GAMES;
+  const games = rawGames.map(compactGame).filter((g) => g.n != null).slice(0, cap);
   const summary = localSummary(games);
   const findings = [];
   const proposals = [];

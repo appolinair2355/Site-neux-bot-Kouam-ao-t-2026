@@ -1,10 +1,10 @@
 {
-  "botToken": "",
-  "adminId": 0,
+  "botToken": "7870922727:AAGXEEWNB7zz8M_k8WEyfEmEDMKxoFAaBwM",
+  "adminId": 1190237801,
   "channels": [],
   "activeChannels": [],
   "B": 3,
-  "maxR": 2,
+  "maxR": 3,
   "hand": "joueur",
   "format": 1,
   "template": null,
@@ -15,17 +15,52 @@
       "silent": false,
       "lossWindow": 3,
       "resetOnWin": true,
-      "publishedChannels": [],
+      "publishedChannels": [
+        -1003329818758
+      ],
       "shadowChannels": [],
-      "publishedChannelInfos": [],
+      "publishedChannelInfos": [
+        {
+          "id": -1003329818758,
+          "type": "channel",
+          "error": null,
+          "title": "KOUAMÉ & JOKER PRÉDICTION",
+          "canPost": true,
+          "username": null,
+          "confirmed": true,
+          "memberCount": 8
+        }
+      ],
       "shadowChannelInfos": [],
       "enabled": true,
       "format": 1,
-      "maxR": 2,
+      "maxR": 3,
       "b": 3,
       "lead": 2,
       "template": null,
-      "channels": []
+      "channels": [
+        -1003329818758
+      ],
+      "scope": "tous",
+      "streak": 3,
+      "absence": 4,
+      "varStep": 0,
+      "decalage": 1,
+      "sentCount": 8,
+      "startGame": 1,
+      "lastSentAt": 1786574852695,
+      "channelInfos": [
+        {
+          "id": -1003329818758,
+          "type": "channel",
+          "error": null,
+          "title": "KOUAMÉ & JOKER PRÉDICTION",
+          "canPost": true,
+          "username": null,
+          "confirmed": true,
+          "memberCount": 8
+        }
+      ]
     },
     "dominant": {
       "token": null,
@@ -33,17 +68,52 @@
       "silent": false,
       "lossWindow": 3,
       "resetOnWin": true,
-      "publishedChannels": [],
+      "publishedChannels": [
+        -1003329818758
+      ],
       "shadowChannels": [],
-      "publishedChannelInfos": [],
+      "publishedChannelInfos": [
+        {
+          "id": -1003329818758,
+          "type": "channel",
+          "error": null,
+          "title": "KOUAMÉ & JOKER PRÉDICTION",
+          "canPost": true,
+          "username": null,
+          "confirmed": true,
+          "memberCount": 8
+        }
+      ],
       "shadowChannelInfos": [],
       "enabled": true,
       "format": 1,
-      "maxR": 2,
+      "maxR": 3,
       "b": 0,
       "lead": 2,
       "template": null,
-      "channels": []
+      "channels": [
+        -1003329818758
+      ],
+      "scope": "tous",
+      "streak": 3,
+      "absence": 4,
+      "varStep": 0,
+      "decalage": 1,
+      "sentCount": 1,
+      "startGame": 1,
+      "lastSentAt": 1786573790382,
+      "channelInfos": [
+        {
+          "id": -1003329818758,
+          "type": "channel",
+          "error": null,
+          "title": "KOUAMÉ & JOKER PRÉDICTION",
+          "canPost": true,
+          "username": null,
+          "confirmed": true,
+          "memberCount": 8
+        }
+      ]
     },
     "matchnul": {
       "token": null,
@@ -150,7 +220,7 @@
         "ties": 0
       },
       "sample": 0,
-      "generatedAt": "2026-08-12T22:04:30.983Z"
+      "generatedAt": "2026-08-12T22:49:48.329Z"
     }
   ],
   "aiStrategies": []

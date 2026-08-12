@@ -10,6 +10,7 @@ const ai = require('./ai-analyzer');
 const strategies = require('./strategies');
 const db = require('./db');
 const { state } = require('./predictor');
+const cumulative = require('./cumulative');
 
 const auto = {
   enabled: config.AI_AUTO_ENABLED !== false,
@@ -135,6 +136,9 @@ function start(onChange) {
   const tickLocal = () => {
     try { const r = runLocal(); if (r.isNew && onChange) onChange(); }
     catch (e) { auto.lastError = e.message; }
+    // analyse cumulative par paliers de 4 jeux (1→4, 1→8, 1→12 … 1→1440)
+    cumulative.tick().then((r) => { if (r && r.created && r.created.length && onChange) onChange(); })
+      .catch((e) => { auto.lastError = e.message; });
   };
   const tickRemote = () => {
     refreshPastDays().then(() => runRemote()).then((r) => { if (r && onChange) onChange(); });
@@ -163,7 +167,8 @@ function status() {
     remoteIntervalMs: config.AI_REMOTE_INTERVAL_MS,
     results: state.aiAnalyses.slice(0, 6),
     strategies: state.aiStrategies || [],
+    cumulative: cumulative.status(),
   };
 }
 
-module.exports = { start, stop, status, runLocal, runRemote, saveProposal, refreshPastDays, getPastDays: () => pastDays, auto };
+module.exports = { start, stop, status, cumulative, runLocal, runRemote, saveProposal, refreshPastDays, getPastDays: () => pastDays, auto };

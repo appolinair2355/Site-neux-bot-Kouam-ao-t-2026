@@ -9,6 +9,7 @@ const strategies = require('./strategies');
 const ai = require('./ai-analyzer');
 const miner = require('./pattern-miner');
 const aiAuto = require('./ai-auto');
+const cumulative = require('./cumulative');
 const {
   state, stats, predictionMessage, recentGames, SUITS,
   setStrategyConfig, resetStrategy, initStrategies, parityRuntime,
@@ -323,6 +324,8 @@ app.post('/api/strategies/:key', async (req, res) => {
   const notice = touched
     ? await announceConfig(req.params.key, req.body.mode === 'shadow' ? 'shadow' : 'published')
     : null;
+  await cumulative.purgeStaleFor(cumulative.strategySignature());
+  cumulative.tick();
   res.json({ ok: true, saved: db.ready, notice, ...strategyPayload(req.params.key) });
 });
 
@@ -449,6 +452,8 @@ app.post('/api/strategies/:key/reset', async (req, res) => {
   if (!cfg) return res.status(404).json({ error: 'Stratégie inconnue' });
   persist();
   if (db.ready) await db.saveStrategy(req.params.key, strategies.BY_KEY[req.params.key].name, cfg);
+  await cumulative.purgeStaleFor(cumulative.strategySignature());
+  cumulative.tick();
   res.json({ ok: true, ...strategyPayload(req.params.key) });
 });
 
@@ -479,6 +484,28 @@ app.get('/api/db/strategies', async (req, res) => {
   res.json({ saved: await db.loadStrategies(), details: out });
 });
 
+
+// --- analyse cumulative par paliers de 4 jeux -------------------------------
+app.get('/api/ai/cumulative', async (req, res) => {
+  const date = req.query.date ? String(req.query.date) : null;
+  if (date && date !== cumulative.runtime.date) {
+    return res.json({ date, step: cumulative.STEP, maxGames: cumulative.MAX_GAMES, checkpoints: await cumulative.byDate(date) });
+  }
+  res.json(cumulative.status());
+});
+
+app.post('/api/ai/cumulative/run', async (req, res) => {
+  const r = await cumulative.tick();
+  res.json({ ok: true, ...r, status: cumulative.status() });
+});
+
+// efface les paliers qui ne correspondent plus à la stratégie actuelle
+app.post('/api/ai/cumulative/purge', async (req, res) => {
+  const sig = cumulative.strategySignature();
+  const removed = await cumulative.purgeStaleFor(sig);
+  const r = await cumulative.tick();
+  res.json({ ok: true, removed, recalculated: r.created.length, status: cumulative.status() });
+});
 
 // --- analyseur automatique en temps réel ------------------------------------
 app.get('/api/ai/auto', (req, res) => res.json(aiAuto.status()));

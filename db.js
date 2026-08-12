@@ -410,8 +410,12 @@ async function readOnlyQuery(sql, limit = 50) {
   return { rows: r.rows, count: r.rowCount };
 }
 
+// helpers génériques (utilisés par l'analyse cumulative)
+async function exec(sql, params = []) { return q(sql, params); }
+async function rows(sql, params = []) { const r = await q(sql, params); return r ? r.rows : []; }
+
 module.exports = {
-  connect, status, saveGame, gamesByDate, dailySummary,
+  connect, status, saveGame, gamesByDate, dailySummary, exec, rows,
   savePrediction, closePrediction, setSetting, getSetting, normalizeDate,
   saveStrategy, loadStrategies, deleteStrategy, strategyStats, strategyPredictions, clearPredictions,
   lastGames, gameByNumber, predictionsByDate, predictionSummary,
