@@ -7,6 +7,7 @@ const db = require('./db');
 const fmt = require('./formats');
 const strategies = require('./strategies');
 const ai = require('./ai-analyzer');
+const miner = require('./pattern-miner');
 const aiAuto = require('./ai-auto');
 const {
   state, stats, predictionMessage, recentGames, SUITS,
@@ -14,7 +15,7 @@ const {
   strategyGames, bilanText, gameCategories, gateView, shadowRuntime,
   predictionsPanel, strategyChannels,
 } = require('./predictor');
-const { startLoop, startBot, botStatus, activate, deactivate, persist, sendBilan, dropSender, announceConfig, announceMainBot, resolveChat, testSend, saveConfigsToDb, applyDbConfigs } = require('./bot');
+const { startLoop, startBot, botStatus, activate, deactivate, persist, sendBilan, dropSender, announceConfig, announceMainBot, resolveChat, testSend, saveConfigsToDb, applyDbConfigs, setMainChannel } = require('./bot');
 
 const app = express();
 app.use(express.json());
@@ -119,6 +120,12 @@ app.post('/api/channels/activate', (req, res) => {
   res.json({ ok: true });
 });
 
+// canal principal (page Configuration) : vérifié, enregistré et confirmé
+app.post('/api/channels/main', async (req, res) => {
+  const r = await setMainChannel(req.body && req.body.channelId);
+  res.status(r.ok ? 200 : 400).json(r);
+});
+
 app.post('/api/channels/deactivate', (req, res) => {
   deactivate(parseInt(req.body.id, 10));
   res.json({ ok: true });
@@ -192,6 +199,12 @@ app.post('/api/db/query', async (req, res) => {
   res.json(r);
 });
 
+
+// contenu complet de la base de données (panneau « Base de données »)
+app.get('/api/db/dump', async (req, res) => {
+  if (!db.ready) return res.status(400).json({ error: 'Base de données non connectée', status: db.status() });
+  res.json(await db.dump(Math.min(100, parseInt(req.query.limit, 10) || 25)));
+});
 
 // --- stratégies -------------------------------------------------------------
 function strategyPayload(key) {
@@ -383,8 +396,10 @@ app.post('/api/ai/analyze', async (req, res) => {
     let games = [];
     if (date && db.ready) games = await db.gamesByDate(date, limit);
     if (!games.length) games = [...state.history].slice(0, limit);
+    if (db.ready) await aiAuto.refreshPastDays();
     const result = await ai.analyze({
       games,
+      pastDays: aiAuto.getPastDays(),
       date,
       objective: req.body && req.body.objective ? String(req.body.objective).slice(0, 1200) : '',
     });
@@ -395,6 +410,20 @@ app.post('/api/ai/analyze', async (req, res) => {
     const status = error.code === 'AI_NOT_CONFIGURED' ? 503 : error.code === 'NOT_ENOUGH_DATA' ? 422 : 502;
     res.status(status).json({ error: error.message, code: error.code || 'AI_ERROR' });
   }
+});
+
+// découverte de NOUVELLES régularités (au-delà des stratégies existantes)
+app.get('/api/ai/patterns', async (req, res) => {
+  const limit = Math.min(300, parseInt(req.query.limit, 10) || 150);
+  let games = [...state.history].slice(0, limit);
+  let pastDays = [];
+  if (db.ready) {
+    if (!games.length) games = await db.gamesByDate(null, limit);
+    await aiAuto.refreshPastDays(true);
+    pastDays = aiAuto.getPastDays();
+  }
+  const result = miner.mine(games, { lead: 2, pastDays, todayGames: games });
+  res.json({ ...result, generatedAt: new Date().toISOString(), pastDaysCount: pastDays.length });
 });
 
 app.post('/api/ai/strategies', (req, res) => {

@@ -47,6 +47,18 @@ function persist() {
     aiStrategies: state.aiStrategies,
   });
   if (db.ready) {
+    // configuration complète (token, admin, canaux) : elle est relue au démarrage
+    db.saveAppConfig({
+      botToken: state.botToken || '',
+      adminId: state.adminId || 0,
+      channels: state.channels || [],
+      activeChannels: state.activeChannels || [],
+      B: state.B,
+      maxR: state.maxR,
+      format: state.format,
+      template: state.template || '',
+      savedAt: new Date().toISOString(),
+    });
     db.setSetting('B', state.B);
     db.setSetting('maxR', state.maxR);
     db.setSetting('format', state.format);
@@ -764,14 +776,19 @@ async function announceConfig(key, mode = 'published') {
       `🧭 Routage : ${mode === 'shadow' ? 'prédictions silencieuses' : 'prédictions activées'}\n\n` +
       `Ce canal recevra désormais les ${mode === 'shadow' ? 'prédictions silencieuses' : 'prédictions publiées'} de cette stratégie. 🚀`;
     try {
+      // l'envoi est tenté même si getChat a échoué : certains canaux ne
+      // répondent pas à getChat mais acceptent parfaitement les messages.
       await sender.sendMessage(id, text);
       sent.push(id);
       countSent(key);
       info.confirmed = true;
+      info.error = null;
+      state.sendErrors[key] = null;
     } catch (e) {
       failed.push({ id, error: e.message });
       info.confirmed = false;
       info.error = e.message;
+      state.sendErrors[key] = `${id} : ${e.message}`;
     }
     infos.push(info);
   }
@@ -780,7 +797,13 @@ async function announceConfig(key, mode = 'published') {
     cfg.channelInfos = infos;
     cfg.publishedChannelInfos = infos;
   }
-  return { ok: sent.length > 0, sent, failed, channels: infos };
+  return {
+    ok: sent.length > 0,
+    sent,
+    failed,
+    channels: infos,
+    error: sent.length ? null : (failed[0] ? `${failed[0].id} : ${failed[0].error}` : 'Envoi impossible'),
+  };
 }
 
 // envoi d'un message de test dans le(s) canal(aux) d'une stratégie
@@ -805,11 +828,42 @@ async function testSend(key, mode = 'published') {
 }
 
 // confirmation pour le bot principal (réglages)
+// Configure le canal principal (page Configuration) : vérification + message
+async function setMainChannel(raw) {
+  const value = String(raw || '').trim();
+  if (!value) return { ok: false, error: "Renseigne l'ID du canal (ex : -1001234567890 ou @moncanal)" };
+  if (!state.botToken) return { ok: false, error: "Configure d'abord le token API du bot." };
+  const check = await resolveChat(value);
+  const id = check.ok ? check.chat.id : (/^-?\d+$/.test(value) ? Number(value) : value);
+  if (!state.activeChannels.includes(id)) state.activeChannels.push(id);
+  if (!state.channels.some((c) => c.id === id)) {
+    state.channels.push({ id, title: check.ok ? check.chat.title : String(id) });
+  }
+  persist();
+  const sender = senderFor();
+  const text =
+    '✅ CANAL PRINCIPAL CONFIGURÉ\n\n' +
+    `🤖 Bot : @${state.botUsername || 'bot'}\n` +
+    `📡 Canal : ${check.ok ? check.chat.title : id}\n` +
+    `🆔 ID : ${id}\n\n` +
+    'Le token API et l’ID du canal sont enregistrés en base de données : ' +
+    'après un redémarrage tout repart automatiquement. 🚀';
+  try {
+    await sender.sendMessage(id, text);
+    return { ok: true, id, chat: check.ok ? check.chat : { id, title: String(id) }, sent: true };
+  } catch (e) {
+    return { ok: false, error: `Message non envoyé dans ${id} : ${e.message}`, id };
+  }
+}
+
 async function announceMainBot() {
   const sender = senderFor();
   if (!sender) return { ok: false, error: 'Aucun token API configuré' };
-  const ids = state.activeChannels || [];
-  if (!ids.length) return { ok: false, error: 'Aucun canal actif' };
+  const ids = [...new Set([
+    ...(state.activeChannels || []),
+    ...strategies.LIST.flatMap((d) => strategyChannels(d.key)),
+  ])];
+  if (!ids.length) return { ok: false, error: "Token enregistré. Configure maintenant un ID de canal pour recevoir les messages." };
   const text =
     '✅ BOT CONNECTÉ\n\n' +
     `🤖 @${state.botUsername || 'bot'}\n` +
@@ -960,6 +1014,19 @@ async function applyDbConfigs() {
   if (maxR != null) state.maxR = parseInt(maxR, 10);
   if (fmtId) state.format = parseInt(fmtId, 10) || state.format;
   if (tpl !== null) state.template = tpl ? tpl : null;
+  // token API, ID administrateur et canaux enregistrés : restaurés au démarrage
+  const app = await db.loadAppConfig();
+  const restored = [];
+  if (app) {
+    if (app.botToken && !state.botToken) { state.botToken = app.botToken; restored.push('token'); }
+    if (app.adminId && !state.adminId) { state.adminId = app.adminId; restored.push('admin'); }
+    if (Array.isArray(app.channels) && app.channels.length && !state.channels.length) {
+      state.channels = app.channels; restored.push('canaux');
+    }
+    if (Array.isArray(app.activeChannels) && app.activeChannels.length && !state.activeChannels.length) {
+      state.activeChannels = app.activeChannels; restored.push('canaux actifs');
+    }
+  }
   const rows = await db.loadStrategies();
   const loaded = [];
   for (const [key, cfg] of Object.entries(rows)) {
@@ -971,8 +1038,14 @@ async function applyDbConfigs() {
   // base vide OU nouvelles stratégies absentes → on les enregistre tout de suite
   const missing = strategies.LIST.filter((d) => !loaded.includes(d.key)).map((d) => d.key);
   if (missing.length) await saveConfigsToDb();
-  store.patch({ strategies: state.strategies });
-  return { ok: true, loaded, added: missing };
+  store.patch({
+    strategies: state.strategies,
+    botToken: state.botToken,
+    adminId: state.adminId,
+    channels: state.channels,
+    activeChannels: state.activeChannels,
+  });
+  return { ok: true, loaded, added: missing, restored };
 }
 
 async function startLoop() {
@@ -982,6 +1055,7 @@ async function startLoop() {
   console.log(s.ready ? '🗄️ Base de données connectée' : `🗄️ Base non connectée : ${s.error}`);
   if (s.ready) {
     const r = await applyDbConfigs();
+    if ((r.restored || []).length) console.log('🔐 Restauré depuis la base : ' + r.restored.join(', '));
     console.log('🧠 Configurations lues en base : ' + ((r.loaded || []).join(', ') || 'aucune') +
       ((r.added || []).length ? ' • ajoutées : ' + r.added.join(', ') : ''));
   } else {
@@ -995,4 +1069,4 @@ async function startLoop() {
   startBot();
 }
 
-module.exports = { broadcast, sendPrediction, updateResult, startLoop, startBot, botStatus, activate, deactivate, persist, listChannels, sendBilan, dropSender, announceConfig, announceMainBot, resolveChat, testSend, senderFor, saveConfigsToDb, applyDbConfigs };
+module.exports = { setMainChannel, broadcast, sendPrediction, updateResult, startLoop, startBot, botStatus, activate, deactivate, persist, listChannels, sendBilan, dropSender, announceConfig, announceMainBot, resolveChat, testSend, senderFor, saveConfigsToDb, applyDbConfigs };

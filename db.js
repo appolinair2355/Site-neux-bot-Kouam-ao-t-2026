@@ -260,6 +260,82 @@ async function getSetting(key) {
 }
 
 
+// ---- configuration de l'application (token, canaux, admin, réglages) -------
+// Tout est enregistré en base : après un redémarrage, le bot repart avec le
+// token, l'ID administrateur, les canaux et les réglages déjà configurés.
+async function saveAppConfig(cfg = {}) {
+  return setSetting('app_config', JSON.stringify(cfg));
+}
+
+async function loadAppConfig() {
+  const raw = await getSetting('app_config');
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch (_) { return null; }
+}
+
+// ---- panneau base de données : tout ce qui est stocké ----------------------
+async function allSettings() {
+  const r = await q(`SELECT key, value FROM settings ORDER BY key`);
+  if (!r) return [];
+  return r.rows.map((row) => ({
+    key: row.key,
+    // le token n'est jamais renvoyé en clair au navigateur
+    value: /token/i.test(row.key) ? '••••••' : maskConfig(row.key, row.value),
+  }));
+}
+
+function maskConfig(key, value) {
+  if (key !== 'app_config') return value;
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed.botToken) parsed.botToken = parsed.botToken.slice(0, 8) + '••••••';
+    return JSON.stringify(parsed);
+  } catch (_) { return value; }
+}
+
+async function tableCounts() {
+  const r = await q(
+    `SELECT (SELECT count(*)::int FROM games)       AS games,
+            (SELECT count(*)::int FROM predictions) AS predictions,
+            (SELECT count(*)::int FROM settings)    AS settings,
+            (SELECT count(*)::int FROM strategies)  AS strategies`);
+  return r ? r.rows[0] : null;
+}
+
+// contenu complet et lisible de la base (panneau « Base de données »)
+async function dump(limit = 25) {
+  return {
+    status: status(),
+    counts: await tableCounts(),
+    overview: await overview(),
+    dates: await availableDates(15),
+    games: await lastGames(limit),
+    predictions: await lastPredictions(limit),
+    strategies: await strategyRows(),
+    settings: await allSettings(),
+  };
+}
+
+async function lastPredictions(limit = 25) {
+  const r = await q(
+    `SELECT id, strategy, target, suit, label, hand, max_r, status, rattrapage,
+            hit_number, played_on, created_at
+       FROM predictions ORDER BY id DESC LIMIT $1`, [limit]);
+  return r ? r.rows : [];
+}
+
+async function strategyRows() {
+  const r = await q(`SELECT key, name, enabled, config, updated_at FROM strategies ORDER BY key`);
+  if (!r) return [];
+  return r.rows.map((row) => ({
+    key: row.key,
+    name: row.name,
+    enabled: row.enabled,
+    updated_at: row.updated_at,
+    config: typeof row.config === 'string' ? JSON.parse(row.config || '{}') : row.config || {},
+  }));
+}
+
 // ---- lecture / vérification des données ------------------------------------
 // dernier jeux enregistrés (toutes dates)
 async function lastGames(limit = 10) {
@@ -340,5 +416,6 @@ module.exports = {
   saveStrategy, loadStrategies, deleteStrategy, strategyStats, strategyPredictions, clearPredictions,
   lastGames, gameByNumber, predictionsByDate, predictionSummary,
   overview, availableDates, readOnlyQuery,
+  saveAppConfig, loadAppConfig, dump, allSettings, lastPredictions, strategyRows, tableCounts,
   get ready() { return ready; },
 };

@@ -4,6 +4,7 @@
 'use strict';
 
 const config = require('./config');
+const miner = require('./pattern-miner');
 
 const MAX_GAMES = 120;
 const SUITS = ['♦️', '❤️', '♣️', '♠️'];
@@ -68,7 +69,7 @@ function localSummary(games) {
 // ---------------------------------------------------------------------------
 function pct(a, b) { return b ? Math.round((a / b) * 1000) / 10 : 0; }
 
-function localAnalysis(rawGames = []) {
+function localAnalysis(rawGames = [], options = {}) {
   const games = rawGames.map(compactGame).filter((g) => g.n != null).slice(0, MAX_GAMES);
   const summary = localSummary(games);
   const findings = [];
@@ -166,9 +167,39 @@ function localAnalysis(rawGames = []) {
     findings.push(`Taux d'égalités élevé : ${pct(summary.ties, games.length)}% des jeux analysés.`);
   }
 
+  // ---------------------------------------------------------------------
+  // DÉCOUVERTE : l'analyseur cherche des régularités qu'aucune stratégie
+  // existante ne décrit (carte précise -> costume futur, points, chaînes,
+  // séquences de vainqueurs, répétition d'une journée déjà jouée).
+  // ---------------------------------------------------------------------
+  const mined = miner.mine(rawGames, {
+    lead: options.lead || 2,
+    pastDays: options.pastDays || [],
+    todayGames: options.todayGames || rawGames,
+  });
+  for (const f of mined.findings) findings.push(f);
+  for (const p of mined.proposals) proposals.push(p);
+  for (const r of mined.replacements) {
+    findings.push(r.text);
+    proposals.push({
+      name: `Remplacer ${r.from} par ${r.to} (jeu a+${r.lead})`,
+      logic: `Quand le déclencheur ${r.from} est vu côté joueur, prédire ${r.to} au lieu de ${r.from} sur le jeu a+${r.lead}.`,
+      trigger: `${r.from} vu dans la main du joueur`,
+      target: `jeu a+${r.lead}`,
+      suggestedLead: r.lead,
+      minimumSample: 25,
+      evidence: `${r.rate}% pour ${r.to} contre ${r.currentRate}% pour ${r.from} sur ${r.support} observations.`,
+      risks: "Remplacement à tester en mode silencieux avant de modifier une stratégie publiée.",
+      compatibleExisting: 'costume',
+    });
+  }
+
   const confidence = proposals.length ? (games.length >= 40 ? 'moyenne' : 'faible') : 'exploratoire';
   return {
     source: 'local',
+    discoveries: mined.discoveries || [],
+    replacements: mined.replacements || [],
+    dayMatches: mined.dayMatches || [],
     title: findings.length ? findings[0] : 'Aucun signal marquant pour l’instant',
     confidence,
     observation: findings.length
@@ -189,7 +220,7 @@ function localAnalysis(rawGames = []) {
 // ---------------------------------------------------------------------------
 // Enrichissement Pollinations.ai
 // ---------------------------------------------------------------------------
-async function analyze({ games = [], date = null, objective = '' } = {}) {
+async function analyze({ games = [], date = null, objective = '', pastDays = [] } = {}) {
   if (!keyLooksValid()) {
     const error = new Error("Clé Pollinations.ai absente : renseigne-la dans le code (config.js) ou depuis la page Analyseur IA.");
     error.code = 'AI_NOT_CONFIGURED';
@@ -204,12 +235,14 @@ async function analyze({ games = [], date = null, objective = '' } = {}) {
   }
 
   const summary = localSummary(normalized);
-  const local = localAnalysis(normalized);
+  const local = localAnalysis(games, { pastDays });
   const system = [
     'Tu es un analyste prudent de données Baccarat.',
     'Tu dois analyser uniquement les observations fournies et ne jamais promettre une prédiction fiable ou certaine.',
     'Les cartes de la main joueur sont la seule base de vérification des stratégies; la main banquier sert aux comparaisons et au contexte.',
-    'Cherche des fréquences, séries, absences, distributions et signaux de sur-ajustement.',
+    'Ne te limite JAMAIS aux stratégies déjà existantes : cherche de NOUVELLES régularités.',
+    'Exemples de ce que tu dois chercher : « quand le joueur ou le banquier a eu 6❤️ au jeu a, ♣️ arrive au jeu a+2 », « la partie du 20/08/2026 se rejoue aujourd\'hui », « telle séquence de vainqueurs annonce le suivant », « il faut remplacer le costume prédit par un autre quand le déclencheur est vu ».',
+    'Cherche des fréquences, séries, absences, distributions, décalages (a+1, a+2, a+3), répétitions de journées et signaux de sur-ajustement.',
     'Une stratégie proposée doit être testable, réversible, limitée à un échantillon minimum et accompagnée de ses risques.',
     'Réponds uniquement avec un JSON valide, sans Markdown.',
   ].join(' ');
@@ -218,6 +251,9 @@ async function analyze({ games = [], date = null, objective = '' } = {}) {
     dateAnalysee: date || 'historique disponible',
     resumeLocal: summary,
     signauxDetectesLocalement: local.findings,
+    reglesDecouvertesLocalement: local.discoveries || [],
+    remplacementsDeCostumeConseilles: local.replacements || [],
+    journeesSimilaires: local.dayMatches || [],
     jeux: normalized,
     formatReponse: {
       title: 'titre court',
@@ -234,6 +270,7 @@ async function analyze({ games = [], date = null, objective = '' } = {}) {
         risks: 'risques et limites',
         compatibleExisting: 'costume|dominant|matchnul|parite|absente|ombre|null',
       }],
+      replacements: [{ from: '♦️', to: '♣️', lead: 2, text: "d'après mes analyses, remplace ♦️ par ♣️ quand le déclencheur est vu" }],
       nextChecks: ['contrôles à faire sur les prochains jeux'],
     },
   };
@@ -272,7 +309,10 @@ async function analyze({ games = [], date = null, objective = '' } = {}) {
   return {
     ...result,
     source: 'pollinations',
-    findings: Array.isArray(result.findings) ? result.findings : local.findings,
+    findings: Array.isArray(result.findings) && result.findings.length ? result.findings : local.findings,
+    discoveries: local.discoveries || [],
+    replacements: Array.isArray(result.replacements) && result.replacements.length ? result.replacements : local.replacements || [],
+    dayMatches: local.dayMatches || [],
     generatedAt: new Date().toISOString(),
     sample: normalized.length,
     localSummary: summary,

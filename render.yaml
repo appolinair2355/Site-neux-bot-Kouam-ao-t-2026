@@ -7,8 +7,7 @@ services:
     startCommand: npm start
     healthCheckPath: /health
     envVars:
-      - key: DATABASE_URL
-        sync: false
+      # DATABASE_URL est déjà écrite en dur dans config.js
       - key: BOT_TOKEN
         sync: false
       - key: ADMIN_ID

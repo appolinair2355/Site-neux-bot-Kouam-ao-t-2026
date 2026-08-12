@@ -8,6 +8,7 @@
 const config = require('./config');
 const ai = require('./ai-analyzer');
 const strategies = require('./strategies');
+const db = require('./db');
 const { state } = require('./predictor');
 
 const auto = {
@@ -64,9 +65,33 @@ function pushResult(result) {
   return true;
 }
 
+// journées déjà jouées (base de données) : sert à repérer « le jeu d'hier
+// revient aujourd'hui » ou « la partie du 20/08/2026 se rejoue ».
+let pastDays = [];
+let pastDaysAt = 0;
+
+async function refreshPastDays(force = false) {
+  if (!db.ready) { pastDays = []; return pastDays; }
+  if (!force && Date.now() - pastDaysAt < 5 * 60 * 1000) return pastDays;
+  try {
+    const dates = await db.availableDates(8);
+    const today = new Date().toISOString().slice(0, 10);
+    const out = [];
+    for (const row of dates) {
+      const date = String(row.played_on).slice(0, 10);
+      if (date === today) continue;
+      out.push({ date, games: await db.gamesByDate(date, 400) });
+      if (out.length >= 6) break;
+    }
+    pastDays = out;
+    pastDaysAt = Date.now();
+  } catch (e) { auto.lastError = e.message; }
+  return pastDays;
+}
+
 function runLocal() {
   const games = [...(state.history || [])].slice(0, ai.MAX_GAMES);
-  const result = ai.localAnalysis(games);
+  const result = ai.localAnalysis(games, { pastDays });
   auto.lastLocalAt = Date.now();
   auto.lastGame = state.lastFinished ? state.lastFinished.number : null;
   const isNew = pushResult(result);
@@ -83,7 +108,12 @@ async function runRemote() {
   const games = [...(state.history || [])].slice(0, 60);
   if (games.length < 6) return null;
   try {
-    const result = await ai.analyze({ games, objective: 'Analyse automatique en temps réel du flux en cours.' });
+    await refreshPastDays();
+    const result = await ai.analyze({
+      games,
+      pastDays,
+      objective: "Analyse automatique en temps réel : cherche aussi des régularités nouvelles (carte précise suivie d'un costume, décalages a+1/a+2/a+3, répétition d'une journée déjà jouée) et propose les remplacements de costume utiles aux stratégies existantes.",
+    });
     auto.lastRemoteAt = Date.now();
     auto.lastError = null;
     pushResult(result);
@@ -106,7 +136,9 @@ function start(onChange) {
     try { const r = runLocal(); if (r.isNew && onChange) onChange(); }
     catch (e) { auto.lastError = e.message; }
   };
-  const tickRemote = () => { runRemote().then((r) => { if (r && onChange) onChange(); }); };
+  const tickRemote = () => {
+    refreshPastDays().then(() => runRemote()).then((r) => { if (r && onChange) onChange(); });
+  };
   tickLocal();
   localTimer = setInterval(tickLocal, config.AI_LOCAL_INTERVAL_MS);
   remoteTimer = setInterval(tickRemote, config.AI_REMOTE_INTERVAL_MS);
@@ -134,4 +166,4 @@ function status() {
   };
 }
 
-module.exports = { start, stop, status, runLocal, runRemote, saveProposal, auto };
+module.exports = { start, stop, status, runLocal, runRemote, saveProposal, refreshPastDays, getPastDays: () => pastDays, auto };
