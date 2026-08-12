@@ -481,6 +481,10 @@ function defaultsFor(key) {
     silent: false,
     lossWindow: 3,
     resetOnWin: true,
+    publishedChannels: [],
+    shadowChannels: [],
+    publishedChannelInfos: [],
+    shadowChannelInfos: [],
     ...JSON.parse(JSON.stringify(s.defaults)),
   };
 }

@@ -27,6 +27,8 @@ state.hand = 'joueur';
 if (saved.format) state.format = saved.format;
 if (saved.template !== undefined) state.template = saved.template;
 if (saved.strategies && typeof saved.strategies === 'object') state.strategies = saved.strategies;
+if (Array.isArray(saved.aiAnalyses)) state.aiAnalyses = saved.aiAnalyses;
+if (Array.isArray(saved.aiStrategies)) state.aiStrategies = saved.aiStrategies;
 initStrategies();
 
 function persist() {
@@ -41,6 +43,8 @@ function persist() {
     format: state.format,
     template: state.template,
     strategies: state.strategies,
+    aiAnalyses: state.aiAnalyses,
+    aiStrategies: state.aiStrategies,
   });
   if (db.ready) {
     db.setSetting('B', state.B);
@@ -732,12 +736,12 @@ async function sendBilan(key) {
 
 // message de confirmation envoyé dans le canal dès qu'on configure
 // le token API et/ou l'ID du canal d'une stratégie
-async function announceConfig(key) {
+async function announceConfig(key, mode = 'published') {
   const def = strategies.BY_KEY[key];
   const cfg = state.strategies[key] || {};
-  const ids = strategyChannels(key);
+  const ids = strategyChannels(key, mode);
   if (!def) return { ok: false, error: 'Stratégie inconnue' };
-  if (!ids.length) return { ok: false, error: 'Aucun canal configuré pour cette stratégie' };
+  if (!ids.length) return { ok: false, error: `Aucun canal ${mode === 'shadow' ? 'silencieux' : 'public'} configuré pour cette stratégie` };
   const sender = senderFor();
   if (!sender) return { ok: false, error: "Aucun token API configuré dans les réglages" };
 
@@ -756,8 +760,9 @@ async function announceConfig(key) {
       (info.memberCount != null ? `👥 Abonnés : ${info.memberCount}\n` : '') +
       `🤖 Bot : @${state.botUsername || 'bot'} (token des réglages)\n` +
       `🎯 Format ${cfg.format} • +${cfg.maxR} rattrapage(s)\n` +
-      `📊 Bilan automatique : ${cfg.bilan === false ? 'non' : 'oui'}\n\n` +
-      'Ce canal recevra désormais les prédictions de cette stratégie. 🚀';
+      `📊 Bilan automatique : ${cfg.bilan === false ? 'non' : 'oui'}\n` +
+      `🧭 Routage : ${mode === 'shadow' ? 'prédictions silencieuses' : 'prédictions activées'}\n\n` +
+      `Ce canal recevra désormais les ${mode === 'shadow' ? 'prédictions silencieuses' : 'prédictions publiées'} de cette stratégie. 🚀`;
     try {
       await sender.sendMessage(id, text);
       sent.push(id);
@@ -770,21 +775,25 @@ async function announceConfig(key) {
     }
     infos.push(info);
   }
-  cfg.channelInfos = infos;
+  if (mode === 'shadow') cfg.shadowChannelInfos = infos;
+  else {
+    cfg.channelInfos = infos;
+    cfg.publishedChannelInfos = infos;
+  }
   return { ok: sent.length > 0, sent, failed, channels: infos };
 }
 
 // envoi d'un message de test dans le(s) canal(aux) d'une stratégie
-async function testSend(key) {
+async function testSend(key, mode = 'published') {
   const def = strategies.BY_KEY[key];
   if (!def) return { ok: false, error: 'Stratégie inconnue' };
   const sender = senderFor();
   if (!sender) return { ok: false, error: "Aucun token API configuré dans les réglages" };
-  const ids = strategyChannels(key);
-  if (!ids.length) return { ok: false, error: 'Aucun canal configuré pour cette stratégie' };
+  const ids = strategyChannels(key, mode);
+  if (!ids.length) return { ok: false, error: `Aucun canal ${mode === 'shadow' ? 'silencieux' : 'public'} configuré pour cette stratégie` };
   const cfg = state.strategies[key] || {};
   const preview = fmt.formatPreview(cfg.format, { maxR: cfg.maxR });
-  const text = `🧪 TEST D'ENVOI\n\n🧠 ${def.name}\n\n${preview}\n\nSi tu vois ce message, les prédictions arriveront bien ici. ✅`;
+  const text = `🧪 TEST D'ENVOI\n\n🧠 ${def.name}\n🧭 ${mode === 'shadow' ? 'Canal silencieux' : 'Canal public'}\n\n${preview}\n\nSi tu vois ce message, le routage est correctement configuré. ✅`;
   const sent = [];
   const failed = [];
   for (const id of ids) {
@@ -820,28 +829,37 @@ async function announceMainBot() {
 // ---------------------------------------------------------------------------
 async function broadcast(pred) {
   if (db.ready) db.savePrediction(pred, state.B);
-  // Mode silencieux : la prédiction est calculée et vérifiée dans l'ombre,
-  // mais elle ne part dans le canal qu'après la confirmation « double perte ».
+  const sender = senderFor();
+  if (!sender) {
+    state.sendErrors[pred.strategy] = 'Aucun token Telegram configuré';
+    return;
+  }
+  // Une prédiction en mode silencieux est envoyée uniquement au canal silencieux.
+  // Elle ne fuit jamais vers le canal public avant le déclenchement double perte.
   if (!canSend(pred.strategy)) {
     pred.silent = true;
     pred.gate = gateView(pred.strategy).label;
+    const shadowIds = strategyChannels(pred.strategy, 'shadow');
+    if (!shadowIds.length) return;
+    await sendPrediction(pred, sender, shadowIds);
     return;
   }
   pred.silent = false;
-  const sender = senderFor();
-  if (!sender) { state.sendErrors[pred.strategy] = 'Aucun token Telegram configuré'; return; }
   const ids = strategyChannels(pred.strategy);
   if (!ids.length) { state.sendErrors[pred.strategy] = 'Aucun canal configuré'; return; }
+  await sendPrediction(pred, sender, ids);
+}
+
+async function sendPrediction(pred, sender, ids) {
   state.sendErrors[pred.strategy] = null;
   const { text, parse_mode } = predictionText(pred);
-  for (const id of ids) {
+  for (const id of [...new Set(ids)]) {
     try {
       const m = await sender.sendMessage(id, text, parse_mode ? { parse_mode } : {});
       pred.messages.push({ chatId: id, messageId: m.message_id });
       countSent(pred.strategy);
     } catch (e) {
       state.sendErrors[pred.strategy] = `${id} : ${e.message}`;
-      console.error('Envoi échoué', id, e.message);
     }
   }
 }

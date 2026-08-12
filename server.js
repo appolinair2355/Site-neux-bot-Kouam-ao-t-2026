@@ -6,6 +6,7 @@ const api = require('./api');
 const db = require('./db');
 const fmt = require('./formats');
 const strategies = require('./strategies');
+const ai = require('./ai-analyzer');
 const {
   state, stats, predictionMessage, recentGames, SUITS,
   setStrategyConfig, resetStrategy, initStrategies, parityRuntime,
@@ -40,6 +41,12 @@ app.get('/api/state', (req, res) => {
     db: db.status(),
     apiUrl: api.endpoints()[0],
     champId: config.CHAMP_ID,
+    ai: {
+      configured: !!config.POLLINATIONS_API_KEY,
+      model: config.POLLINATIONS_MODEL,
+      lastAnalysis: state.aiAnalyses[0] || null,
+      savedStrategies: state.aiStrategies,
+    },
     channels: state.channels.map((c) => ({ ...c, active: state.activeChannels.includes(c.id) })),
     strategies: strategies.LIST.map((d) => ({
       key: d.key, name: d.name, about: d.about, usesB: !!d.usesB,
@@ -194,8 +201,11 @@ function strategyPayload(key) {
     about: d.about,
     usesB: !!d.usesB,
     config: { ...cfg, token: undefined },
-    channels: cfg.channels || [],
-    channelInfos: cfg.channelInfos || [],
+    channels: cfg.publishedChannels || cfg.channels || [],
+    publishedChannels: cfg.publishedChannels || cfg.channels || [],
+    shadowChannels: cfg.shadowChannels || [],
+    channelInfos: cfg.publishedChannelInfos || cfg.channelInfos || [],
+    shadowChannelInfos: cfg.shadowChannelInfos || [],
     sentCount: cfg.sentCount || 0,
     lastSentAt: cfg.lastSentAt || null,
     bot: botStatus(),
@@ -288,8 +298,15 @@ app.post('/api/strategies/:key', async (req, res) => {
   persist();
   if (db.ready) await db.saveStrategy(req.params.key, strategies.BY_KEY[req.params.key].name, cfg);
   // token API et/ou ID de canal configurés → on prévient le canal
-  const touched = req.body && (req.body.channels !== undefined || req.body.channelId !== undefined);
-  const notice = touched ? await announceConfig(req.params.key) : null;
+  const touched = req.body && (
+    req.body.channels !== undefined ||
+    req.body.channelId !== undefined ||
+    req.body.publishedChannels !== undefined ||
+    req.body.shadowChannels !== undefined
+  );
+  const notice = touched
+    ? await announceConfig(req.params.key, req.body.mode === 'shadow' ? 'shadow' : 'published')
+    : null;
   res.json({ ok: true, saved: db.ready, notice, ...strategyPayload(req.params.key) });
 });
 
@@ -297,6 +314,7 @@ app.post('/api/strategies/:key', async (req, res) => {
 app.post('/api/strategies/:key/channel', async (req, res) => {
   const key = req.params.key;
   if (!strategies.BY_KEY[key]) return res.status(404).json({ error: 'Stratégie inconnue' });
+  const mode = req.body.mode === 'shadow' ? 'shadow' : 'published';
   const raw = String(req.body.channelId || '').trim();
   if (!raw) return res.status(400).json({ error: "Renseigne l'ID du canal (ex : -1001234567890 ou @moncanal)" });
   if (!botStatus().tokenSet) {
@@ -310,30 +328,86 @@ app.post('/api/strategies/:key/channel', async (req, res) => {
       error: `Le bot n'est pas administrateur de « ${check.chat.title} » avec le droit « Publier des messages ».`,
     });
   }
-  const cfg = setStrategyConfig(key, { channelId: String(check.chat.id) });
-  const notice = await announceConfig(key);
-  cfg.channelInfos = notice.channels || [check.chat];
+  const cfg = setStrategyConfig(key, mode === 'shadow'
+    ? { shadowChannelId: String(check.chat.id) }
+    : { publishedChannels: [String(check.chat.id)] });
+  const notice = await announceConfig(key, mode);
+  if (mode === 'shadow') cfg.shadowChannelInfos = notice.channels || [check.chat];
+  else cfg.publishedChannelInfos = notice.channels || [check.chat];
   persist();
   if (db.ready) await db.saveStrategy(key, strategies.BY_KEY[key].name, cfg);
-  res.json({ ok: true, channel: check.chat, notice, ...strategyPayload(key) });
+  res.json({ ok: true, mode, channel: check.chat, notice, ...strategyPayload(key) });
 });
 
 // retirer le canal d'une stratégie
 app.delete('/api/strategies/:key/channel', async (req, res) => {
   if (!strategies.BY_KEY[req.params.key]) return res.status(404).json({ error: 'Stratégie inconnue' });
-  const cfg = setStrategyConfig(req.params.key, { channels: [], channelInfos: [] });
+  const mode = req.body && req.body.mode === 'shadow' ? 'shadow' : 'published';
+  const cfg = mode === 'shadow'
+    ? setStrategyConfig(req.params.key, { shadowChannels: [], shadowChannelInfos: [] })
+    : setStrategyConfig(req.params.key, { publishedChannels: [], publishedChannelInfos: [], channels: [], channelInfos: [] });
   persist();
   if (db.ready) await db.saveStrategy(req.params.key, strategies.BY_KEY[req.params.key].name, cfg);
-  res.json({ ok: true, ...strategyPayload(req.params.key) });
+  res.json({ ok: true, mode, ...strategyPayload(req.params.key) });
 });
 
 // test d'envoi réel dans le canal configuré
 app.post('/api/strategies/:key/test', async (req, res) => {
   if (!strategies.BY_KEY[req.params.key]) return res.status(404).json({ error: 'Stratégie inconnue' });
-  const r = await testSend(req.params.key);
+  const r = await testSend(req.params.key, req.body && req.body.mode === 'shadow' ? 'shadow' : 'published');
   persist();
   if (!r.ok) return res.status(400).json({ error: r.error || (r.failed || []).map((f) => `${f.id} : ${f.error}`).join(' / ') });
   res.json(r);
+});
+
+// --- analyse IA guidée ------------------------------------------------------
+app.get('/api/ai/status', (req, res) => {
+  res.json({
+    configured: !!config.POLLINATIONS_API_KEY,
+    model: config.POLLINATIONS_MODEL,
+    baseUrl: config.POLLINATIONS_BASE_URL,
+    lastAnalysis: state.aiAnalyses[0] || null,
+    savedStrategies: state.aiStrategies,
+  });
+});
+
+app.post('/api/ai/analyze', async (req, res) => {
+  try {
+    const date = req.body && req.body.date ? String(req.body.date).trim() : null;
+    const limit = Math.min(ai.MAX_GAMES, Math.max(6, parseInt(req.body && req.body.limit, 10) || 60));
+    let games = [];
+    if (date && db.ready) games = await db.gamesByDate(date, limit);
+    if (!games.length) games = [...state.history].slice(0, limit);
+    const result = await ai.analyze({
+      games,
+      date,
+      objective: req.body && req.body.objective ? String(req.body.objective).slice(0, 1200) : '',
+    });
+    state.aiAnalyses = [result, ...state.aiAnalyses].slice(0, 8);
+    persist();
+    res.json({ ok: true, result });
+  } catch (error) {
+    const status = error.code === 'AI_NOT_CONFIGURED' ? 503 : error.code === 'NOT_ENOUGH_DATA' ? 422 : 502;
+    res.status(status).json({ error: error.message, code: error.code || 'AI_ERROR' });
+  }
+});
+
+app.post('/api/ai/strategies', (req, res) => {
+  const proposal = req.body && req.body.proposal;
+  if (!proposal || typeof proposal !== 'object') return res.status(400).json({ error: 'Proposition de stratégie manquante' });
+  const item = {
+    id: `ai-${Date.now()}`,
+    name: String(proposal.name || 'Stratégie IA').slice(0, 100),
+    logic: String(proposal.logic || '').slice(0, 1000),
+    evidence: String(proposal.evidence || '').slice(0, 1000),
+    risks: String(proposal.risks || '').slice(0, 1000),
+    compatibleExisting: strategies.BY_KEY[proposal.compatibleExisting] ? proposal.compatibleExisting : null,
+    createdAt: new Date().toISOString(),
+    active: false,
+  };
+  state.aiStrategies = [item, ...state.aiStrategies].slice(0, 30);
+  persist();
+  res.json({ ok: true, strategy: item });
 });
 
 app.post('/api/strategies/:key/reset', async (req, res) => {

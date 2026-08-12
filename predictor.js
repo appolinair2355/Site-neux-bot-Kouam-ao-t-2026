@@ -30,6 +30,8 @@ const state = {
   games: new Map(),
   counters: { '♦️': 0, '❤️': 0, '♣️': 0, '♠️': 0 },
   predictions: [],
+  aiAnalyses: [],
+  aiStrategies: [],
   triggersDone: {},        // "clé:déclencheur" -> true (règle 1 : un seul traitement)
   live: null,
   lastFinished: null,
@@ -50,6 +52,9 @@ function initStrategies() {
     // une configuration enregistrée avant l'ajout d'un réglage (mode silencieux,
     // fenêtre de pertes…) est complétée sans écraser les choix de l'utilisateur
     for (const [k, v] of Object.entries(def)) if (cur[k] === undefined) cur[k] = v;
+    // Migration douce : l'ancien champ `channels` devient le canal public.
+    if (!Array.isArray(cur.publishedChannels)) cur.publishedChannels = Array.isArray(cur.channels) ? cur.channels : [];
+    if (!Array.isArray(cur.shadowChannels)) cur.shadowChannels = [];
   }
   syncCostume();
   return state.strategies;
@@ -123,13 +128,27 @@ function setStrategyConfig(key, patch = {}) {
   if (patch.lossWindow !== undefined) next.lossWindow = Math.max(1, Math.min(20, parseInt(patch.lossWindow, 10) || 3));
   if (patch.resetOnWin !== undefined) next.resetOnWin = !!patch.resetOnWin;
   if (patch.template !== undefined) next.template = patch.template ? String(patch.template) : null;
-  if (patch.channels !== undefined || patch.channelId !== undefined) {
-    const before = JSON.stringify(next.channels || []);
-    next.channels = parseChannels(patch.channels !== undefined ? patch.channels : patch.channelId);
-    // le canal a changé → les informations affichées sont recalculées
-    if (JSON.stringify(next.channels) !== before) next.channelInfos = [];
+  if (patch.channels !== undefined || patch.channelId !== undefined || patch.publishedChannels !== undefined) {
+    const value = patch.publishedChannels !== undefined
+      ? patch.publishedChannels
+      : patch.channels !== undefined ? patch.channels : patch.channelId;
+    next.publishedChannels = parseChannels(value);
+    next.channels = next.publishedChannels;
+    if (JSON.stringify(next.publishedChannels) !== JSON.stringify(cur.publishedChannels || cur.channels || [])) {
+      next.channelInfos = [];
+      next.publishedChannelInfos = [];
+    }
+  }
+  if (patch.shadowChannels !== undefined || patch.shadowChannelId !== undefined) {
+    const value = patch.shadowChannels !== undefined ? patch.shadowChannels : patch.shadowChannelId;
+    next.shadowChannels = parseChannels(value);
+    if (JSON.stringify(next.shadowChannels) !== JSON.stringify(cur.shadowChannels || [])) {
+      next.shadowChannelInfos = [];
+    }
   }
   if (patch.channelInfos !== undefined) next.channelInfos = patch.channelInfos || [];
+  if (patch.publishedChannelInfos !== undefined) next.publishedChannelInfos = patch.publishedChannelInfos || [];
+  if (patch.shadowChannelInfos !== undefined) next.shadowChannelInfos = patch.shadowChannelInfos || [];
   // un seul token API pour toute l'application (réglages) : plus de token par stratégie
   delete next.token;
   if (patch.bilan !== undefined) next.bilan = !!patch.bilan;
@@ -145,10 +164,16 @@ function resetStrategy(key) {
   return state.strategies[key];
 }
 
-function strategyChannels(key) {
+function strategyChannels(key, mode = 'published') {
   const c = state.strategies[key];
-  if (c && Array.isArray(c.channels) && c.channels.length) return c.channels;
-  return state.activeChannels;
+  if (!c) return mode === 'shadow' ? [] : state.activeChannels;
+  if (mode === 'shadow') return Array.isArray(c.shadowChannels) ? c.shadowChannels : [];
+  const configured = Array.isArray(c.publishedChannels)
+    ? c.publishedChannels
+    : Array.isArray(c.channels) && c.channels.length ? c.channels : state.activeChannels;
+  const shadow = new Set(Array.isArray(c.shadowChannels) ? c.shadowChannels : []);
+  // Un canal ne reçoit jamais les deux catégories pour une même stratégie.
+  return configured.filter((id) => !shadow.has(id));
 }
 
 
