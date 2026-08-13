@@ -493,6 +493,35 @@ function defaultsFor(key) {
     lossTrigger: 2,     // nb de pertes avant d'ouvrir l'envoi (1 = dès la 1ʳᵉ perte)
     autoUnlockMin: 10,  // déblocage automatique après 10 minutes de blocage
     resetOnWin: true,
+    // --- Déclencheur automatique (commun à TOUTES les stratégies) -----------
+    //  autoEnabled     → active le mode « déclencheur + N prédictions »
+    //  autoTrigger     → 'perte' ou 'rattrapage'
+    //  autoRattrapage  → niveau de rattrapage déclencheur (si autoTrigger = 'rattrapage')
+    //  autoSkip        → nombre de prédictions comptées après le déclencheur
+    //  autoSend        → nombre de prédictions envoyées une fois le compte atteint
+    autoEnabled: false,
+    autoTrigger: 'perte',
+    autoRattrapage: 2,
+    autoSkip: 3,
+    autoSend: 1,
+    // --- Mode d'activation SILENCIEUX (nouveau) ----------------------------
+    //  silenceMode       → active le mode
+    //  silenceTrigger    → 'perte' ou 'rattrapage'
+    //  silenceLossCount  → nb de pertes déclenchantes (1 ou 2)
+    //  silenceRatLevel   → niveau de rattrapage déclencheur (2, 3 ou 4)
+    //  silenceRatCount   → nb de fois ce rattrapage (1 ou 2)
+    //  silenceOffset     → +N jeux après le jeu déclencheur (ex. #23 +10 → #33)
+    //  silenceCount      → nb de prédictions envoyées avant remise à zéro
+    //  silenceChannels   → canaux qui reçoivent ces prédictions
+    silenceMode: false,
+    silenceTrigger: 'perte',
+    silenceLossCount: 1,
+    silenceRatLevel: 2,
+    silenceRatCount: 1,
+    silenceOffset: 10,
+    silenceCount: 6,
+    silenceChannels: [],
+    silenceChannelInfos: [],
     publishedChannels: [],
     shadowChannels: [],
     publishedChannelInfos: [],

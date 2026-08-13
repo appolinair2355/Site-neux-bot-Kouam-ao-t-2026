@@ -38,6 +38,9 @@ const state = {
   lastError: null,
   sendErrors: {},          // clé de stratégie -> dernière erreur d'envoi Telegram
   gates: {},               // clé de stratégie -> filtre d'envoi « double perte »
+  autoGates: {},           // clé de stratégie -> déclencheur automatique (perte/rattrapage + N)
+  silenceGates: {},        // clé de stratégie -> mode d'activation silencieux (déclencheur + jeu +N)
+  freshFinished: [],       // tours terminés depuis la dernière évaluation
   startedAt: Date.now(),
 };
 
@@ -128,6 +131,26 @@ function setStrategyConfig(key, patch = {}) {
   if (patch.lossWindow !== undefined) next.lossWindow = Math.max(1, Math.min(20, parseInt(patch.lossWindow, 10) || 3));
   if (patch.resetOnWin !== undefined) next.resetOnWin = !!patch.resetOnWin;
   if (patch.lossTrigger !== undefined) next.lossTrigger = Math.max(1, Math.min(5, parseInt(patch.lossTrigger, 10) || 2));
+  // déclencheur automatique (perte / rattrapage + nombre de prédictions)
+  if (patch.autoEnabled !== undefined) next.autoEnabled = !!patch.autoEnabled;
+  if (patch.autoTrigger !== undefined) next.autoTrigger = patch.autoTrigger === 'rattrapage' ? 'rattrapage' : 'perte';
+  if (patch.autoRattrapage !== undefined) next.autoRattrapage = Math.max(1, Math.min(9, parseInt(patch.autoRattrapage, 10) || 1));
+  if (patch.autoSkip !== undefined) next.autoSkip = Math.max(0, Math.min(20, parseInt(patch.autoSkip, 10) || 0));
+  if (patch.autoSend !== undefined) next.autoSend = Math.max(1, Math.min(10, parseInt(patch.autoSend, 10) || 1));
+  // --- mode d'activation silencieux --------------------------------------
+  if (patch.silenceMode !== undefined) next.silenceMode = !!patch.silenceMode;
+  if (patch.silenceTrigger !== undefined) next.silenceTrigger = patch.silenceTrigger === 'rattrapage' ? 'rattrapage' : 'perte';
+  if (patch.silenceLossCount !== undefined) next.silenceLossCount = Math.max(1, Math.min(5, parseInt(patch.silenceLossCount, 10) || 1));
+  if (patch.silenceRatLevel !== undefined) next.silenceRatLevel = Math.max(1, Math.min(9, parseInt(patch.silenceRatLevel, 10) || 2));
+  if (patch.silenceRatCount !== undefined) next.silenceRatCount = Math.max(1, Math.min(5, parseInt(patch.silenceRatCount, 10) || 1));
+  if (patch.silenceOffset !== undefined) next.silenceOffset = Math.max(1, Math.min(99, parseInt(patch.silenceOffset, 10) || 1));
+  if (patch.silenceCount !== undefined) next.silenceCount = Math.max(1, Math.min(50, parseInt(patch.silenceCount, 10) || 1));
+  if (patch.silenceChannels !== undefined || patch.silenceChannelId !== undefined) {
+    const value = patch.silenceChannels !== undefined ? patch.silenceChannels : patch.silenceChannelId;
+    next.silenceChannels = parseChannels(value);
+    if (JSON.stringify(next.silenceChannels) !== JSON.stringify(cur.silenceChannels || [])) next.silenceChannelInfos = [];
+  }
+  if (patch.silenceChannelInfos !== undefined) next.silenceChannelInfos = patch.silenceChannelInfos || [];
   if (patch.autoUnlockMin !== undefined) next.autoUnlockMin = Math.max(0, Math.min(240, parseInt(patch.autoUnlockMin, 10) || 0));
   if (patch.template !== undefined) next.template = patch.template ? String(patch.template) : null;
   if (patch.channels !== undefined || patch.channelId !== undefined || patch.publishedChannels !== undefined) {
@@ -155,6 +178,15 @@ function setStrategyConfig(key, patch = {}) {
   delete next.token;
   if (patch.bilan !== undefined) next.bilan = !!patch.bilan;
   state.strategies[key] = next;
+  // un changement de réglage du déclencheur automatique repart d'un état propre
+  if (patch.autoEnabled !== undefined || patch.autoTrigger !== undefined
+      || patch.autoRattrapage !== undefined || patch.autoSkip !== undefined
+      || patch.autoSend !== undefined) resetAutoGate(key);
+  // un changement de réglage du mode silencieux repart aussi d'un état propre
+  if (patch.silenceMode !== undefined || patch.silenceTrigger !== undefined
+      || patch.silenceLossCount !== undefined || patch.silenceRatLevel !== undefined
+      || patch.silenceRatCount !== undefined || patch.silenceOffset !== undefined
+      || patch.silenceCount !== undefined) resetSilenceGate(key);
   if (key === 'costume') pullCostume();
   return next;
 }
@@ -168,7 +200,12 @@ function resetStrategy(key) {
 
 function strategyChannels(key, mode = 'published') {
   const c = state.strategies[key];
-  if (!c) return mode === 'shadow' ? [] : state.activeChannels;
+  if (!c) return mode === 'published' ? state.activeChannels : [];
+  if (mode === 'silence') {
+    const own = Array.isArray(c.silenceChannels) ? c.silenceChannels : [];
+    if (own.length) return own;
+    return Array.isArray(c.shadowChannels) ? c.shadowChannels : [];
+  }
   if (mode === 'shadow') return Array.isArray(c.shadowChannels) ? c.shadowChannels : [];
   const configured = Array.isArray(c.publishedChannels)
     ? c.publishedChannels
@@ -227,6 +264,8 @@ function unlockGate(key, manual = true) {
   g.blockedSince = null;
   g.autoUnlockedAt = Date.now();
   g.autoUnlockReason = manual ? 'déblocage manuel' : 'déblocage automatique (10 min)';
+  const cfg = state.strategies[key];
+  if (cfg && cfg.autoEnabled) { const a = autoGate(key); a.armed = true; a.counting = false; a.reason = 'déblocage manuel'; }
   return g;
 }
 
@@ -261,6 +300,8 @@ function windowSize(cfg) {
 function noteClosed(pred) {
   const cfg = state.strategies[pred.strategy];
   if (!cfg) return;
+  noteClosedAuto(pred);
+  noteClosedSilence(pred);
   const g = gate(pred.strategy);
   const win = pred.status === 'gagné';
   const max = windowSize(cfg);
@@ -291,10 +332,226 @@ function noteClosed(pred) {
   if (g.window >= max) resetGate(pred.strategy);
 }
 
+
+// ---------------------------------------------------------------------------
+// Déclencheur automatique : « perte + N prédictions » ou « rattrapage X + N »
+// ---------------------------------------------------------------------------
+// Fonctionnement (commun à TOUTES les stratégies, indépendant du mode silencieux) :
+//   1) le bot attend l'ÉVÉNEMENT déclencheur configuré :
+//        • autoTrigger = 'perte'      → une prédiction perdue (❌)
+//        • autoTrigger = 'rattrapage' → une prédiction terminée AU rattrapage
+//          demandé ou au-delà (ex. rattrapage 2 → gagnée en 2 ou perdue après 2)
+//   2) après ce déclencheur il COMPTE `autoSkip` prédictions terminées, qui
+//      restent silencieuses (visibles sur le site / canal silencieux) ;
+//   3) la prédiction SUIVANTE part automatiquement dans le canal public ;
+//      `autoSend` permet d'en envoyer plusieurs d'affilée (1 par défaut) ;
+//   4) le compteur repart ensuite à zéro et attend un nouveau déclencheur.
+// Exemples : « perte + 3 prédictions » → ❌ · P1 P2 P3 (silence) · P4 ENVOYÉE.
+//            « rattrapage 2 + 3 prédictions » → ✅2 · P1 P2 P3 · P4 ENVOYÉE.
+function autoCfg(cfg) {
+  return {
+    enabled: !!(cfg && cfg.autoEnabled),
+    trigger: cfg && cfg.autoTrigger === 'rattrapage' ? 'rattrapage' : 'perte',
+    level: Math.max(1, Math.min(9, parseInt(cfg && cfg.autoRattrapage, 10) || 2)),
+    skip: Math.max(0, Math.min(20, parseInt(cfg && cfg.autoSkip, 10) || 0)),
+    send: Math.max(1, Math.min(10, parseInt(cfg && cfg.autoSend, 10) || 1)),
+  };
+}
+
+function autoGate(key) {
+  if (!state.autoGates[key]) state.autoGates[key] = { armed: false, counting: false, seen: 0, sent: 0, triggeredAt: null, reason: null };
+  return state.autoGates[key];
+}
+
+function resetAutoGate(key) {
+  state.autoGates[key] = { armed: false, counting: false, seen: 0, sent: 0, triggeredAt: null, reason: null };
+  return state.autoGates[key];
+}
+
+function isAutoTrigger(pred, a) {
+  if (a.trigger === 'perte') return pred.status === 'perdu';
+  return (pred.step || 0) >= a.level;    // rattrapage atteint (gagné ou perdu)
+}
+
+// mise à jour du déclencheur automatique à chaque prédiction terminée
+function noteClosedAuto(pred) {
+  const a = autoCfg(state.strategies[pred.strategy]);
+  if (!a.enabled) return;
+  const g = autoGate(pred.strategy);
+  if (g.armed) return;                    // une prédiction est déjà autorisée
+  if (isAutoTrigger(pred, a)) {
+    g.counting = true;
+    g.seen = 0;
+    g.sent = 0;
+    g.triggeredAt = pred.target;
+    g.reason = a.trigger === 'perte'
+      ? `perte sur #N${pred.target}`
+      : `rattrapage ${pred.step} sur #N${pred.target}`;
+    if (a.skip === 0) { g.armed = true; g.counting = false; }
+    return;
+  }
+  if (!g.counting) return;
+  g.seen += 1;
+  if (g.seen >= a.skip) { g.armed = true; g.counting = false; }
+}
+
+// consommation : appelée après l'envoi public d'une prédiction
+function noteSent(key) {
+  const a = autoCfg(state.strategies[key]);
+  if (!a.enabled) return;
+  const g = autoGate(key);
+  if (!g.armed) return;
+  g.sent += 1;
+  if (g.sent >= a.send) resetAutoGate(key);
+}
+
+// état lisible du déclencheur automatique
+function autoView(key) {
+  const cfg = state.strategies[key] || {};
+  const a = autoCfg(cfg);
+  const g = autoGate(key);
+  const trigLabel = a.trigger === 'perte' ? 'une perte' : `un rattrapage ${a.level}`;
+  return {
+    enabled: a.enabled,
+    trigger: a.trigger,
+    rattrapage: a.level,
+    skip: a.skip,
+    send: a.send,
+    counting: !!g.counting,
+    seen: g.seen,
+    armed: !!g.armed,
+    sent: g.sent,
+    triggeredAt: g.triggeredAt,
+    label: !a.enabled
+      ? 'Déclencheur automatique désactivé'
+      : g.armed
+        ? `Prochaine prédiction ENVOYÉE automatiquement (${g.sent}/${a.send} envoyée(s))`
+        : g.counting
+          ? `Déclencheur pris (${g.reason}) : ${g.seen}/${a.skip} prédiction(s) comptée(s)`
+          : `En attente de ${trigLabel} (puis ${a.skip} prédiction(s) avant l'envoi)`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Mode d'activation SILENCIEUX
+// ---------------------------------------------------------------------------
+// Principe demandé :
+//   1) on attend le déclencheur : « 1 (ou 2) perte(s) » OU « 1 (ou 2) fois un
+//      rattrapage 2 / 3 / 4 » ;
+//   2) on note le NUMÉRO DU JEU où le déclencheur est tombé (ex. #N23) et on
+//      ajoute le décalage configuré (+10) → premier jeu visé = #N33 ;
+//   3) toutes les prédictions dont le jeu visé est ≥ à ce numéro partent dans
+//      le canal silencieux configuré ;
+//   4) après `silenceCount` prédictions envoyées (ex. 6), la fenêtre est
+//      remise à zéro et le bot attend un nouveau déclencheur.
+function silenceCfg(cfg) {
+  return {
+    enabled: !!(cfg && cfg.silenceMode),
+    trigger: cfg && cfg.silenceTrigger === 'rattrapage' ? 'rattrapage' : 'perte',
+    lossCount: Math.max(1, Math.min(5, parseInt(cfg && cfg.silenceLossCount, 10) || 1)),
+    ratLevel: Math.max(1, Math.min(9, parseInt(cfg && cfg.silenceRatLevel, 10) || 2)),
+    ratCount: Math.max(1, Math.min(5, parseInt(cfg && cfg.silenceRatCount, 10) || 1)),
+    offset: Math.max(1, Math.min(99, parseInt(cfg && cfg.silenceOffset, 10) || 1)),
+    count: Math.max(1, Math.min(50, parseInt(cfg && cfg.silenceCount, 10) || 1)),
+  };
+}
+
+function silenceGate(key) {
+  if (!state.silenceGates[key]) {
+    state.silenceGates[key] = { hits: 0, armed: false, from: null, sent: 0, triggeredAt: null, reason: null };
+  }
+  return state.silenceGates[key];
+}
+
+function resetSilenceGate(key) {
+  state.silenceGates[key] = { hits: 0, armed: false, from: null, sent: 0, triggeredAt: null, reason: null };
+  return state.silenceGates[key];
+}
+
+function isSilenceEvent(pred, s) {
+  if (s.trigger === 'perte') return pred.status === 'perdu';
+  return (pred.step || 0) >= s.ratLevel;
+}
+
+// mise à jour à chaque prédiction terminée
+function noteClosedSilence(pred) {
+  const cfg = state.strategies[pred.strategy];
+  const s = silenceCfg(cfg);
+  if (!s.enabled) return;
+  const g = silenceGate(pred.strategy);
+  if (g.armed) return;                       // fenêtre déjà ouverte
+  if (!isSilenceEvent(pred, s)) return;
+  g.hits += 1;
+  const need = s.trigger === 'perte' ? s.lossCount : s.ratCount;
+  if (g.hits < need) return;
+  g.armed = true;
+  g.hits = 0;
+  g.sent = 0;
+  g.triggeredAt = pred.target;
+  g.from = Number(pred.target) + s.offset;   // ex. 23 + 10 → 33
+  g.reason = s.trigger === 'perte'
+    ? `${need} perte(s), dernière sur #N${pred.target}`
+    : `${need} fois rattrapage ${s.ratLevel}, dernier sur #N${pred.target}`;
+}
+
+// cette prédiction doit-elle partir dans le canal silencieux ?
+function silenceShouldSend(pred) {
+  const cfg = state.strategies[pred.strategy];
+  const s = silenceCfg(cfg);
+  if (!s.enabled) return false;
+  const g = silenceGate(pred.strategy);
+  if (!g.armed || g.from == null) return false;
+  if (g.sent >= s.count) { resetSilenceGate(pred.strategy); return false; }
+  return Number(pred.target) >= Number(g.from);
+}
+
+// consommation après un envoi silencieux
+function noteSilenceSent(key) {
+  const s = silenceCfg(state.strategies[key]);
+  if (!s.enabled) return;
+  const g = silenceGate(key);
+  if (!g.armed) return;
+  g.sent += 1;
+  if (g.sent >= s.count) resetSilenceGate(key);
+}
+
+// état lisible du mode silencieux
+function silenceView(key) {
+  const cfg = state.strategies[key] || {};
+  const s = silenceCfg(cfg);
+  const g = silenceGate(key);
+  const need = s.trigger === 'perte' ? s.lossCount : s.ratCount;
+  const wait = s.trigger === 'perte'
+    ? `${need} perte(s)`
+    : `${need} fois un rattrapage ${s.ratLevel}`;
+  return {
+    enabled: s.enabled,
+    trigger: s.trigger,
+    lossCount: s.lossCount,
+    ratLevel: s.ratLevel,
+    ratCount: s.ratCount,
+    offset: s.offset,
+    count: s.count,
+    armed: !!g.armed,
+    hits: g.hits,
+    from: g.from,
+    sent: g.sent,
+    triggeredAt: g.triggeredAt,
+    channels: strategyChannels(key, 'silence'),
+    label: !s.enabled
+      ? "Mode d'activation silencieux désactivé"
+      : g.armed
+        ? `Fenêtre ouverte depuis #N${g.from} (+${s.offset}) — ${g.sent}/${s.count} prédiction(s) envoyée(s)`
+        : `En attente de ${wait} (puis départ au jeu déclencheur +${s.offset}, ${s.count} prédiction(s))`,
+  };
+}
+
 // une prédiction de cette stratégie peut-elle partir dans le canal ?
 function canSend(key) {
   const cfg = state.strategies[key];
   if (!cfg) return true;
+  // le déclencheur automatique remplace le filtre « double perte » quand il est actif
+  if (cfg.autoEnabled) return !!autoGate(key).armed;
   if (!cfg.silent) return true;
   applyAutoUnlock(key);
   return !!gate(key).armed;
@@ -316,6 +573,8 @@ function gateView(key) {
     autoUnlocked: !!g.autoUnlockedAt,
     autoUnlockReason: g.autoUnlockReason || null,
     silent: !!cfg.silent,
+    auto: autoView(key),
+    silence: silenceView(key),
     lossWindow: max,
     resetOnWin: cfg.resetOnWin !== false,
     armed: !!g.armed,
@@ -323,7 +582,9 @@ function gateView(key) {
     used: g.window,
     left: g.losses === 1 ? Math.max(0, max - g.window) : null,
     sending: canSend(key),
-    label: !cfg.silent
+    label: cfg.autoEnabled
+      ? autoView(key).label
+      : !cfg.silent
       ? 'Envoi direct (mode silencieux désactivé)'
       : g.armed
         ? (g.autoUnlockReason ? `Envoi ACTIF (${g.autoUnlockReason})` : `Envoi ACTIF : ${need} perte(s) confirmée(s)`)
@@ -376,6 +637,7 @@ function setOnFinished(fn) { onFinishedHook = fn; }
 function resetShoe(reason = 'nouveau sabot') {
   state.games.clear();
   state.history = [];
+  state.freshFinished = [];
   state.triggersDone = {};
   state.lastFinished = null;
   for (const s of SUITS) state.counters[s] = 0;
@@ -476,6 +738,8 @@ function onFinished(round) {
   state.history.unshift(round);
   state.history = state.history.slice(0, 200);
   bumpCounters(round);
+  state.freshFinished.push(round);
+  if (state.freshFinished.length > 20) state.freshFinished = state.freshFinished.slice(-20);
   if (onFinishedHook) { try { onFinishedHook(round); } catch (_) {} }
 }
 
@@ -486,11 +750,24 @@ function evaluate() {
   initStrategies();
   syncCostume();
   const out = [];
+  // CORRECTIF : plusieurs tours peuvent se terminer entre deux passages. On
+  // évalue CHAQUE tour terminé (dans l'ordre) et plus seulement le dernier,
+  // sinon un déclencheur (ex. retour de carte pour la stratégie Ombre) est perdu.
+  const fresh = state.freshFinished.length
+    ? [...state.freshFinished].sort((a, b) => a.number - b.number)
+    : state.lastFinished ? [state.lastFinished] : [];
+  state.freshFinished = [];
+  const jobs = [];
   for (const def of strategies.LIST) {
     const cfg = state.strategies[def.key];
     if (!cfg || !cfg.enabled) continue;
-    const source = def.source === 'live' ? state.live : state.lastFinished;
-    if (!source) continue;
+    if (def.source === 'live') {
+      if (state.live) jobs.push([def, cfg, state.live]);
+    } else {
+      for (const g of fresh) jobs.push([def, cfg, g]);
+    }
+  }
+  for (const [def, cfg, source] of jobs) {
     let hit = null;
     try {
       hit = def.detect(source, cfg, { counters: state.counters, games: state.games });
@@ -934,6 +1211,15 @@ module.exports = {
   sweepAutoUnlock,
   canSend,
   gateView,
+  autoView,
+  autoGate,
+  resetAutoGate,
+  noteSent,
+  silenceView,
+  silenceGate,
+  resetSilenceGate,
+  silenceShouldSend,
+  noteSilenceSent,
   resetGate,
   noteClosed,
   shadowRuntime,

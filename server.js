@@ -11,6 +11,7 @@ const miner = require('./pattern-miner');
 const aiAuto = require('./ai-auto');
 const cumulative = require('./cumulative');
 const advisor = require('./strategy-advisor');
+const predit = require('./predit');
 const {
   state, stats, predictionMessage, recentGames, SUITS,
   setStrategyConfig, resetStrategy, initStrategies, parityRuntime,
@@ -58,6 +59,7 @@ app.get('/api/state', (req, res) => {
       key: d.key, name: d.name, about: d.about, usesB: !!d.usesB,
       config: state.strategies[d.key] || {}, stats: stats(d.key),
     })),
+    predit: predit.status(),
     predictions: state.predictions.slice(0, 50).map((p) => ({
       strategy: p.strategy, strategyName: p.strategyName, label: p.label,
       target: p.target, suit: p.suit, hand: p.hand, step: p.step, maxR: p.maxR,
@@ -222,8 +224,10 @@ function strategyPayload(key) {
     channels: cfg.publishedChannels || cfg.channels || [],
     publishedChannels: cfg.publishedChannels || cfg.channels || [],
     shadowChannels: cfg.shadowChannels || [],
+    silenceChannels: cfg.silenceChannels || [],
     channelInfos: cfg.publishedChannelInfos || cfg.channelInfos || [],
     shadowChannelInfos: cfg.shadowChannelInfos || [],
+    silenceChannelInfos: cfg.silenceChannelInfos || [],
     sentCount: cfg.sentCount || 0,
     lastSentAt: cfg.lastSentAt || null,
     bot: botStatus(),
@@ -320,10 +324,10 @@ app.post('/api/strategies/:key', async (req, res) => {
     req.body.channels !== undefined ||
     req.body.channelId !== undefined ||
     req.body.publishedChannels !== undefined ||
-    req.body.shadowChannels !== undefined
+    req.body.shadowChannels !== undefined || req.body.silenceChannels !== undefined
   );
   const notice = touched
-    ? await announceConfig(req.params.key, req.body.mode === 'shadow' ? 'shadow' : 'published')
+    ? await announceConfig(req.params.key, req.body.mode === 'shadow' ? 'shadow' : req.body.mode === 'silence' ? 'silence' : 'published')
     : null;
   await cumulative.purgeStaleFor(cumulative.strategySignature());
   cumulative.tick();
@@ -334,7 +338,7 @@ app.post('/api/strategies/:key', async (req, res) => {
 app.post('/api/strategies/:key/channel', async (req, res) => {
   const key = req.params.key;
   if (!strategies.BY_KEY[key]) return res.status(404).json({ error: 'Stratégie inconnue' });
-  const mode = req.body.mode === 'shadow' ? 'shadow' : 'published';
+  const mode = req.body.mode === 'shadow' ? 'shadow' : req.body.mode === 'silence' ? 'silence' : 'published';
   const raw = String(req.body.channelId || '').trim();
   if (!raw) return res.status(400).json({ error: "Renseigne l'ID du canal (ex : -1001234567890 ou @moncanal)" });
   if (!botStatus().tokenSet) {
@@ -348,11 +352,14 @@ app.post('/api/strategies/:key/channel', async (req, res) => {
       error: `Le bot n'est pas administrateur de « ${check.chat.title} » avec le droit « Publier des messages ».`,
     });
   }
-  const cfg = setStrategyConfig(key, mode === 'shadow'
-    ? { shadowChannelId: String(check.chat.id) }
-    : { publishedChannels: [String(check.chat.id)] });
+  const cfg = setStrategyConfig(key, mode === 'silence'
+    ? { silenceChannelId: String(check.chat.id) }
+    : mode === 'shadow'
+      ? { shadowChannelId: String(check.chat.id) }
+      : { publishedChannels: [String(check.chat.id)] });
   const notice = await announceConfig(key, mode);
-  if (mode === 'shadow') cfg.shadowChannelInfos = notice.channels || [check.chat];
+  if (mode === 'silence') cfg.silenceChannelInfos = notice.channels || [check.chat];
+  else if (mode === 'shadow') cfg.shadowChannelInfos = notice.channels || [check.chat];
   else cfg.publishedChannelInfos = notice.channels || [check.chat];
   persist();
   if (db.ready) await db.saveStrategy(key, strategies.BY_KEY[key].name, cfg);
@@ -362,8 +369,10 @@ app.post('/api/strategies/:key/channel', async (req, res) => {
 // retirer le canal d'une stratégie
 app.delete('/api/strategies/:key/channel', async (req, res) => {
   if (!strategies.BY_KEY[req.params.key]) return res.status(404).json({ error: 'Stratégie inconnue' });
-  const mode = req.body && req.body.mode === 'shadow' ? 'shadow' : 'published';
-  const cfg = mode === 'shadow'
+  const mode = req.body && (req.body.mode === 'shadow' || req.body.mode === 'silence') ? req.body.mode : 'published';
+  const cfg = mode === 'silence'
+    ? setStrategyConfig(req.params.key, { silenceChannels: [], silenceChannelInfos: [] })
+    : mode === 'shadow'
     ? setStrategyConfig(req.params.key, { shadowChannels: [], shadowChannelInfos: [] })
     : setStrategyConfig(req.params.key, { publishedChannels: [], publishedChannelInfos: [], channels: [], channelInfos: [] });
   persist();
@@ -374,7 +383,7 @@ app.delete('/api/strategies/:key/channel', async (req, res) => {
 // test d'envoi réel dans le canal configuré
 app.post('/api/strategies/:key/test', async (req, res) => {
   if (!strategies.BY_KEY[req.params.key]) return res.status(404).json({ error: 'Stratégie inconnue' });
-  const r = await testSend(req.params.key, req.body && req.body.mode === 'shadow' ? 'shadow' : 'published');
+  const r = await testSend(req.params.key, req.body && (req.body.mode === 'shadow' || req.body.mode === 'silence') ? req.body.mode : 'published');
   persist();
   if (!r.ok) return res.status(400).json({ error: r.error || (r.failed || []).map((f) => `${f.id} : ${f.error}`).join(' / ') });
   res.json(r);
@@ -572,18 +581,52 @@ app.delete('/api/ai/strategies/:id', (req, res) => {
   res.json({ ok: true, savedStrategies: state.aiStrategies });
 });
 
+
+// --- panneau « Prédit » (prédictions certifiées 100%) -----------------------
+app.get('/api/predit', (req, res) => res.json(predit.status()));
+
+app.post('/api/predit/config', (req, res) => {
+  predit.configure(req.body || {});
+  res.json(predit.status());
+});
+
+app.post('/api/predit/channel', async (req, res) => {
+  const ids = predit.parseChannels(req.body && req.body.channelId);
+  if (!ids.length) return res.status(400).json({ error: 'ID de canal invalide' });
+  const check = await resolveChat(ids[0]);
+  if (!check.ok) return res.status(400).json({ error: check.error });
+  predit.configure({ channels: ids });
+  const notice = await predit.test();
+  res.json({ ok: true, channel: check.chat, notice, predit: predit.status() });
+});
+
+app.delete('/api/predit/channel', (req, res) => {
+  predit.configure({ channels: [] });
+  res.json(predit.status());
+});
+
+app.post('/api/predit/test', async (req, res) => {
+  const r = await predit.test();
+  res.status(r.ok ? 200 : 400).json(r);
+});
+
+app.post('/api/predit/scan', async (req, res) => {
+  await predit.tick();
+  res.json(predit.status());
+});
+
 // --- diagnostic complet des envois de prédictions ---------------------------
 app.get('/api/diagnostics/channels', async (req, res) => {
   const bot = botStatus();
   const out = [];
   for (const def of strategies.LIST) {
     const cfg = state.strategies[def.key] || {};
-    const entry = { key: def.key, name: def.name, enabled: !!cfg.enabled, silent: !!cfg.silent, published: [], shadow: [], sendError: state.sendErrors[def.key] || null, sentCount: cfg.sentCount || 0, lastSentAt: cfg.lastSentAt || null };
-    for (const mode of ['published', 'shadow']) {
+    const entry = { key: def.key, name: def.name, enabled: !!cfg.enabled, silent: !!cfg.silent, silenceMode: !!cfg.silenceMode, published: [], shadow: [], silence: [], sendError: state.sendErrors[def.key] || null, sentCount: cfg.sentCount || 0, lastSentAt: cfg.lastSentAt || null };
+    for (const mode of ['published', 'shadow', 'silence']) {
       const ids = strategyChannels(def.key, mode);
       for (const id of ids) {
         const check = bot.tokenSet ? await resolveChat(id) : { ok: false, error: 'Aucun token Telegram configuré' };
-        entry[mode === 'shadow' ? 'shadow' : 'published'].push(check.ok
+        entry[mode].push(check.ok
           ? { id, title: check.chat.title, type: check.chat.type, canPost: check.chat.canPost, ok: check.chat.canPost !== false }
           : { id, ok: false, error: check.error });
       }

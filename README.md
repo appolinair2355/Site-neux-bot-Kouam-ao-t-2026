@@ -106,3 +106,18 @@ public et silencieux, le droit de publier et la dernière erreur d'envoi.
 5. **Analyse cumulative** : paliers 1→4, 1→8, 1→12 … jusqu'au jeu 1440.
 6. **Nouveau panneau « Avis IA sur les stratégies existantes »** : avis et
    conseils cumulés (`/api/ai/strategy-advice`).
+
+
+## Panneau « Prédit » (nouveau)
+
+- Page web : onglet **Prédit** (`#/predit`).
+- L'analyseur IA tourne en continu. Dès qu'une règle atteint **100 % de réussite**
+  sur au moins N observations (réglable), elle est **certifiée** et entre dans le panneau.
+- Chaque prédiction d'une stratégie certifiée est envoyée dans le **canal Telegram du panneau**
+  (indépendant des canaux des autres stratégies).
+- Si une **deuxième** stratégie atteint aussi 100 % pendant que la première reste à 100 %,
+  les deux prédisent automatiquement ; quand elles visent le même jeu avec le même costume,
+  le message part en **double confirmation**.
+- Dès qu'une stratégie certifiée perd une prédiction, elle est retirée automatiquement du panneau.
+- API : `GET /api/predit`, `POST /api/predit/config`, `POST /api/predit/channel`,
+  `DELETE /api/predit/channel`, `POST /api/predit/test`, `POST /api/predit/scan`.

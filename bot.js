@@ -4,13 +4,15 @@ const config = require('./config');
 const api = require('./api');
 const store = require('./store');
 const db = require('./db');
+const predit = require('./predit');
 const fmt = require('./formats');
 const strategies = require('./strategies');
 const {
   state, evaluate, verify, registerGames, setOnFinished,
   predictionText, predictionMessage, liveText, stats, SUITS,
   initStrategies, setStrategyConfig, resetStrategy, strategyChannels, parityRuntime,
-  bilanText, canSend, gateView, shadowRuntime, sweepAutoUnlock, unlockGate,
+  bilanText, canSend, gateView, autoView, noteSent, shadowRuntime, sweepAutoUnlock, unlockGate,
+  silenceView, silenceShouldSend, noteSilenceSent,
 } = require('./predictor');
 
 let bot = null;
@@ -111,6 +113,7 @@ const HELP =
   '/setb <n> — compteur B (apparitions consécutives max)\n' +
   '/setmaxr <n> — nombre de rattrapages vérifiés\n' +
   '/setformat <1-87> — style du message de prédiction (87 = nouveau format)\n' +
+  '/modesilence <clé> <on|off> [perte|rattrapage] [n] [+N] [nb] [niveau] — mode d\'activation silencieux\n' +
   '/formats [page] — liste des 87 styles (80-83 pair/impair, 84-86 ombre, 87 nouveau format)\n' +
   '/apercu <n> — aperçu complet d\'un style (⌛ / ✅ / ❌)\n' +
   '/settemplate <texte> — style personnalisé ({game} {emoji} {suit} {status} {maxR})\n' +
@@ -516,6 +519,36 @@ function wire(b) {
     );
   });
 
+  // Nouveau mode d'activation silencieux :
+  // /modesilence <clé> <on|off> [perte|rattrapage] [nb déclencheurs] [+N] [nb prédictions]
+  b.onText(/^\/modesilence(?:\s+(\w+))?(?:\s+(\w+))?(?:\s+(perte|rattrapage))?(?:\s+(\d+))?(?:\s+\+?(\d+))?(?:\s+(\d+))?(?:\s+(\d+))?/i, (msg, m) => {
+    if (!isAdmin(msg)) return deny(msg.chat.id);
+    const key = (m[1] || '').toLowerCase();
+    if (!strategies.BY_KEY[key]) {
+      return b.sendMessage(msg.chat.id,
+        "ℹ️ Usage : /modesilence <clé> <on|off> [perte|rattrapage] [nombre de déclencheurs] [décalage +N] [nombre de prédictions]\n" +
+        "Exemple : /modesilence costume on perte 1 10 6\n" +
+        "Rattrapage : /modesilence <clé> on rattrapage <nb de fois> <+N> <nb préd.> <niveau 2|3|4>");
+    }
+    const patch = {};
+    if (m[2]) patch.silenceMode = /^(on|oui|1|actif|true)$/i.test(m[2]);
+    if (m[3]) patch.silenceTrigger = m[3].toLowerCase();
+    if (m[4]) { const n = parseInt(m[4], 10); if (patch.silenceTrigger === 'rattrapage' || (m[3] || '').toLowerCase() === 'rattrapage') patch.silenceRatCount = n; else patch.silenceLossCount = n; }
+    if (m[5]) patch.silenceOffset = parseInt(m[5], 10);
+    if (m[6]) patch.silenceCount = parseInt(m[6], 10);
+    if (m[7]) patch.silenceRatLevel = parseInt(m[7], 10);
+    setStrategyConfig(key, patch);
+    persist();
+    const v = silenceView(key);
+    b.sendMessage(msg.chat.id,
+      `🤫 ${strategies.BY_KEY[key].name}\n` +
+      `• Mode d'activation silencieux : ${v.enabled ? 'activé' : 'désactivé'}\n` +
+      `• Déclencheur : ${v.trigger === 'perte' ? `${v.lossCount} perte(s)` : `${v.ratCount} fois rattrapage ${v.ratLevel}`}\n` +
+      `• Décalage : +${v.offset} jeux après le jeu déclencheur\n` +
+      `• Prédictions envoyées avant l'arrêt : ${v.count}\n` +
+      `• Canal : ${(v.channels || []).join(', ') || 'aucun'}\n\n${v.label}`);
+  });
+
   b.onText(/^\/debloquer(?:\s+(\w+))?/, (msg, m) => {
     if (!isAdmin(msg)) return deny(msg.chat.id);
     const key = (m[1] || '').toLowerCase();
@@ -765,7 +798,7 @@ async function announceConfig(key, mode = 'published') {
   const cfg = state.strategies[key] || {};
   const ids = strategyChannels(key, mode);
   if (!def) return { ok: false, error: 'Stratégie inconnue' };
-  if (!ids.length) return { ok: false, error: `Aucun canal ${mode === 'shadow' ? 'silencieux' : 'public'} configuré pour cette stratégie` };
+  if (!ids.length) return { ok: false, error: `Aucun canal ${mode === 'published' ? 'public' : 'silencieux'} configuré pour cette stratégie` };
   const sender = senderFor();
   if (!sender) return { ok: false, error: "Aucun token API configuré dans les réglages" };
 
@@ -785,8 +818,8 @@ async function announceConfig(key, mode = 'published') {
       `🤖 Bot : @${state.botUsername || 'bot'} (token des réglages)\n` +
       `🎯 Format ${cfg.format} • +${cfg.maxR} rattrapage(s)\n` +
       `📊 Bilan automatique : ${cfg.bilan === false ? 'non' : 'oui'}\n` +
-      `🧭 Routage : ${mode === 'shadow' ? 'prédictions silencieuses' : 'prédictions activées'}\n\n` +
-      `Ce canal recevra désormais les ${mode === 'shadow' ? 'prédictions silencieuses' : 'prédictions publiées'} de cette stratégie. 🚀`;
+      `🧭 Routage : ${mode === 'published' ? 'prédictions activées' : mode === 'silence' ? "prédictions du mode d'activation silencieux" : 'prédictions silencieuses'}\n\n` +
+      `Ce canal recevra désormais les ${mode === 'published' ? 'prédictions publiées' : 'prédictions silencieuses'} de cette stratégie. 🚀`;
     try {
       // l'envoi est tenté même si getChat a échoué : certains canaux ne
       // répondent pas à getChat mais acceptent parfaitement les messages.
@@ -804,7 +837,8 @@ async function announceConfig(key, mode = 'published') {
     }
     infos.push(info);
   }
-  if (mode === 'shadow') cfg.shadowChannelInfos = infos;
+  if (mode === 'silence') cfg.silenceChannelInfos = infos;
+  else if (mode === 'shadow') cfg.shadowChannelInfos = infos;
   else {
     cfg.channelInfos = infos;
     cfg.publishedChannelInfos = infos;
@@ -825,10 +859,10 @@ async function testSend(key, mode = 'published') {
   const sender = senderFor();
   if (!sender) return { ok: false, error: "Aucun token API configuré dans les réglages" };
   const ids = strategyChannels(key, mode);
-  if (!ids.length) return { ok: false, error: `Aucun canal ${mode === 'shadow' ? 'silencieux' : 'public'} configuré pour cette stratégie` };
+  if (!ids.length) return { ok: false, error: `Aucun canal ${mode === 'published' ? 'public' : 'silencieux'} configuré pour cette stratégie` };
   const cfg = state.strategies[key] || {};
   const preview = fmt.formatPreview(cfg.format, { maxR: cfg.maxR });
-  const text = `🧪 TEST D'ENVOI\n\n🧠 ${def.name}\n🧭 ${mode === 'shadow' ? 'Canal silencieux' : 'Canal public'}\n\n${preview}\n\nSi tu vois ce message, le routage est correctement configuré. ✅`;
+  const text = `🧪 TEST D'ENVOI\n\n🧠 ${def.name}\n🧭 ${mode === 'published' ? 'Canal public' : mode === 'silence' ? "Canal du mode d'activation silencieux" : 'Canal silencieux'}\n\n${preview}\n\nSi tu vois ce message, le routage est correctement configuré. ✅`;
   const sent = [];
   const failed = [];
   for (const id of ids) {
@@ -900,6 +934,26 @@ async function broadcast(pred) {
     state.sendErrors[pred.strategy] = 'Aucun token Telegram configuré';
     return;
   }
+  // ── Mode d'activation SILENCIEUX ────────────────────────────────────────
+  // Quand il est actif il pilote seul l'envoi de la stratégie : rien ne part
+  // tant que le déclencheur (pertes / rattrapages) n'a pas ouvert la fenêtre,
+  // puis les prédictions à partir du jeu « déclencheur + N » sont envoyées
+  // dans le canal silencieux configuré, jusqu'au nombre demandé.
+  const silCfg = state.strategies[pred.strategy] || {};
+  if (silCfg.silenceMode) {
+    const view = silenceView(pred.strategy);
+    pred.silent = true;
+    pred.silenceMode = true;
+    pred.gate = view.label;
+    if (!silenceShouldSend(pred)) return;
+    const silIds = strategyChannels(pred.strategy, 'silence');
+    if (!silIds.length) { state.sendErrors[pred.strategy] = 'Aucun canal silencieux configuré'; return; }
+    await sendPrediction(pred, sender, silIds);
+    if (pred.messages.length) noteSilenceSent(pred.strategy);
+    pred.gate = silenceView(pred.strategy).label;
+    return;
+  }
+
   // Une prédiction en mode silencieux est envoyée uniquement au canal silencieux.
   // Elle ne fuit jamais vers le canal public avant le déclenchement double perte.
   if (!canSend(pred.strategy)) {
@@ -914,6 +968,11 @@ async function broadcast(pred) {
   const ids = strategyChannels(pred.strategy);
   if (!ids.length) { state.sendErrors[pred.strategy] = 'Aucun canal configuré'; return; }
   await sendPrediction(pred, sender, ids);
+  // panneau « Prédit » : reprise si la stratégie est certifiée 100%
+  try { await predit.mirror(pred); } catch (e) { predit.panel.lastError = e.message; }
+  // le déclencheur automatique consomme l'autorisation d'envoi
+  if (pred.messages.length) noteSent(pred.strategy);
+  pred.gate = gateView(pred.strategy).label;
 }
 
 async function sendPrediction(pred, sender, ids) {
@@ -992,6 +1051,9 @@ async function tick() {
 
     const preds = evaluate();
     for (const pred of preds) await broadcast(pred);
+
+    // panneau « Prédit » : prédictions certifiées à 100% (IA)
+    await predit.tick();
   } catch (e) {
     state.lastError = e.message;
   }
@@ -1065,6 +1127,8 @@ async function applyDbConfigs() {
 }
 
 async function startLoop() {
+  predit.restore();
+  predit.setSender(senderFor);
   // base de données : chaque jeu terminé est archivé par date
   setOnFinished((round) => { if (db.ready) db.saveGame(round); });
   const s = await db.connect();
@@ -1085,4 +1149,4 @@ async function startLoop() {
   startBot();
 }
 
-module.exports = { setMainChannel, broadcast, sendPrediction, updateResult, startLoop, startBot, botStatus, activate, deactivate, persist, listChannels, sendBilan, dropSender, announceConfig, announceMainBot, resolveChat, testSend, senderFor, saveConfigsToDb, applyDbConfigs };
+module.exports = { predit, setMainChannel, broadcast, sendPrediction, updateResult, startLoop, startBot, botStatus, activate, deactivate, persist, listChannels, sendBilan, dropSender, announceConfig, announceMainBot, resolveChat, testSend, senderFor, saveConfigsToDb, applyDbConfigs };

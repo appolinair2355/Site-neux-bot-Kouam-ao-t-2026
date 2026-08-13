@@ -7,7 +7,7 @@
 
 const tg = require('./tg-formats');
 
-const FORMAT_COUNT = 87;   // 87 = nouveau format officiel de prédiction
+const FORMAT_COUNT = 88;   // 88 = format LUXE BACCARA (Jeu · costume · Dogon)
 
 // costumes utilisés par le moteur (avec sélecteur emoji) -> clés de tg-formats
 function normalizeSuit(suit) {

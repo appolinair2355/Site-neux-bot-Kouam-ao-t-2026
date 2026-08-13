@@ -174,7 +174,9 @@ function rankBuckets(buckets, build, minRate = MIN_RATE) {
       const hits = b.hits[suit] || 0;
       const rate = pct(hits, b.support);
       if (rate < minRate) continue;
-      out.push({ score: rate * Math.log2(b.support + 1), rate, suit, ...build(b, suit, rate) });
+      const built = build(b, suit, rate);
+      const rule = { kind: built.kind, hand: b.hand || 'joueur', token: b.token, value: b.value != null ? b.value : null, k: b.k, suit };
+      out.push({ score: rate * Math.log2(b.support + 1), rate, support: b.support, hits: b.hits[suit] || 0, suit, rule, ...built });
     }
   }
   return out.sort((a, b) => b.score - a.score);
@@ -378,7 +380,7 @@ function mine(rawGames = [], options = {}) {
     sample: games.length,
     findings: [...day.findings, ...kept.map((k) => k.finding)],
     proposals: [...day.proposals, ...kept.map((k) => k.proposal)],
-    discoveries: kept.map(({ kind, rate, finding, proposal }) => ({ kind, rate, finding, proposal })),
+    discoveries: kept.map(({ kind, rate, support, hits, suit, rule, finding, proposal }) => ({ kind, rate, support: support || 0, hits: hits || 0, suit, rule: rule || null, finding, proposal })),
     replacements: suitReplacements(games, lead),
     dayMatches: day.matches,
     note: null,

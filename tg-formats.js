@@ -1,4 +1,4 @@
-// tg-formats.js — Formats de messages Telegram pour Baccarat Pro (N°1 à N°86)
+// tg-formats.js — Formats de messages Telegram pour Baccarat Pro (N°1 à N°88)
 // Fichier dédié aux 77 formats de prédiction — aucun saut de numéro.
 // Importer avec : const { buildTgMessage, buildPredictionMsg, buildResultMsg, ... } = require('./tg-formats');
 
@@ -1038,6 +1038,22 @@ function buildTgMessage(formatId, {
           `🔁 Rattrapage : +${maxR}\n` +
           `━━━━━━━━━━━━━━━\n` +
           `📊 Statut : ${sl87}`,
+        parse_mode: null,
+      };
+    }
+
+    // ── Format 88 : LUXE BACCARA (format compact demandé) ─────────────────
+    case 88: {
+      const cible88 = suit === 'pair' || suit === 'impair'
+        ? (suit === 'pair' ? 'PAIR' : 'IMPAIR')
+        : cardsLabel ? cardsLabel : emoji;
+      let sl88 = '';
+      if (status === 'gagne')      sl88 = `  ·  ✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}`;
+      else if (status === 'perdu') sl88 = '  ·  ❌';
+      return {
+        text:
+          `🌹 𝐋𝐔𝐗𝐄 𝐁𝐀𝐂𝐂𝐀𝐑𝐀 🌹\n` +
+          `🎱 Jeu #N${gameNumber}  ·  ${cible88}  ·  Dogon +${maxR}${sl88}`,
         parse_mode: null,
       };
     }
