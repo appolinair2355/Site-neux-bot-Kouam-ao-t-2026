@@ -62,9 +62,9 @@
       "absence": 4,
       "varStep": 0,
       "decalage": 1,
-      "sentCount": 34,
+      "sentCount": 40,
       "startGame": 1,
-      "lastSentAt": 1786579011754,
+      "lastSentAt": 1786639511179,
       "channelInfos": [
         {
           "id": -1003329818758,
@@ -131,9 +131,9 @@
       "absence": 4,
       "varStep": 0,
       "decalage": 1,
-      "sentCount": 13,
+      "sentCount": 16,
       "startGame": 1,
-      "lastSentAt": 1786579011526,
+      "lastSentAt": 1786639442106,
       "channelInfos": [
         {
           "id": -1003329818758,
@@ -196,8 +196,8 @@
       "channels": [
         -1002887687164
       ],
-      "sentCount": 9,
-      "lastSentAt": 1786579012195,
+      "sentCount": 12,
+      "lastSentAt": 1786639268310,
       "channelInfos": [
         {
           "id": -1002887687164,
@@ -265,8 +265,8 @@
       "scope": "tous",
       "streak": 3,
       "absence": 4,
-      "sentCount": 10,
-      "lastSentAt": 1786579053554,
+      "sentCount": 12,
+      "lastSentAt": 1786639562184,
       "channelInfos": [
         {
           "id": -1003848194038,
@@ -410,7 +410,7 @@
         "ties": 0
       },
       "sample": 0,
-      "generatedAt": "2026-08-13T16:32:59.524Z"
+      "generatedAt": "2026-08-13T19:18:54.587Z"
     }
   ],
   "aiStrategies": [],
@@ -419,6 +419,8 @@
     "channels": [],
     "minSample": 8,
     "maxR": 2,
+    "format": 1,
+    "perStrategy": 2,
     "requireCombo": false
   }
 }

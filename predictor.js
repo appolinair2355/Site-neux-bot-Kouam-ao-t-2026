@@ -986,8 +986,10 @@ function parityRuntime() {
 // ---------------------------------------------------------------------------
 function bilanText(key) {
   const s = stats(key);
+  const def = key ? strategies.BY_KEY[key] : null;
   return (
-    '📊 STATISTIQUE 📈\n\n\n' +
+    '📊 STATISTIQUE 📈\n\n' +
+    (def ? `🧠 Stratégie : ${def.name}\n\n` : '') +
     `🟢 GAIN : ${s.win}\n` +
     `🔴 PERTE : ${s.loss}\n\n\n` +
     `✅ Taux de réussite : ${s.rate} %`

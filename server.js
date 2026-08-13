@@ -12,6 +12,7 @@ const aiAuto = require('./ai-auto');
 const cumulative = require('./cumulative');
 const advisor = require('./strategy-advisor');
 const predit = require('./predit');
+const dayCompare = require('./day-compare');
 const {
   state, stats, predictionMessage, recentGames, SUITS,
   setStrategyConfig, resetStrategy, initStrategies, parityRuntime,
@@ -266,6 +267,15 @@ app.post('/api/strategies/:key/bilan', async (req, res) => {
   res.json({ ok: true, text: bilanText(req.params.key) });
 });
 
+// bilan séparé par stratégie
+app.get('/api/bilans', (req, res) => {
+  res.json({
+    bilans: strategies.LIST.map((d) => ({
+      key: d.key, name: d.name, stats: stats(d.key), text: bilanText(d.key),
+    })),
+  });
+});
+
 // panneau des prédictions : silencieuses et publiées, séparées
 app.get('/api/predictions', (req, res) => {
   res.json(predictionsPanel(Math.min(200, parseInt(req.query.limit, 10) || 60)));
@@ -437,6 +447,38 @@ app.get('/api/ai/patterns', async (req, res) => {
   }
   const result = miner.mine(games, { lead: 2, pastDays, todayGames: games });
   res.json({ ...result, generatedAt: new Date().toISOString(), pastDaysCount: pastDays.length });
+});
+
+// comparaison des statistiques des jours antérieurs et d'aujourd'hui
+app.get('/api/ai/compare-days', async (req, res) => {
+  const limit = Math.min(500, parseInt(req.query.limit, 10) || 300);
+  let games = [...state.history].slice(0, limit);
+  let pastDays = [];
+  if (db.ready) {
+    if (!games.length) games = await db.gamesByDate(null, limit);
+    await aiAuto.refreshPastDays(true);
+    pastDays = aiAuto.getPastDays();
+  }
+  res.json(dayCompare.compare(games, pastDays));
+});
+
+// création automatique des stratégies issues de la comparaison des journées
+app.post('/api/ai/compare-days/save', async (req, res) => {
+  const limit = 300;
+  let games = [...state.history].slice(0, limit);
+  let pastDays = [];
+  if (db.ready) {
+    if (!games.length) games = await db.gamesByDate(null, limit);
+    await aiAuto.refreshPastDays(true);
+    pastDays = aiAuto.getPastDays();
+  }
+  const result = dayCompare.compare(games, pastDays);
+  const created = [];
+  for (const proposal of result.proposals) {
+    const saved = aiAuto.saveProposal(proposal, 'auto-comparaison');
+    if (saved) created.push(saved.name);
+  }
+  res.json({ ok: true, created, total: result.proposals.length });
 });
 
 app.post('/api/ai/strategies', (req, res) => {

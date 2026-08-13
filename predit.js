@@ -1,22 +1,22 @@
 // predit.js — panneau « Prédit » : prédictions automatiques 100% sûres
 //
-//  • L'IA analyse les jeux en continu (pattern-miner + résultats réels des
-//    stratégies existantes).
-//  • Dès qu'une règle atteint 100% de réussite sur un échantillon suffisant,
-//    elle est CERTIFIÉE et entre dans ce panneau.
-//  • Chaque prédiction d'une règle certifiée est publiée dans le canal Telegram
-//    du panneau « Prédit ».
-//  • Si une deuxième règle atteint aussi 100% et que la première reste à 100%,
-//    LES DEUX prédisent automatiquement ensemble. Quand elles visent le même
-//    jeu avec le même costume, le message part en « double confirmation ».
-//  • Dès qu'une règle certifiée perd (elle n'est plus à 100%), elle est retirée
-//    automatiquement du panneau.
+//  • SEULES les stratégies CRÉÉES PAR L'IA (règles découvertes par l'analyseur)
+//    qui atteignent 100% de réussite entrent dans ce panneau. Les stratégies
+//    existantes du bot ne sont JAMAIS utilisées ici.
+//  • Le message envoyé dans le canal utilise le FORMAT DE PRÉDICTION CONFIGURÉ
+//    (les 88 formats). Le motif de la prédiction n'apparaît jamais dans le
+//    message : il est gardé dans l'historique de la stratégie.
+//  • Chaque stratégie certifiée ne prédit qu'un nombre configuré de fois
+//    (ex. 2). Ensuite elle est mise en pause et le panneau attend une NOUVELLE
+//    stratégie à 100% pour continuer à prédire.
+//  • Dès qu'une stratégie certifiée perd, elle est retirée automatiquement.
 'use strict';
 
 const miner = require('./pattern-miner');
 const strategies = require('./strategies');
 const store = require('./store');
-const { state, stats } = require('./predictor');
+const fmt = require('./formats');
+const { state } = require('./predictor');
 
 const SUITS = ['♦️', '❤️', '♣️', '♠️'];
 
@@ -25,10 +25,12 @@ const panel = {
   channels: [],        // canaux Telegram du panneau
   minSample: 6,        // observations minimum pour certifier une règle à 100%
   maxR: 1,             // rattrapages autorisés sur une prédiction du panneau
+  format: 1,           // format de prédiction utilisé pour les messages
+  perStrategy: 2,      // nombre de prédictions autorisées par stratégie créée
   requireCombo: false, // n'envoyer QUE les prédictions confirmées par 2 règles
-  certified: [],       // règles actuellement à 100%
-  retired: [],         // règles retirées (elles ont perdu leur 100%)
-  predictions: [],     // prédictions du panneau (les 120 dernières)
+  certified: [],       // règles IA actuellement à 100%
+  retired: [],         // règles retirées (perdues ou quota atteint)
+  predictions: [],     // prédictions du panneau (les 200 dernières)
   sentCount: 0,
   lastSentAt: null,
   lastScanAt: null,
@@ -64,6 +66,8 @@ function configure(patch = {}) {
   if (patch.channels !== undefined) panel.channels = parseChannels(patch.channels);
   if (patch.minSample !== undefined) panel.minSample = Math.max(3, Math.min(60, parseInt(patch.minSample, 10) || 6));
   if (patch.maxR !== undefined) panel.maxR = Math.max(0, Math.min(5, parseInt(patch.maxR, 10) || 0));
+  if (patch.format !== undefined) panel.format = fmt.clampFormat(patch.format);
+  if (patch.perStrategy !== undefined) panel.perStrategy = Math.max(1, Math.min(50, parseInt(patch.perStrategy, 10) || 1));
   persist();
   return config();
 }
@@ -74,6 +78,8 @@ function config() {
     channels: panel.channels,
     minSample: panel.minSample,
     maxR: panel.maxR,
+    format: panel.format,
+    perStrategy: panel.perStrategy,
     requireCombo: panel.requireCombo,
   };
 }
@@ -124,9 +130,9 @@ function triggered(rule, game) {
 }
 
 // ---------------------------------------------------------------------------
-// Certification : une règle n'entre ici QUE si elle est à 100%
+// Certification : SEULES les stratégies créées par l'IA à 100% entrent ici
 // ---------------------------------------------------------------------------
-function certifyDiscoveries(games) {
+function certifyDiscoveries() {
   const found = miner.mine(state.history || [], { lead: 2 });
   const list = (found.discoveries || []).filter(
     (d) => d.rule && Number(d.rate) >= 100 && Number(d.support || 0) >= panel.minSample,
@@ -145,46 +151,16 @@ function certifyDiscoveries(games) {
       type: 'ia',
       name: (d.proposal && d.proposal.name) || d.finding,
       finding: d.finding,
+      motif: (d.proposal && d.proposal.logic) || d.finding,
+      trigger: (d.proposal && d.proposal.trigger) || '',
       rule: d.rule,
       rate: d.rate,
       sample: d.support,
+      used: 0,
       win: 0,
       loss: 0,
       certifiedAt: new Date().toISOString(),
     });
-  }
-  return panel.certified;
-}
-
-// stratégies existantes qui affichent 100% de réussite réelle
-function certifyStrategies() {
-  for (const def of strategies.LIST) {
-    const st = stats(def.key);
-    const done = st.win + st.loss;
-    const id = `strat:${def.key}`;
-    const existing = panel.certified.find((c) => c.id === id);
-    const perfect = done >= panel.minSample && st.loss === 0 && st.rate >= 100;
-    if (perfect && !existing && !panel.retired.some((r) => r.id === id)) {
-      panel.certified.push({
-        id,
-        type: 'strategie',
-        key: def.key,
-        name: def.name,
-        finding: `Stratégie « ${def.name} » : ${st.win} gains, 0 perte (100%).`,
-        rule: null,
-        rate: 100,
-        sample: done,
-        win: st.win,
-        loss: 0,
-        certifiedAt: new Date().toISOString(),
-      });
-    } else if (existing) {
-      existing.rate = st.rate;
-      existing.sample = done;
-      existing.win = st.win;
-      existing.loss = st.loss;
-      if (st.loss > 0) retire(existing, `La stratégie n'est plus à 100% (${st.rate}%).`);
-    }
   }
   return panel.certified;
 }
@@ -194,8 +170,9 @@ function retire(entry, reason) {
   panel.retired = [{ ...entry, reason, retiredAt: new Date().toISOString() }, ...panel.retired].slice(0, 30);
 }
 
+// stratégies encore à 100% ET qui n'ont pas épuisé leur quota de prédictions
 function activeCertified() {
-  return panel.certified.filter((c) => c.rate >= 100);
+  return panel.certified.filter((c) => c.rate >= 100 && (c.used || 0) < panel.perStrategy);
 }
 
 // ---------------------------------------------------------------------------
@@ -205,12 +182,21 @@ function lastFinishedNumber(games) {
   return games.length ? games[games.length - 1].n : 0;
 }
 
+function motifOf(entry, game, target) {
+  return [
+    entry.trigger ? `Déclencheur : ${entry.trigger}` : null,
+    `Vu au jeu #N${game.n} → prédiction sur #N${target}`,
+    entry.motif || entry.finding || '',
+    `Fiabilité mesurée : ${entry.rate}% sur ${entry.sample} observation(s)`,
+  ].filter(Boolean).join(' · ');
+}
+
 function makePredictions(games) {
   const last = lastFinishedNumber(games);
   if (!last) return [];
   const created = [];
   for (const entry of activeCertified()) {
-    if (!entry.rule) continue; // les stratégies existantes passent par mirror()
+    if (!entry.rule) continue;
     for (let i = games.length - 1; i >= 0 && i >= games.length - 6; i -= 1) {
       const g = games[i];
       if (!triggered(entry.rule, g)) continue;
@@ -222,6 +208,8 @@ function makePredictions(games) {
         source: entry.id,
         sources: [{ id: entry.id, name: entry.name, rate: entry.rate, sample: entry.sample }],
         sourceName: entry.name,
+        // le motif reste dans l'historique de la stratégie, jamais dans le message
+        motif: motifOf(entry, g, target),
         trigger: g.n,
         target,
         suit: entry.rule.suit,
@@ -233,11 +221,13 @@ function makePredictions(games) {
         createdAt: new Date().toISOString(),
       };
       panel.predictions.unshift(pred);
+      entry.used = (entry.used || 0) + 1;
       created.push(pred);
+      if ((entry.used || 0) >= panel.perStrategy) entry.quotaAt = new Date().toISOString();
       break;
     }
   }
-  panel.predictions = panel.predictions.slice(0, 120);
+  panel.predictions = panel.predictions.slice(0, 200);
   return created;
 }
 
@@ -252,6 +242,7 @@ function mergeCombos(created) {
     if (twin) {
       twin.combo = true;
       twin.sources = [...twin.sources, ...pred.sources];
+      twin.motif = [twin.motif, pred.motif].filter(Boolean).join('\n');
       panel.predictions = panel.predictions.filter((p) => p !== pred);
       if (!out.includes(twin)) out.push(twin);
       twin.resend = true;
@@ -296,47 +287,48 @@ function verify(games) {
     for (const src of pred.sources) {
       const entry = panel.certified.find((c) => c.id === src.id);
       if (!entry) continue;
-      if (pred.status === 'gagné') { entry.win += 1; continue; }
-      entry.loss += 1;
-      entry.rate = 0;
-      retire(entry, `Prédiction perdue sur le jeu #N${pred.target} : la règle n'est plus sûre à 100%.`);
+      if (pred.status === 'gagné') {
+        entry.win += 1;
+      } else {
+        entry.loss += 1;
+        entry.rate = 0;
+        retire(entry, `Prédiction perdue sur le jeu #N${pred.target} : la règle n'est plus sûre à 100%.`);
+        continue;
+      }
+      // quota atteint : la stratégie sort du service, on attend une nouvelle
+      if ((entry.used || 0) >= panel.perStrategy && !panel.predictions.some(
+        (p) => p.status === 'en attente' && p.sources.some((s) => s.id === entry.id),
+      )) {
+        retire(entry, `Quota atteint : ${entry.used} prédiction(s) envoyée(s). Le panneau attend une nouvelle stratégie à 100%.`);
+      }
     }
   }
   return closed;
 }
 
 // ---------------------------------------------------------------------------
-// Messages Telegram
+// Messages Telegram — format configuré, AUCUN motif visible
 // ---------------------------------------------------------------------------
 function predictionText(pred) {
-  const head = pred.combo ? '🔥 PRÉDIT — DOUBLE CONFIRMATION 100%' : '🎯 PRÉDIT — SIGNAL 100%';
-  const sources = pred.sources
-    .map((s, i) => `${i + 1}. ${s.name} — ${s.rate}% (${s.sample} observations)`)
-    .join('\n');
-  const statut = pred.status === 'gagné' ? '✅ GAGNÉ' : pred.status === 'perdu' ? '❌ PERDU' : '⌛ En attente';
-  return [
-    head,
-    '',
-    `🎮 Jeu : #N${pred.target}`,
-    `🃏 Costume : ${pred.suit}`,
-    `♻️ Rattrapages : ${pred.maxR}`,
-    pred.combo ? '🤝 Deux stratégies à 100% prédisent ensemble' : '🧠 Stratégie certifiée à 100%',
-    '',
-    sources,
-    '',
-    `Statut : ${statut}${pred.step ? ` (rattrapage ${pred.step})` : ''}`,
-  ].join('\n');
+  return fmt.renderMessage(panel.format, {
+    gameNumber: pred.target,
+    suit: pred.suit,
+    strategy: 'Prédit',
+    maxR: pred.maxR,
+    status: pred.status,
+    rattrapage: pred.step,
+  });
 }
 
 async function send(pred) {
   const bot = typeof sender === 'function' ? sender() : null;
   if (!bot) { panel.lastError = 'Aucun token Telegram configuré'; return false; }
   if (!panel.channels.length) { panel.lastError = 'Aucun canal configuré pour le panneau Prédit'; return false; }
-  const text = predictionText(pred);
+  const out = predictionText(pred);
   let ok = false;
   for (const id of panel.channels) {
     try {
-      const m = await bot.sendMessage(id, text);
+      const m = await bot.sendMessage(id, out.text, out.parse_mode ? { parse_mode: out.parse_mode } : {});
       pred.messages.push({ chatId: id, messageId: m.message_id });
       panel.sentCount += 1;
       panel.lastSentAt = Date.now();
@@ -352,41 +344,76 @@ async function send(pred) {
 async function update(pred) {
   const bot = typeof sender === 'function' ? sender() : null;
   if (!bot || !pred.messages.length) return;
-  const text = predictionText(pred);
+  const out = predictionText(pred);
   for (const m of pred.messages) {
-    try { await bot.editMessageText(text, { chat_id: m.chatId, message_id: m.messageId }); }
-    catch (_) {}
+    try {
+      await bot.editMessageText(out.text, {
+        chat_id: m.chatId, message_id: m.messageId,
+        ...(out.parse_mode ? { parse_mode: out.parse_mode } : {}),
+      });
+    } catch (_) {}
   }
 }
 
-// prédiction d'une stratégie existante certifiée : elle est reprise ici
-async function mirror(pred) {
-  if (!panel.enabled) return false;
-  const entry = activeCertified().find((c) => c.type === 'strategie' && c.key === pred.strategy);
-  if (!entry) return false;
-  if (panel.predictions.some((p) => p.source === entry.id && p.target === pred.target)) return false;
-  const item = {
-    id: `predit-${entry.id}-${pred.target}`,
-    source: entry.id,
-    sources: [{ id: entry.id, name: entry.name, rate: entry.rate, sample: entry.sample }],
-    sourceName: entry.name,
-    trigger: pred.trigger != null ? pred.trigger : null,
-    target: pred.target,
-    suit: pred.suit,
-    step: 0,
-    maxR: panel.maxR,
-    status: 'en attente',
-    combo: false,
-    messages: [],
-    createdAt: new Date().toISOString(),
+// Les stratégies existantes du bot ne sont plus reprises dans « Prédit ».
+async function mirror() { return false; }
+
+// ---------------------------------------------------------------------------
+// Historique séparé par stratégie + bilan par stratégie
+// ---------------------------------------------------------------------------
+function predRow(p) {
+  return {
+    target: p.target, suit: p.suit, status: p.status, step: p.step, maxR: p.maxR,
+    combo: p.combo, sources: p.sources.map((s) => s.name), motif: p.motif || '',
+    createdAt: p.createdAt, published: p.messages.length > 0,
   };
-  panel.predictions.unshift(item);
-  const merged = mergeCombos([item]);
-  for (const p of merged) {
-    if (panel.requireCombo && !p.combo) continue;
-    await send(p);
+}
+
+function bilanOf(list) {
+  const done = list.filter((p) => p.status !== 'en attente');
+  const win = done.filter((p) => p.status === 'gagné').length;
+  const loss = done.length - win;
+  return { total: list.length, win, loss, pending: list.length - done.length, rate: done.length ? Math.round((win / done.length) * 100) : 0 };
+}
+
+function bilanText(entry, list) {
+  const b = bilanOf(list);
+  return (
+    '📊 STATISTIQUE 📈\n\n' +
+    `🧠 Stratégie IA : ${entry.name}\n\n` +
+    `🟢 GAIN : ${b.win}\n` +
+    `🔴 PERTE : ${b.loss}\n\n` +
+    `✅ Taux de réussite : ${b.rate} %`
+  );
+}
+
+function strategiesView() {
+  const all = [...panel.certified, ...panel.retired];
+  const seen = new Set();
+  const out = [];
+  for (const entry of all) {
+    if (seen.has(entry.id)) continue;
+    seen.add(entry.id);
+    const list = panel.predictions.filter((p) => p.sources.some((s) => s.id === entry.id));
+    out.push({
+      id: entry.id,
+      name: entry.name,
+      motif: entry.motif || entry.finding || '',
+      finding: entry.finding || '',
+      rate: entry.rate,
+      sample: entry.sample,
+      used: entry.used || 0,
+      quota: panel.perStrategy,
+      active: panel.certified.some((c) => c.id === entry.id) && entry.rate >= 100,
+      waiting: (entry.used || 0) >= panel.perStrategy,
+      reason: entry.reason || null,
+      certifiedAt: entry.certifiedAt,
+      bilan: bilanOf(list),
+      bilanText: bilanText(entry, list),
+      predictions: list.slice(0, 20).map(predRow), // 20 dernières de CETTE stratégie
+    });
   }
-  return true;
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -398,8 +425,7 @@ async function tick() {
   busy = true;
   try {
     const games = orderedGames();
-    certifyStrategies();
-    if (games.length >= 12) certifyDiscoveries(games);
+    if (games.length >= 12) certifyDiscoveries();
     const closed = verify(games);
     for (const pred of closed) await update(pred);
     const created = mergeCombos(makePredictions(games));
@@ -422,11 +448,12 @@ async function test() {
   const bot = typeof sender === 'function' ? sender() : null;
   if (!bot) return { ok: false, error: 'Aucun token Telegram configuré' };
   if (!panel.channels.length) return { ok: false, error: 'Aucun canal configuré' };
+  const preview = fmt.formatPreview(panel.format, { maxR: panel.maxR });
   const sent = [];
   const errors = [];
   for (const id of panel.channels) {
     try {
-      await bot.sendMessage(id, '🎯 PRÉDIT — message de test\n\nCe canal recevra les prédictions certifiées à 100%.');
+      await bot.sendMessage(id, `🎯 PRÉDIT — message de test\n\nFormat ${panel.format} :\n\n${preview}`);
       sent.push(String(id));
     } catch (e) { errors.push(`${id} : ${e.message}`); }
   }
@@ -438,18 +465,17 @@ function status() {
   return {
     ...config(),
     running: panel.enabled,
+    formatPreview: fmt.formatPreview(panel.format, { maxR: panel.maxR }),
     certified: panel.certified.map((c) => ({
-      id: c.id, type: c.type, name: c.name, finding: c.finding, rate: c.rate,
-      sample: c.sample, win: c.win, loss: c.loss, certifiedAt: c.certifiedAt,
+      id: c.id, type: c.type, name: c.name, finding: c.finding, motif: c.motif || '',
+      rate: c.rate, sample: c.sample, used: c.used || 0, quota: panel.perStrategy,
+      win: c.win, loss: c.loss, certifiedAt: c.certifiedAt,
     })),
     retired: panel.retired.slice(0, 10),
     autoDouble: active.length >= 2,
     activeCount: active.length,
-    predictions: panel.predictions.slice(0, 40).map((p) => ({
-      target: p.target, suit: p.suit, status: p.status, step: p.step, maxR: p.maxR,
-      combo: p.combo, sources: p.sources.map((s) => s.name), createdAt: p.createdAt,
-      published: p.messages.length > 0,
-    })),
+    strategies: strategiesView(),
+    globalBilan: bilanOf(panel.predictions),
     sentCount: panel.sentCount,
     lastSentAt: panel.lastSentAt,
     lastScanAt: panel.lastScanAt,
