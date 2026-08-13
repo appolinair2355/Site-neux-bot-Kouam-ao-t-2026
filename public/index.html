@@ -152,6 +152,7 @@
         <a href="#/strategies" data-nav="strategies">Stratégies</a>
         <a href="#/ai" data-nav="ai">Analyseur IA</a>
         <a href="#/ai-strategies" data-nav="ai">Stratégies IA</a>
+        <a href="#/predit" data-nav="predit">Prédit</a>
         <a href="#/diagnostics" data-nav="settings">Envois</a>
         <a href="#/database" data-nav="database">Base de données</a>
         <a href="#/formats" data-nav="formats">Formats</a>
@@ -251,17 +252,20 @@
         <div class="strategy-grid">${strategyButtons()}</div></section>
         <section class="section"><div class="strategy-grid">
           <button class="strategy-button" onclick="location.hash='#/ai'"><span class="eyebrow">Analyse continue</span><b>Analyseur IA</b><span>Il analyse les jeux lui-même en temps réel et écrit ses constats dans Résultats.</span><em>Ouvrir l’analyseur →</em></button>
+          <button class="strategy-button" onclick="location.hash='#/predit'"><span class="eyebrow">${(snapshot.predit?.activeCount || 0)} stratégie(s) à 100%</span><b>Prédit</b><span>Les stratégies certifiées 100% prédisent ici et envoient dans leur canal Telegram.</span><em>Ouvrir le panneau →</em></button>
           <button class="strategy-button" onclick="location.hash='#/ai-strategies'"><span class="eyebrow">${created} enregistrée(s)</span><b>Stratégies IA créées</b><span>Les stratégies trouvées ou créées par l’analyseur arrivent ici.</span><em>Voir les stratégies IA →</em></button>
         </div></section>
         ${predictionsSection()}`;
     }
     function strategiesPage() { setNav('strategies'); $('#app').innerHTML = `<div class="section-head" style="padding-top:38px"><div><span class="eyebrow">Catalogue</span><h2 style="margin-top:7px">Choisir une stratégie</h2></div><a class="button small ghost" href="#/">Retour accueil</a></div><div class="strategy-grid">${strategyButtons()}</div>${predictionsSection()}`; }
     function routeRows(s) {
-      const pub = s.publishedChannels || s.channels || [], shadow = s.shadowChannels || [];
+      const pub = s.publishedChannels || s.channels || [], shadow = s.shadowChannels || [], silence = s.silenceChannels || [];
       return `<div class="two-col"><div class="route-card public"><div class="route-title"><i></i><strong>Canal public</strong></div><p>Prédictions directes ou activées après deux pertes. Jamais mélangé avec le canal silencieux.</p>
         <div class="field"><label>ID ou @nom du canal</label><input id="pubChannel" value="${esc(pub.join(', '))}" placeholder="-1001234567890"></div><div class="toolbar"><button class="button small primary" onclick="saveChannel('${s.key}','published')">Vérifier et enregistrer</button><button class="button small danger" onclick="removeChannel('${s.key}','published')">Retirer</button></div></div>
         <div class="route-card shadow"><div class="route-title"><i></i><strong>Canal silencieux</strong></div><p>Signaux calculés pendant le mode silencieux. Il peut être différent du canal public et ne reçoit jamais de publication publique.</p>
-        <div class="field"><label>ID ou @nom du canal</label><input id="shadowChannel" value="${esc(shadow.join(', '))}" placeholder="-1009876543210"></div><div class="toolbar"><button class="button small primary" onclick="saveChannel('${s.key}','shadow')">Vérifier et enregistrer</button><button class="button small danger" onclick="removeChannel('${s.key}','shadow')">Retirer</button></div></div></div>`;
+        <div class="field"><label>ID ou @nom du canal</label><input id="shadowChannel" value="${esc(shadow.join(', '))}" placeholder="-1009876543210"></div><div class="toolbar"><button class="button small primary" onclick="saveChannel('${s.key}','shadow')">Vérifier et enregistrer</button><button class="button small danger" onclick="removeChannel('${s.key}','shadow')">Retirer</button></div></div></div>
+        <div class="route-card shadow" style="margin-top:14px"><div class="route-title"><i></i><strong>Canal du mode d’activation silencieux</strong></div><p>Reçoit les prédictions déclenchées par le mode d’activation silencieux (déclencheur + jeu +N). S’il est vide, le canal silencieux ci-dessus est utilisé.</p>
+        <div class="field"><label>ID ou @nom du canal</label><input id="silenceChannel" value="${esc(silence.join(', '))}" placeholder="-1005555555555"></div><div class="toolbar"><button class="button small primary" onclick="saveChannel('${s.key}','silence')">Vérifier et enregistrer</button><button class="button small danger" onclick="removeChannel('${s.key}','silence')">Retirer</button><button class="button small ghost" onclick="testStrategy('${s.key}','silence')">Tester</button></div></div>`;
     }
     const strategyDetails = {};
     async function strategyPage(key) {
@@ -275,10 +279,28 @@
           ${s.key === 'parite' ? `<div class="three-col"><div class="field"><label>Départ</label><input id="cfgStart" type="number" min="1" value="${c.startGame ?? 1}"></div><div class="field"><label>Pas VAR</label><input id="cfgVar" type="number" min="0" value="${c.varStep ?? 0}"></div><div class="field"><label>Décalage</label><input id="cfgDec" type="number" min="1" value="${c.decalage ?? 1}"></div></div>` : ''}
           ${s.key === 'absente' ? `<div class="field"><label>Jeux sans costume</label><input id="cfgStreak" type="number" min="2" max="10" value="${c.streak ?? 3}"></div>` : ''}
           ${s.key === 'ombre' ? `<div class="three-col"><div class="field"><label>Absence minimum</label><input id="cfgAbsence" type="number" min="1" max="30" value="${c.absence ?? 4}"></div><div class="field"><label>Périmètre</label><select id="cfgScope"><option value="tous" ${c.scope !== 'joueur' ? 'selected' : ''}>Joueur + banquier</option><option value="joueur" ${c.scope === 'joueur' ? 'selected' : ''}>Joueur uniquement</option></select></div></div>` : ''}
-          <div class="field"><label>Format du message</label><p class="small">Les 87 formats complets sont accessibles depuis le bouton Formats.</p></div><label class="check"><input id="cfgEnabled" type="checkbox" ${c.enabled ? 'checked' : ''}> Activer cette stratégie</label>
+          <div class="field"><label>Format du message</label><p class="small">Les 88 formats complets sont accessibles depuis le bouton Formats.</p></div><label class="check"><input id="cfgEnabled" type="checkbox" ${c.enabled ? 'checked' : ''}> Activer cette stratégie</label>
           <div class="toolbar" style="margin-top:18px"><button class="button primary" onclick="saveStrategy('${s.key}')">Enregistrer les réglages</button><button class="button ghost" onclick="resetStrategy('${s.key}')">Réinitialiser</button><button class="button small ghost" onclick="testStrategy('${s.key}','published')">Tester canal public</button><button class="button small ghost" onclick="testStrategy('${s.key}','shadow')">Tester canal silencieux</button></div><div id="strategyMessage"></div></div>
         <div class="panel"><h3>Filtre après pertes</h3><p class="small">Le mode silencieux calcule et vérifie chaque signal dans l’ombre. Après une première perte, une fenêtre s’ouvre ; après une deuxième perte dans cette fenêtre, les prochaines prédictions sont activées vers le canal public.</p>
           <label class="check"><input id="cfgSilent" type="checkbox" ${c.silent ? 'checked' : ''}> Activer le mode silencieux</label><div class="field" style="margin-top:18px"><label>Nombre maximum de prédictions après la première perte</label><input id="cfgLossWindow" type="number" min="1" max="20" value="${c.lossWindow ?? 3}"></div><div class="field"><label>Pertes nécessaires avant d’envoyer (1 = envoi dès la première perte)</label><input id="cfgLossTrigger" type="number" min="1" max="5" value="${c.lossTrigger ?? 2}"></div><div class="field"><label>Déblocage automatique après (minutes, 0 = jamais)</label><input id="cfgAutoUnlock" type="number" min="0" max="240" value="${c.autoUnlockMin ?? 10}"></div><div class="field"><label>Après un gain</label><select id="cfgReset"><option value="1" ${c.resetOnWin !== false ? 'selected' : ''}>Revenir au silence</option><option value="0" ${c.resetOnWin === false ? 'selected' : ''}>Continuer l’envoi</option></select></div><div class="notice">${esc(s.gate?.label || 'État du filtre indisponible')}</div><div class="toolbar" style="margin-top:10px"><button class="button small ghost" onclick="unlockStrategy('${esc(s.key || '')}')">Débloquer maintenant</button></div><div class="split small"><span class="muted">Gagnées</span><b style="color:var(--green)">${s.stats?.win ?? 0}</b><span class="muted">Perdues</span><b style="color:var(--red)">${s.stats?.loss ?? 0}</b></div></div></div>
+        <section class="section"><div class="panel"><h3>Déclencheur automatique</h3><p class="small">Disponible pour toutes les stratégies. Le bot attend l’événement choisi (une perte, ou un rattrapage précis), compte ensuite le nombre de prédictions demandé en silence, puis envoie automatiquement la ou les prédictions suivantes dans le canal public. Exemples : « perte + 3 prédictions » ou « rattrapage 2 + 3 prédictions ». Quand ce mode est actif, il remplace le filtre après pertes.</p>
+          <label class="check"><input id="cfgAutoEnabled" type="checkbox" ${c.autoEnabled ? 'checked' : ''}> Activer le déclencheur automatique</label>
+          <div class="three-col" style="margin-top:18px"><div class="field"><label>Événement déclencheur</label><select id="cfgAutoTrigger"><option value="perte" ${c.autoTrigger !== 'rattrapage' ? 'selected' : ''}>Une perte</option><option value="rattrapage" ${c.autoTrigger === 'rattrapage' ? 'selected' : ''}>Un rattrapage</option></select></div>
+          <div class="field"><label>Rattrapage déclencheur</label><input id="cfgAutoRattrapage" type="number" min="1" max="9" value="${c.autoRattrapage ?? 2}"></div>
+          <div class="field"><label>Prédictions comptées avant l’envoi</label><input id="cfgAutoSkip" type="number" min="0" max="20" value="${c.autoSkip ?? 3}"></div></div>
+          <div class="field"><label>Prédictions envoyées une fois le compte atteint</label><input id="cfgAutoSend" type="number" min="1" max="10" value="${c.autoSend ?? 1}"></div>
+          <div class="notice">${esc(s.gate?.auto?.label || 'Déclencheur automatique désactivé')}</div>
+          <div class="toolbar" style="margin-top:10px"><button class="button primary" onclick="saveStrategy('${s.key}')">Enregistrer le déclencheur</button></div></div></section>
+        <section class="section"><div class="panel"><h3>Mode d’activation silencieux</h3><p class="small">Le bot attend le déclencheur choisi : <b>1 ou 2 pertes</b>, ou <b>1 ou 2 fois un rattrapage 2 / 3 / 4</b>. Il retient le numéro du jeu déclencheur et ajoute le décalage configuré : si le jeu #N23 a perdu et que le décalage est +10, le départ est le jeu #N33. À partir de ce numéro, les prédictions partent dans le canal du mode silencieux, jusqu’au nombre demandé (ex. 6), puis la fenêtre repart à zéro et le bot attend un nouveau déclencheur. Quand ce mode est actif, il pilote seul l’envoi de la stratégie.</p>
+          <label class="check"><input id="cfgSilenceMode" type="checkbox" ${c.silenceMode ? 'checked' : ''}> Activer le mode d’activation silencieux</label>
+          <div class="three-col" style="margin-top:18px"><div class="field"><label>Déclencheur</label><select id="cfgSilenceTrigger"><option value="perte" ${c.silenceTrigger !== 'rattrapage' ? 'selected' : ''}>Après des pertes</option><option value="rattrapage" ${c.silenceTrigger === 'rattrapage' ? 'selected' : ''}>Après des rattrapages</option></select></div>
+          <div class="field"><label>Nombre de pertes (1 ou 2)</label><input id="cfgSilenceLossCount" type="number" min="1" max="5" value="${c.silenceLossCount ?? 1}"></div>
+          <div class="field"><label>Rattrapage visé (2, 3 ou 4)</label><input id="cfgSilenceRatLevel" type="number" min="1" max="9" value="${c.silenceRatLevel ?? 2}"></div></div>
+          <div class="three-col"><div class="field"><label>Nombre de fois ce rattrapage (1 ou 2)</label><input id="cfgSilenceRatCount" type="number" min="1" max="5" value="${c.silenceRatCount ?? 1}"></div>
+          <div class="field"><label>Décalage +N après le jeu déclencheur</label><input id="cfgSilenceOffset" type="number" min="1" max="99" value="${c.silenceOffset ?? 10}"></div>
+          <div class="field"><label>Prédictions à envoyer avant l’arrêt</label><input id="cfgSilenceCount" type="number" min="1" max="50" value="${c.silenceCount ?? 6}"></div></div>
+          <div class="notice">${esc(s.gate?.silence?.label || 'Mode d’activation silencieux désactivé')}</div>
+          <div class="toolbar" style="margin-top:10px"><button class="button primary" onclick="saveStrategy('${s.key}')">Enregistrer le mode silencieux</button></div></div></section>
         <section class="section"><div class="section-head"><div><span class="eyebrow">Séparation des sorties</span><h2 style="margin-top:7px">Canaux de cette stratégie</h2></div><span class="tag">${(s.publishedChannels || s.channels || []).length ? 'Public configuré' : 'Public à configurer'} · ${s.shadowChannels?.length ? 'Silencieux configuré' : 'Silencieux à configurer'}</span></div>${routeRows(s)}</section>
         ${liveGamesSection(s)}
         <section class="section"><div class="section-head"><div><span class="eyebrow">Historique court</span><h2 style="margin-top:7px">Prédictions récentes</h2></div></div><div class="panel">${(s.predictions || []).length ? `<table><thead><tr><th>Tour</th><th>Signal</th><th>État</th><th>Routage</th></tr></thead><tbody>${s.predictions.slice(0,20).map(p => `<tr><td class="mono">#N${esc(p.target)}</td><td>${esc(p.label || '')}</td><td><span class="tag ${p.status === 'gagné' ? 'good' : p.status === 'perdu' ? 'bad' : 'warn'}">${esc(p.status)}</span></td><td>${p.silent ? 'Silencieux' : 'Public'}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">Aucune prédiction enregistrée pour cette stratégie.</div>'}</div></section>`;
@@ -305,15 +327,16 @@
     async function refreshStrategyLive(key) { await refresh(); strategyPage(key); }
     function val(id) { return document.getElementById(id)?.value ?? ''; }
     async function saveStrategy(key) {
-      const patch = { enabled: $('#cfgEnabled')?.checked, format: val('cfgFormat'), maxR: val('cfgMaxR'), lead: val('cfgLead'), b: val('cfgB'), silent: $('#cfgSilent')?.checked, lossWindow: val('cfgLossWindow'), lossTrigger: val('cfgLossTrigger'), autoUnlockMin: val('cfgAutoUnlock'), resetOnWin: val('cfgReset') !== '0', startGame: val('cfgStart'), varStep: val('cfgVar'), decalage: val('cfgDec'), streak: val('cfgStreak'), absence: val('cfgAbsence'), scope: val('cfgScope'), publishedChannels: ids(val('pubChannel')), shadowChannels: ids(val('shadowChannel')) };
+      const patch = { enabled: $('#cfgEnabled')?.checked, format: val('cfgFormat'), maxR: val('cfgMaxR'), lead: val('cfgLead'), b: val('cfgB'), silent: $('#cfgSilent')?.checked, lossWindow: val('cfgLossWindow'), lossTrigger: val('cfgLossTrigger'), autoUnlockMin: val('cfgAutoUnlock'), resetOnWin: val('cfgReset') !== '0', autoEnabled: $('#cfgAutoEnabled')?.checked, autoTrigger: val('cfgAutoTrigger'), autoRattrapage: val('cfgAutoRattrapage'), autoSkip: val('cfgAutoSkip'), autoSend: val('cfgAutoSend'), silenceMode: $('#cfgSilenceMode')?.checked, silenceTrigger: val('cfgSilenceTrigger'), silenceLossCount: val('cfgSilenceLossCount'), silenceRatLevel: val('cfgSilenceRatLevel'), silenceRatCount: val('cfgSilenceRatCount'), silenceOffset: val('cfgSilenceOffset'), silenceCount: val('cfgSilenceCount'), silenceChannels: ids(val('silenceChannel')), startGame: val('cfgStart'), varStep: val('cfgVar'), decalage: val('cfgDec'), streak: val('cfgStreak'), absence: val('cfgAbsence'), scope: val('cfgScope'), publishedChannels: ids(val('pubChannel')), shadowChannels: ids(val('shadowChannel')) };
       const pub = new Set(patch.publishedChannels), shadow = new Set(patch.shadowChannels), overlap = [...pub].filter(id => shadow.has(id));
       if (overlap.length) return toast('Un même canal ne peut pas être public et silencieux pour la même stratégie.', 'error');
       try { await api(`/api/strategies/${key}`, 'POST', patch); await refresh(); await strategyPage(key); toast('Réglages enregistrés.'); } catch (e) { toast(e.message, 'error'); }
     }
     async function saveChannel(key, mode) {
-      const input = document.getElementById(mode === 'shadow' ? 'shadowChannel' : 'pubChannel'), values = ids(input?.value);
+      const inputId = mode === 'shadow' ? 'shadowChannel' : mode === 'silence' ? 'silenceChannel' : 'pubChannel';
+      const input = document.getElementById(inputId), values = ids(input?.value);
       if (!values.length) return toast('Renseigne un ID de canal.', 'error');
-      const other = ids(document.getElementById(mode === 'shadow' ? 'pubChannel' : 'shadowChannel')?.value);
+      const other = mode === 'silence' ? [] : ids(document.getElementById(mode === 'shadow' ? 'pubChannel' : 'shadowChannel')?.value);
       if (values.some(v => other.includes(v))) return toast('Les deux canaux doivent être différents.', 'error');
       try {
         const r = await api(`/api/strategies/${key}/channel`, 'POST', { channelId: values[0], mode });
@@ -417,6 +440,46 @@
     async function toggleAuto(on) { try { await api('/api/ai/auto/toggle', 'POST', { enabled: on }); await refresh(); aiPage(); } catch(e) { toast(e.message, 'error'); } }
     async function saveAiKey() { try { await api('/api/ai/key', 'POST', { key: val('aiKey') }); await refresh(); aiPage(); toast('Clé appliquée.'); } catch(e) { toast(e.message, 'error'); } }
     async function deleteAiStrategy(id) { try { await api('/api/ai/strategies/' + id, 'DELETE'); await refresh(); aiStrategiesPage(); } catch(e) { toast(e.message, 'error'); } }
+
+    function preditPage() {
+      setNav('predit');
+      const p = snapshot.predit || {};
+      const cert = p.certified || [];
+      const preds = p.predictions || [];
+      const retired = p.retired || [];
+      $('#app').innerHTML = `<div class="section-head" style="padding-top:38px"><div><span class="eyebrow">Prédictions certifiées</span><h2 style="margin-top:7px">Prédit</h2><p class="small">Dès que l’IA trouve une stratégie sûre à 100%, elle entre ici et prédit automatiquement. Si une deuxième stratégie atteint aussi 100% pendant que la première tient toujours, les deux prédisent ensemble et le signal part en double confirmation.</p></div><div class="toolbar"><button class="button primary" onclick="preditScan()">Analyser maintenant</button><button class="button ghost" onclick="preditPage()">Actualiser</button></div></div>
+        <div class="stat-grid"><div class="stat"><span>Stratégies 100%</span><b>${esc(String(p.activeCount || 0))}</b></div><div class="stat"><span>Mode double</span><b>${p.autoDouble ? 'Actif' : 'En attente'}</b></div><div class="stat"><span>Messages envoyés</span><b>${esc(String(p.sentCount || 0))}</b></div><div class="stat"><span>Dernier envoi</span><b style="font-size:15px">${formatDate(p.lastSentAt)}</b></div></div>
+        <div class="two-col">
+          <div class="route-card public"><div class="route-title"><i></i><strong>Canal Telegram du panneau</strong></div><p>Ce canal reçoit uniquement les prédictions des stratégies certifiées à 100%.</p>
+            <div class="field"><label>ID ou @nom du canal</label><input id="preditChannel" value="${esc((p.channels || []).join(', '))}" placeholder="-1001234567890"></div>
+            <div class="toolbar"><button class="button small primary" onclick="savePreditChannel()">Vérifier et enregistrer</button><button class="button small ghost" onclick="preditTest()">Envoyer un test</button><button class="button small danger" onclick="removePreditChannel()">Retirer</button></div>
+            ${p.lastError ? `<div class="notice error" style="margin-top:12px">${esc(p.lastError)}</div>` : ''}</div>
+          <div class="panel"><h3>Réglages du panneau</h3>
+            <label class="check"><input id="preditEnabled" type="checkbox" ${p.enabled ? 'checked' : ''}> Activer les prédictions automatiques</label>
+            <div class="three-col" style="margin-top:16px"><div class="field"><label>Observations minimum</label><input id="preditSample" type="number" min="3" max="60" value="${esc(String(p.minSample ?? 6))}"></div>
+              <div class="field"><label>Rattrapages</label><input id="preditMaxR" type="number" min="0" max="5" value="${esc(String(p.maxR ?? 1))}"></div></div>
+            <label class="check"><input id="preditCombo" type="checkbox" ${p.requireCombo ? 'checked' : ''}> N’envoyer que les signaux confirmés par deux stratégies à 100%</label>
+            <div class="toolbar" style="margin-top:16px"><button class="button primary" onclick="savePredit()">Enregistrer</button></div></div>
+        </div>
+        <section class="section"><div class="section-head"><div><span class="eyebrow">Certifiées</span><h2 style="margin-top:7px">Stratégies à 100% en service</h2></div><span class="tag ${cert.length ? 'good' : 'warn'}">${cert.length} en service</span></div>
+          ${cert.length ? `<div class="proposals">${cert.map(c => `<article class="proposal"><div class="split"><h3>${esc(c.name)}</h3><span class="tag good">${esc(String(c.rate))}% · ${esc(String(c.sample))} obs.</span></div><dl><dt>Constat</dt><dd>${esc(c.finding || '')}</dd><dt>Origine</dt><dd>${c.type === 'strategie' ? 'Stratégie existante devenue parfaite' : 'Règle trouvée par l’analyseur IA'}</dd><dt>Résultats</dt><dd>${esc(String(c.win || 0))} gain(s) · ${esc(String(c.loss || 0))} perte(s)</dd><dt>Certifiée le</dt><dd>${formatDate(c.certifiedAt)}</dd></dl></article>`).join('')}</div>` : '<div class="empty">Aucune stratégie à 100% pour le moment : l’analyseur continue de chercher.</div>'}</section>
+        <section class="section"><div class="section-head"><div><span class="eyebrow">Envois</span><h2 style="margin-top:7px">Prédictions du panneau</h2></div></div>
+          <div class="panel">${preds.length ? `<table><thead><tr><th>Jeu</th><th>Costume</th><th>Sources</th><th>Étape</th><th>État</th><th>Envoi</th></tr></thead><tbody>${preds.map(x => `<tr><td class="mono">#N${esc(x.target)}</td><td>${esc(x.suit)}</td><td>${esc((x.sources || []).join(' + '))}${x.combo ? ' <span class="tag good">double</span>' : ''}</td><td class="mono">${esc(String(x.step ?? 0))}/${esc(String(x.maxR ?? 0))}</td><td><span class="tag ${x.status === 'gagné' ? 'good' : x.status === 'perdu' ? 'bad' : 'warn'}">${esc(x.status)}</span></td><td>${x.published ? 'Publié' : 'Non publié'}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">Aucune prédiction envoyée pour l’instant.</div>'}</div></section>
+        ${retired.length ? `<section class="section"><div class="section-head"><div><span class="eyebrow">Retirées</span><h2 style="margin-top:7px">Stratégies sorties du panneau</h2></div></div><div class="panel">${retired.map(r => `<div class="notice warn"><b>${esc(r.name)}</b> — ${esc(r.reason || '')} <span class="muted">${formatDate(r.retiredAt)}</span></div>`).join('')}</div></section>` : ''}`;
+    }
+    async function savePredit() {
+      try { await api('/api/predit/config', 'POST', { enabled: $('#preditEnabled')?.checked, requireCombo: $('#preditCombo')?.checked, minSample: val('preditSample'), maxR: val('preditMaxR'), channels: ids(val('preditChannel')) }); await refresh(); preditPage(); toast('Panneau Prédit enregistré.'); }
+      catch (e) { toast(e.message, 'error'); }
+    }
+    async function savePreditChannel() {
+      const list = ids(val('preditChannel'));
+      if (!list.length) return toast('Renseigne un ID de canal.', 'error');
+      try { const r = await api('/api/predit/channel', 'POST', { channelId: list[0] }); await refresh(); preditPage(); toast(`Canal ${r.channel?.title || list[0]} relié au panneau Prédit.`); }
+      catch (e) { toast(e.message, 'error'); }
+    }
+    async function removePreditChannel() { try { await api('/api/predit/channel', 'DELETE'); await refresh(); preditPage(); } catch (e) { toast(e.message, 'error'); } }
+    async function preditTest() { try { const r = await api('/api/predit/test', 'POST', {}); toast('Test envoyé : ' + (r.sent || []).join(', ')); } catch (e) { toast(e.message, 'error'); } }
+    async function preditScan() { try { await api('/api/predit/scan', 'POST', {}); await refresh(); preditPage(); toast('Analyse du panneau effectuée.'); } catch (e) { toast(e.message, 'error'); } }
     async function diagnosticsPage() {
       setNav('settings'); $('#app').innerHTML = '<div class="loading">Vérification des canaux…</div>';
       try {
@@ -481,7 +544,7 @@
     }
     async function saveDb() { try { await api('/api/db', 'POST', { url: val('dbUrl') }); await refresh(); settingsPage(); toast('Base connectée.'); } catch(e) { toast(e.message, 'error'); } }
     async function saveGlobals() { try { await api('/api/setb', 'POST', { b: val('globalB') }); await api('/api/setmaxr', 'POST', { maxR: val('globalR') }); await api('/api/setformat', 'POST', { format: val('globalF') }); await refresh(); settingsPage(); toast('Réglages globaux enregistrés.'); } catch(e) { toast(e.message, 'error'); } }
-    async function route() { try { await refresh(); const h = location.hash || '#/'; if (h.startsWith('#/strategy/')) await strategyPage(decodeURIComponent(h.split('/')[2])); else if (h === '#/strategies') strategiesPage(); else if (h === '#/ai') aiPage(); else if (h === '#/ai-strategies') aiStrategiesPage(); else if (h === '#/diagnostics') await diagnosticsPage(); else if (h === '#/database') await databasePage(); else if (h === '#/formats') await formatsPage(); else if (h === '#/settings') settingsPage(); else home(); } catch(e) { $('#app').innerHTML = `<div class="notice error">${esc(e.message)}</div>`; } }
+    async function route() { try { await refresh(); const h = location.hash || '#/'; if (h.startsWith('#/strategy/')) await strategyPage(decodeURIComponent(h.split('/')[2])); else if (h === '#/strategies') strategiesPage(); else if (h === '#/ai') aiPage(); else if (h === '#/ai-strategies') aiStrategiesPage(); else if (h === '#/predit') preditPage(); else if (h === '#/diagnostics') await diagnosticsPage(); else if (h === '#/database') await databasePage(); else if (h === '#/formats') await formatsPage(); else if (h === '#/settings') settingsPage(); else home(); } catch(e) { $('#app').innerHTML = `<div class="notice error">${esc(e.message)}</div>`; } }
     window.addEventListener('hashchange', route); route(); setInterval(() => { if (!location.hash || location.hash === '#/') route(); }, 8000);
   </script>
 </body>
