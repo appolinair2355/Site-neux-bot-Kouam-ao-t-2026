@@ -33,7 +33,18 @@
     .mark { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 12px;
       color: #071014; background: linear-gradient(145deg, var(--cyan), var(--orange)); box-shadow: 0 8px 24px rgba(112,225,229,.18); }
     .brand small { display: block; color: var(--muted); font-size: 10px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
-    nav { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+    nav { display: none; }
+    .home-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; padding: 34px 0 60px; }
+    .home-button { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; text-align: left;
+      background: #FFD400; color: #000; border: 3px solid #000; border-radius: 16px; padding: 26px 22px;
+      font-size: 26px; font-weight: 900; text-transform: uppercase; letter-spacing: .5px; cursor: pointer;
+      box-shadow: 0 8px 0 rgba(0,0,0,.45); }
+    .home-button:hover { background: #FFE45C; transform: translateY(-2px); }
+    .home-button small { color: #000; font-size: 14px; font-weight: 800; text-transform: none; }
+    .backbar { padding: 26px 0 8px; }
+    .home-back { background: #FFD400; color: #000; border: 3px solid #000; font-weight: 900; font-size: 16px;
+      border-radius: 12px; padding: 12px 18px; text-transform: uppercase; text-decoration: none; display: inline-block; }
+    .home-back:hover { background: #FFE45C; }
     nav a { color: var(--muted); text-decoration: none; border: 1px solid transparent; padding: 9px 12px; border-radius: 10px; font-size: 13px; font-weight: 700; }
     nav a:hover, nav a.active { color: var(--text); background: var(--surface-2); border-color: var(--line); }
     .status { display: inline-flex; gap: 8px; align-items: center; color: var(--muted); font-size: 12px; }
@@ -248,16 +259,18 @@
       setNav('home');
       const ai = snapshot.ai || {};
       const created = (ai.savedStrategies || []).length;
-      $('#app').innerHTML = `<section class="section" style="padding-top:38px"><div class="section-head"><div><span class="eyebrow">Accueil</span><h2 style="margin-top:7px">Stratégies existantes</h2></div><span class="tag ${ai.auto?.running ? 'good' : 'warn'}">Analyseur ${ai.auto?.running ? 'en temps réel' : 'arrêté'}</span></div>
-        <div class="strategy-grid">${strategyButtons()}</div></section>
-        <section class="section"><div class="strategy-grid">
-          <button class="strategy-button" onclick="location.hash='#/ai'"><span class="eyebrow">Analyse continue</span><b>Analyseur IA</b><span>Il analyse les jeux lui-même en temps réel et écrit ses constats dans Résultats.</span><em>Ouvrir l’analyseur →</em></button>
-          <button class="strategy-button" onclick="location.hash='#/predit'"><span class="eyebrow">${(snapshot.predit?.activeCount || 0)} stratégie(s) à 100%</span><b>Prédit</b><span>Les stratégies certifiées 100% prédisent ici et envoient dans leur canal Telegram.</span><em>Ouvrir le panneau →</em></button>
-          <button class="strategy-button" onclick="location.hash='#/ai-strategies'"><span class="eyebrow">${created} enregistrée(s)</span><b>Stratégies IA créées</b><span>Les stratégies trouvées ou créées par l’analyseur arrivent ici.</span><em>Voir les stratégies IA →</em></button>
-        </div></section>
-        ${predictionsSection()}`;
+      $('#app').innerHTML = `<div class="home-grid">
+        <button class="home-button" onclick="location.hash='#/strategies'">Stratégies<small>${(snapshot.strategies||[]).length} stratégie(s)</small></button>
+        <button class="home-button" onclick="location.hash='#/ai'">Analyseur IA<small>${ai.auto?.running ? 'Analyse en temps réel' : 'Analyseur arrêté'}</small></button>
+        <button class="home-button" onclick="location.hash='#/ai-strategies'">Stratégies IA<small>${created} créée(s)</small></button>
+        <button class="home-button" onclick="location.hash='#/predit'">Prédit IA<small>${(snapshot.predit?.activeCount || 0)} stratégie(s) à 100%</small></button>
+        <button class="home-button" onclick="location.hash='#/diagnostics'">Envois<small>Vérification des canaux</small></button>
+        <button class="home-button" onclick="location.hash='#/database'">Base de données<small>Historique enregistré</small></button>
+        <button class="home-button" onclick="location.hash='#/formats'">Formats<small>88 formats de prédiction</small></button>
+        <button class="home-button" onclick="location.hash='#/settings'">Configuration<small>Bot, base, réglages</small></button>
+      </div>`;
     }
-    function strategiesPage() { setNav('strategies'); $('#app').innerHTML = `<div class="section-head" style="padding-top:38px"><div><span class="eyebrow">Catalogue</span><h2 style="margin-top:7px">Choisir une stratégie</h2></div><a class="button small ghost" href="#/">Retour accueil</a></div><div class="strategy-grid">${strategyButtons()}</div>${predictionsSection()}`; }
+    function strategiesPage() { setNav('strategies'); $('#app').innerHTML = `<div class="section-head" style="padding-top:38px"><div><span class="eyebrow">Catalogue</span><h2 style="margin-top:7px">Choisir une stratégie</h2></div></div><div class="strategy-grid">${strategyButtons()}</div>`; }
     function routeRows(s) {
       const pub = s.publishedChannels || s.channels || [], shadow = s.shadowChannels || [], silence = s.silenceChannels || [];
       return `<div class="two-col"><div class="route-card public"><div class="route-title"><i></i><strong>Canal public</strong></div><p>Prédictions directes ou activées après deux pertes. Jamais mélangé avec le canal silencieux.</p>
@@ -273,7 +286,7 @@
       try { const full = await api('/api/strategies/' + encodeURIComponent(key)); strategyDetails[key] = full; s = { ...s, ...full }; }
       catch (e) { s = { ...s, ...(strategyDetails[key] || {}) }; }
       setNav('strategies'); const c = s.config || {};
-      $('#app').innerHTML = `<div class="back"><a href="#/strategies">← Retour aux stratégies</a></div><div class="section-head"><div><span class="eyebrow">Configuration stratégie</span><h2 style="margin-top:7px">${esc(s.name)}</h2><p class="small">${esc(s.about)}</p></div><span class="tag ${c.enabled ? 'good' : 'bad'}">${c.enabled ? 'Active' : 'En pause'}</span></div>
+      $('#app').innerHTML = `<div class="section-head"><div><span class="eyebrow">Configuration stratégie</span><h2 style="margin-top:7px">${esc(s.name)}</h2><p class="small">${esc(s.about)}</p></div><span class="tag ${c.enabled ? 'good' : 'bad'}">${c.enabled ? 'Active' : 'En pause'}</span></div>
         <div class="two-col"><div class="panel"><h3>Règles de calcul</h3><div class="three-col"><div class="field"><label>Format</label><input id="cfgFormat" type="number" min="1" max="${snapshot.formatCount}" value="${c.format || 1}"></div><div class="field"><label>Rattrapages</label><input id="cfgMaxR" type="number" min="0" max="9" value="${c.maxR ?? 2}"></div><div class="field"><label>Avance</label><input id="cfgLead" type="number" min="1" max="9" value="${c.lead ?? 2}"></div></div>
           ${s.usesB ? `<div class="field"><label>Compteur B</label><input id="cfgB" type="number" min="0" max="20" value="${c.b ?? 3}"></div>` : ''}
           ${s.key === 'parite' ? `<div class="three-col"><div class="field"><label>Départ</label><input id="cfgStart" type="number" min="1" value="${c.startGame ?? 1}"></div><div class="field"><label>Pas VAR</label><input id="cfgVar" type="number" min="0" value="${c.varStep ?? 0}"></div><div class="field"><label>Décalage</label><input id="cfgDec" type="number" min="1" value="${c.decalage ?? 1}"></div></div>` : ''}
@@ -303,7 +316,10 @@
           <div class="toolbar" style="margin-top:10px"><button class="button primary" onclick="saveStrategy('${s.key}')">Enregistrer le mode silencieux</button></div></div></section>
         <section class="section"><div class="section-head"><div><span class="eyebrow">Séparation des sorties</span><h2 style="margin-top:7px">Canaux de cette stratégie</h2></div><span class="tag">${(s.publishedChannels || s.channels || []).length ? 'Public configuré' : 'Public à configurer'} · ${s.shadowChannels?.length ? 'Silencieux configuré' : 'Silencieux à configurer'}</span></div>${routeRows(s)}</section>
         ${liveGamesSection(s)}
-        <section class="section"><div class="section-head"><div><span class="eyebrow">Historique court</span><h2 style="margin-top:7px">Prédictions récentes</h2></div></div><div class="panel">${(s.predictions || []).length ? `<table><thead><tr><th>Tour</th><th>Signal</th><th>État</th><th>Routage</th></tr></thead><tbody>${s.predictions.slice(0,20).map(p => `<tr><td class="mono">#N${esc(p.target)}</td><td>${esc(p.label || '')}</td><td><span class="tag ${p.status === 'gagné' ? 'good' : p.status === 'perdu' ? 'bad' : 'warn'}">${esc(p.status)}</span></td><td>${p.silent ? 'Silencieux' : 'Public'}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">Aucune prédiction enregistrée pour cette stratégie.</div>'}</div></section>`;
+        <section class="section"><div class="section-head"><div><span class="eyebrow">Bilan de cette stratégie</span><h2 style="margin-top:7px">Bilan séparé — ${esc(s.name)}</h2></div><span class="tag ${(s.stats?.rate ?? 0) >= 50 ? 'good' : 'warn'}">${esc(String(s.stats?.rate ?? 0))}%</span></div>
+          <div class="panel"><div class="stat-grid"><div class="stat"><span>Gains</span><b style="color:var(--green)">${esc(String(s.stats?.win ?? 0))}</b></div><div class="stat"><span>Pertes</span><b style="color:var(--red)">${esc(String(s.stats?.loss ?? 0))}</b></div><div class="stat"><span>En attente</span><b>${esc(String(s.stats?.pending ?? 0))}</b></div><div class="stat"><span>Taux</span><b>${esc(String(s.stats?.rate ?? 0))}%</b></div></div>
+          <pre style="white-space:pre-wrap;margin-top:14px">${esc(s.bilanPreview || '')}</pre></div></section>
+        <section class="section"><div class="section-head"><div><span class="eyebrow">Historique de cette stratégie</span><h2 style="margin-top:7px">Les 20 dernières prédictions de ${esc(s.name)}</h2><p class="small">Historique séparé : seules les prédictions de cette stratégie sont listées ici.</p></div></div><div class="panel">${(s.predictions || []).length ? `<table><thead><tr><th>Tour</th><th>Signal</th><th>État</th><th>Routage</th><th>Motif</th></tr></thead><tbody>${s.predictions.slice(0,20).map(p => `<tr><td class="mono">#N${esc(p.target)}</td><td>${esc(p.label || '')}</td><td><span class="tag ${p.status === 'gagné' ? 'good' : p.status === 'perdu' ? 'bad' : 'warn'}">${esc(p.status)}</span></td><td>${p.silent ? 'Silencieux' : 'Public'}</td><td class="small">${esc(p.reason || '')}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">Aucune prédiction enregistrée pour cette stratégie.</div>'}</div></section>`;
     }
     function gameRow(g) {
       const cards = (list) => (list || []).join(' ') || '—';
@@ -350,24 +366,26 @@
     async function testStrategy(key, mode) { try { const r = await api(`/api/strategies/${key}/test`, 'POST', { mode }); toast(`Message de test envoyé : ${(r.sent || []).join(', ')}`, ''); } catch(e) { toast(e.message, 'error'); } }
     function aiPage() {
       setNav('ai'); const aiState = snapshot.ai || {}; const auto = aiState.auto || {};
-      $('#app').innerHTML = `<div class="section-head" style="padding-top:38px"><div><span class="eyebrow">Analyse automatique</span><h2 style="margin-top:7px">Analyseur IA en temps réel</h2><p class="small">L’analyseur observe les jeux terminés en continu. Dès qu’il constate quelque chose, il l’écrit dans Résultats. Dès qu’il trouve ou crée une stratégie, elle part dans « Stratégies IA créées ».</p></div><a class="button small ghost" href="#/">Retour accueil</a></div>
+      $('#app').innerHTML = `<div class="section-head" style="padding-top:38px"><div><span class="eyebrow">Analyse automatique</span><h2 style="margin-top:7px">Analyseur IA en temps réel</h2><p class="small">L’analyseur observe les jeux terminés en continu. Dès qu’il constate quelque chose, il l’écrit dans Résultats. Dès qu’il trouve ou crée une stratégie, elle part dans « Stratégies IA créées ».</p></div></div>
       <div class="two-col"><div class="panel"><h3>État du moteur</h3>
         <div class="notice ${auto.running ? '' : 'warn'}">${auto.running ? 'Analyse locale toutes les ' + Math.round((auto.localIntervalMs||15000)/1000) + ' s · enrichissement Pollinations.ai toutes les ' + Math.round((auto.remoteIntervalMs||180000)/60000) + ' min.' : 'Analyseur en pause.'}</div>
         <div class="split small"><span class="muted">Dernière analyse</span><b>${formatDate(auto.lastLocalAt)}</b><span class="muted">Stratégies créées</span><b>${(aiState.savedStrategies||[]).length}</b></div>
         ${auto.lastError ? `<div class="notice error">${esc(auto.lastError)}</div>` : ''}
-        <div class="toolbar" style="margin-top:16px"><button class="button primary" onclick="runAuto()">Analyser maintenant</button><button class="button ghost" onclick="toggleAuto(${auto.running ? 'false' : 'true'})">${auto.running ? 'Mettre en pause' : 'Relancer'}</button><a class="button small ghost" href="#/ai-strategies">Stratégies IA créées</a></div><div id="aiMessage"></div></div>
+        <div class="toolbar" style="margin-top:16px"><button class="button primary" onclick="runAuto()">Analyser maintenant</button><button class="button ghost" onclick="toggleAuto(${auto.running ? 'false' : 'true'})">${auto.running ? 'Mettre en pause' : 'Relancer'}</button></div><div id="aiMessage"></div></div>
       <div class="panel"><h3>Clé Pollinations.ai</h3><div class="notice ${aiState.configured ? '' : 'warn'}">${aiState.configured ? 'Clé en dur active · modèle ' + esc(aiState.model || 'openai') : 'La clé est écrite en dur dans config.js (POLLINATIONS.API_KEY). Tant qu’elle n’est pas remplacée, seule l’analyse locale tourne — elle suffit pour les constats et les stratégies.'}</div>
         <div class="field"><label>Remplacer la clé sans redéployer</label><input id="aiKey" type="password" autocomplete="off" placeholder="Clé Pollinations.ai"></div><button class="button ghost" onclick="saveAiKey()">Appliquer la clé</button>
         <div class="field" style="margin-top:16px"><label>Analyse ciblée (optionnel)</label><textarea id="aiObjective" placeholder="Ex. Compare les absences de costumes de la main du joueur."></textarea></div><button class="button orange" onclick="runAnalysis()">Analyse Pollinations.ai</button></div></div>
       <div class="section-head" style="margin-top:10px"><div><span class="eyebrow">Résultats</span><h2 style="margin-top:7px">Ce que l’analyseur constate</h2></div></div>
       <div class="section-head" style="margin-top:10px"><div><span class="eyebrow">Découverte</span><h2 style="margin-top:7px">Nouvelles régularités trouvées</h2><p class="small">Au-delà des stratégies existantes : cartes précises suivies d’un costume (a+1, a+2, a+3), points du joueur, enchaînements, séquences de vainqueurs et journées qui se rejouent.</p></div><button class="button orange" onclick="loadPatterns()">Chercher de nouvelles stratégies</button></div>
       <div id="aiPatterns" class="section"><div class="empty">Lance la recherche pour voir ce que l’analyseur découvre.</div></div>
+      <div class="section-head" style="margin-top:10px"><div><span class="eyebrow">Comparaison</span><h2 style="margin-top:7px">Jours antérieurs vs aujourd’hui</h2><p class="small">L’IA compare les statistiques des journées précédentes avec celle d’aujourd’hui et ne garde que les régularités qui tiennent des deux côtés pour créer des stratégies.</p></div><div class="toolbar"><button class="button primary" onclick="loadCompare()">Comparer les journées</button><button class="button orange" onclick="saveCompare()">Créer les stratégies</button></div></div>
+      <div id="aiCompare" class="section"><div class="empty">Lance la comparaison pour voir les écarts entre les journées.</div></div>
       <div class="section-head" style="margin-top:10px"><div><span class="eyebrow">Analyse cumulative</span><h2 style="margin-top:7px">Avis tous les 4 jeux (cumul 1 → 1440)</h2><p class="small">Jeux 1 à 4 : premier avis. Jeux 1 à 8 : l’avis reprend tout depuis le début. Puis 1 à 12, 1 à 16… jusqu’au jeu 1440. Tout est enregistré pour la date du jour ; si une stratégie est modifiée, les paliers qui ne sont plus justes sont effacés et recalculés.</p></div><div class="toolbar"><button class="button primary" onclick="runCumulative()">Mettre à jour</button><button class="button ghost" onclick="purgeCumulative()">Effacer l’incorrect</button></div></div>
       <div id="aiCumulative" class="section"><div class="loading">Chargement des paliers…</div></div>
       <div class="section-head" style="margin-top:10px"><div><span class="eyebrow">Avis sur les stratégies</span><h2 style="margin-top:7px">L’IA juge les stratégies existantes (cumul complet)</h2><p class="small">L’IA reprend TOUT le cumul de la journée (jeux 1 → 1440) et les résultats réels de chaque stratégie pour dire laquelle garder, laquelle ajuster et laquelle mettre en silencieux.</p></div><div class="toolbar"><button class="button primary" onclick="runAdvice(false)">Mettre à jour</button><button class="button orange" onclick="runAdvice(true)">Avis Pollinations.ai</button></div></div>
       <div id="aiAdvice" class="section"><div class="loading">Chargement de l’avis…</div></div>
       <div id="aiResult" class="section"></div>`;
-      renderAiResults(); loadPatterns(); loadCumulative(); loadAdvice();
+      renderAiResults(); loadPatterns(); loadCompare(); loadCumulative(); loadAdvice();
     }
     function renderAiResults() {
       const list = (snapshot.ai?.results || []).filter(Boolean);
@@ -394,9 +412,28 @@
           ${disc.length ? `<div class="proposals">${disc.map(d => `<article class="proposal"><div class="split"><h3>${esc(d.proposal.name)}</h3><span class="tag">${esc(d.rate)}%</span></div><dl><dt>Logique</dt><dd>${esc(d.proposal.logic)}</dd><dt>Déclencheur</dt><dd>${esc(d.proposal.trigger)}</dd><dt>Cible</dt><dd>${esc(d.proposal.target)}</dd><dt>Preuve</dt><dd>${esc(d.proposal.evidence)}</dd><dt>Risque</dt><dd>${esc(d.proposal.risks)}</dd></dl><div class="toolbar" style="margin-top:12px"><button class="button small primary" onclick='saveProposal(${JSON.stringify(d.proposal).replace(/'/g, "&#39;")})'>Enregistrer dans Stratégies IA</button></div></article>`).join('')}</div>` : ''}`;
       } catch (e) { box.innerHTML = `<div class="notice error">${esc(e.message)}</div>`; }
     }
+    async function loadCompare() {
+      const box = $('#aiCompare'); if (!box) return;
+      box.innerHTML = '<div class="loading">Comparaison des journées…</div>';
+      try {
+        const r = await api('/api/ai/compare-days');
+        const t = r.today || {};
+        const dayCard = (d) => `<tr><td><b>${esc(d.label)}</b></td><td class="mono">${esc(String(d.total))}</td><td>${esc(String(d.winners?.joueur ?? 0))}% / ${esc(String(d.winners?.banquier ?? 0))}%</td><td>${(d.suits||[]).map(x => `${esc(x.suit)} ${esc(String(x.rate))}%`).join(' · ')}</td><td>${esc(String(d.parity?.pair ?? 0))}% pairs</td><td class="mono">${esc(String(d.averagePoint ?? 0))}</td></tr>`;
+        box.innerHTML = `<div class="panel"><div class="split"><b>${esc(String(r.daysCompared || 0))} journée(s) antérieure(s) comparée(s)</b><span class="tag">${formatDate(r.generatedAt)}</span></div>
+          ${r.note ? `<div class="notice warn">${esc(r.note)}</div>` : ''}
+          <table><thead><tr><th>Journée</th><th>Jeux</th><th>Joueur / Banquier</th><th>Costumes</th><th>Parité</th><th>Point moyen</th></tr></thead><tbody>${dayCard({ ...t, label: "Aujourd'hui" })}${(r.past || []).map(dayCard).join('')}</tbody></table>
+          ${(r.differences || []).length ? `<ul class="small" style="margin-top:14px">${r.differences.map(d => `<li>${esc(d.text)}</li>`).join('')}</ul>` : ''}
+          ${(r.stable || []).length ? `<h3 style="margin-top:16px">Régularités qui tiennent hier ET aujourd’hui</h3><table><thead><tr><th>Règle</th><th>Aujourd’hui</th><th>Jours précédents</th><th>Détail</th></tr></thead><tbody>${r.stable.map(x => `<tr><td>${esc(x.from)} → ${esc(x.to)} (a+${esc(String(x.k))})</td><td class="mono">${esc(String(x.todayRate))}%</td><td class="mono">${esc(String(x.pastAverage))}%</td><td class="small">${x.days.map(d => `${esc(d.date)} ${esc(String(d.rate))}%`).join(' · ')}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">Aucune régularité commune aux deux périodes pour l’instant.</div>'}</div>
+          ${(r.proposals || []).length ? `<div class="proposals">${r.proposals.map(p => `<article class="proposal"><div class="split"><h3>${esc(p.name)}</h3><span class="tag good">stable</span></div><dl><dt>Logique</dt><dd>${esc(p.logic)}</dd><dt>Déclencheur</dt><dd>${esc(p.trigger)}</dd><dt>Cible</dt><dd>${esc(p.target)}</dd><dt>Preuve</dt><dd>${esc(p.evidence)}</dd><dt>Risque</dt><dd>${esc(p.risks)}</dd></dl><div class="toolbar" style="margin-top:12px"><button class="button small primary" onclick='saveProposal(${JSON.stringify(p).replace(/'/g, "&#39;")})'>Enregistrer dans Stratégies IA</button></div></article>`).join('')}</div>` : ''}`;
+      } catch (e) { box.innerHTML = `<div class="notice error">${esc(e.message)}</div>`; }
+    }
+    async function saveCompare() {
+      try { const r = await api('/api/ai/compare-days/save', 'POST', {}); toast((r.created || []).length + ' stratégie(s) créée(s) à partir de la comparaison des journées.'); await refresh(); }
+      catch (e) { toast(e.message, 'error'); }
+    }
     function aiStrategiesPage() {
       setNav('ai'); const list = snapshot.ai?.savedStrategies || [];
-      $('#app').innerHTML = `<div class="section-head" style="padding-top:38px"><div><span class="eyebrow">Créées par l’analyseur</span><h2 style="margin-top:7px">Stratégies IA</h2><p class="small">Enregistrées automatiquement, jamais activées seules : à tester d’abord en mode silencieux.</p></div><a class="button small ghost" href="#/ai">Retour analyseur</a></div>
+      $('#app').innerHTML = `<div class="section-head" style="padding-top:38px"><div><span class="eyebrow">Créées par l’analyseur</span><h2 style="margin-top:7px">Stratégies IA</h2><p class="small">Enregistrées automatiquement, jamais activées seules : à tester d’abord en mode silencieux.</p></div></div>
       ${list.length ? `<div class="proposals">${list.map(p => `<article class="proposal"><div class="split"><h3>${esc(p.name)}</h3><span class="tag">${esc(p.origin === 'auto-pollinations' ? 'Pollinations.ai' : p.origin === 'auto-local' ? 'Analyse locale' : 'Manuelle')}</span></div><dl><dt>Logique</dt><dd>${esc(p.logic)}</dd>${p.trigger ? `<dt>Déclencheur</dt><dd>${esc(p.trigger)}</dd>` : ''}<dt>Preuve</dt><dd>${esc(p.evidence)}</dd><dt>Risque</dt><dd>${esc(p.risks)}</dd><dt>Créée le</dt><dd>${formatDate(p.createdAt)}</dd></dl><div class="toolbar" style="margin-top:14px">${p.compatibleExisting ? `<a class="button small ghost" href="#/strategy/${encodeURIComponent(p.compatibleExisting)}">Ouvrir la stratégie liée</a>` : ''}<button class="button small danger" onclick="deleteAiStrategy('${p.id}')">Supprimer</button></div></article>`).join('')}</div>` : '<div class="empty">Aucune stratégie créée pour l’instant. L’analyseur en ajoutera dès qu’un signal sera net.</div>'}`;
     }
     async function loadCumulative() {
@@ -445,30 +482,40 @@
       setNav('predit');
       const p = snapshot.predit || {};
       const cert = p.certified || [];
-      const preds = p.predictions || [];
+      const strats = p.strategies || [];
       const retired = p.retired || [];
-      $('#app').innerHTML = `<div class="section-head" style="padding-top:38px"><div><span class="eyebrow">Prédictions certifiées</span><h2 style="margin-top:7px">Prédit</h2><p class="small">Dès que l’IA trouve une stratégie sûre à 100%, elle entre ici et prédit automatiquement. Si une deuxième stratégie atteint aussi 100% pendant que la première tient toujours, les deux prédisent ensemble et le signal part en double confirmation.</p></div><div class="toolbar"><button class="button primary" onclick="preditScan()">Analyser maintenant</button><button class="button ghost" onclick="preditPage()">Actualiser</button></div></div>
-        <div class="stat-grid"><div class="stat"><span>Stratégies 100%</span><b>${esc(String(p.activeCount || 0))}</b></div><div class="stat"><span>Mode double</span><b>${p.autoDouble ? 'Actif' : 'En attente'}</b></div><div class="stat"><span>Messages envoyés</span><b>${esc(String(p.sentCount || 0))}</b></div><div class="stat"><span>Dernier envoi</span><b style="font-size:15px">${formatDate(p.lastSentAt)}</b></div></div>
+      const g = p.globalBilan || {};
+      $('#app').innerHTML = `<div class="section-head" style="padding-top:20px"><div><span class="eyebrow">Prédictions certifiées</span><h2 style="margin-top:7px">Prédit IA</h2><p class="small">Seules les stratégies CRÉÉES PAR L’IA qui atteignent 100% prédisent ici. Le message envoyé utilise le format de prédiction choisi ci-dessous et ne contient jamais le motif : le motif reste dans l’historique de la stratégie.</p></div><div class="toolbar"><button class="button primary" onclick="preditScan()">Analyser maintenant</button><button class="button ghost" onclick="preditPage()">Actualiser</button></div></div>
+        <div class="stat-grid"><div class="stat"><span>Stratégies 100% en service</span><b>${esc(String(p.activeCount || 0))}</b></div><div class="stat"><span>Prédictions par stratégie</span><b>${esc(String(p.perStrategy ?? 2))}</b></div><div class="stat"><span>Gains / Pertes</span><b>${esc(String(g.win || 0))} / ${esc(String(g.loss || 0))}</b></div><div class="stat"><span>Dernier envoi</span><b style="font-size:15px">${formatDate(p.lastSentAt)}</b></div></div>
         <div class="two-col">
-          <div class="route-card public"><div class="route-title"><i></i><strong>Canal Telegram du panneau</strong></div><p>Ce canal reçoit uniquement les prédictions des stratégies certifiées à 100%.</p>
+          <div class="route-card public"><div class="route-title"><i></i><strong>Canal Telegram du panneau</strong></div><p>Ce canal reçoit uniquement les prédictions des stratégies IA certifiées à 100%.</p>
             <div class="field"><label>ID ou @nom du canal</label><input id="preditChannel" value="${esc((p.channels || []).join(', '))}" placeholder="-1001234567890"></div>
             <div class="toolbar"><button class="button small primary" onclick="savePreditChannel()">Vérifier et enregistrer</button><button class="button small ghost" onclick="preditTest()">Envoyer un test</button><button class="button small danger" onclick="removePreditChannel()">Retirer</button></div>
             ${p.lastError ? `<div class="notice error" style="margin-top:12px">${esc(p.lastError)}</div>` : ''}</div>
           <div class="panel"><h3>Réglages du panneau</h3>
             <label class="check"><input id="preditEnabled" type="checkbox" ${p.enabled ? 'checked' : ''}> Activer les prédictions automatiques</label>
-            <div class="three-col" style="margin-top:16px"><div class="field"><label>Observations minimum</label><input id="preditSample" type="number" min="3" max="60" value="${esc(String(p.minSample ?? 6))}"></div>
-              <div class="field"><label>Rattrapages</label><input id="preditMaxR" type="number" min="0" max="5" value="${esc(String(p.maxR ?? 1))}"></div></div>
+            <div class="three-col" style="margin-top:16px">
+              <div class="field"><label>Observations minimum</label><input id="preditSample" type="number" min="3" max="60" value="${esc(String(p.minSample ?? 6))}"></div>
+              <div class="field"><label>Rattrapages</label><input id="preditMaxR" type="number" min="0" max="5" value="${esc(String(p.maxR ?? 1))}"></div>
+              <div class="field"><label>Format de prédiction (1 → ${esc(String(snapshot.formatCount || 88))})</label><input id="preditFormat" type="number" min="1" max="${esc(String(snapshot.formatCount || 88))}" value="${esc(String(p.format ?? 1))}"></div>
+            </div>
+            <div class="field"><label>Nombre de prédictions par stratégie créée</label><input id="preditPerStrategy" type="number" min="1" max="50" value="${esc(String(p.perStrategy ?? 2))}"><p class="small">Exemple : 2 → la stratégie à 100% prédit 2 fois quand son déclencheur est trouvé, puis le panneau attend une nouvelle stratégie à 100%.</p></div>
             <label class="check"><input id="preditCombo" type="checkbox" ${p.requireCombo ? 'checked' : ''}> N’envoyer que les signaux confirmés par deux stratégies à 100%</label>
+            <div class="notice" style="margin-top:14px"><b>Aperçu du format ${esc(String(p.format ?? 1))}</b><pre style="white-space:pre-wrap;margin:8px 0 0">${esc(p.formatPreview || '')}</pre></div>
             <div class="toolbar" style="margin-top:16px"><button class="button primary" onclick="savePredit()">Enregistrer</button></div></div>
         </div>
-        <section class="section"><div class="section-head"><div><span class="eyebrow">Certifiées</span><h2 style="margin-top:7px">Stratégies à 100% en service</h2></div><span class="tag ${cert.length ? 'good' : 'warn'}">${cert.length} en service</span></div>
-          ${cert.length ? `<div class="proposals">${cert.map(c => `<article class="proposal"><div class="split"><h3>${esc(c.name)}</h3><span class="tag good">${esc(String(c.rate))}% · ${esc(String(c.sample))} obs.</span></div><dl><dt>Constat</dt><dd>${esc(c.finding || '')}</dd><dt>Origine</dt><dd>${c.type === 'strategie' ? 'Stratégie existante devenue parfaite' : 'Règle trouvée par l’analyseur IA'}</dd><dt>Résultats</dt><dd>${esc(String(c.win || 0))} gain(s) · ${esc(String(c.loss || 0))} perte(s)</dd><dt>Certifiée le</dt><dd>${formatDate(c.certifiedAt)}</dd></dl></article>`).join('')}</div>` : '<div class="empty">Aucune stratégie à 100% pour le moment : l’analyseur continue de chercher.</div>'}</section>
-        <section class="section"><div class="section-head"><div><span class="eyebrow">Envois</span><h2 style="margin-top:7px">Prédictions du panneau</h2></div></div>
-          <div class="panel">${preds.length ? `<table><thead><tr><th>Jeu</th><th>Costume</th><th>Sources</th><th>Étape</th><th>État</th><th>Envoi</th></tr></thead><tbody>${preds.map(x => `<tr><td class="mono">#N${esc(x.target)}</td><td>${esc(x.suit)}</td><td>${esc((x.sources || []).join(' + '))}${x.combo ? ' <span class="tag good">double</span>' : ''}</td><td class="mono">${esc(String(x.step ?? 0))}/${esc(String(x.maxR ?? 0))}</td><td><span class="tag ${x.status === 'gagné' ? 'good' : x.status === 'perdu' ? 'bad' : 'warn'}">${esc(x.status)}</span></td><td>${x.published ? 'Publié' : 'Non publié'}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">Aucune prédiction envoyée pour l’instant.</div>'}</div></section>
+        <section class="section"><div class="section-head"><div><span class="eyebrow">Certifiées</span><h2 style="margin-top:7px">Stratégies IA à 100% en service</h2></div><span class="tag ${cert.length ? 'good' : 'warn'}">${cert.length} en service</span></div>
+          ${cert.length ? `<div class="proposals">${cert.map(c => `<article class="proposal"><div class="split"><h3>${esc(c.name)}</h3><span class="tag good">${esc(String(c.rate))}% · ${esc(String(c.sample))} obs.</span></div><dl><dt>Motif</dt><dd>${esc(c.motif || c.finding || '')}</dd><dt>Prédictions utilisées</dt><dd>${esc(String(c.used || 0))} / ${esc(String(c.quota || 0))}</dd><dt>Résultats</dt><dd>${esc(String(c.win || 0))} gain(s) · ${esc(String(c.loss || 0))} perte(s)</dd><dt>Certifiée le</dt><dd>${formatDate(c.certifiedAt)}</dd></dl></article>`).join('')}</div>` : '<div class="empty">Aucune stratégie IA à 100% pour le moment : l’analyseur continue de chercher.</div>'}</section>
+        ${strats.map(st => `<section class="section"><div class="section-head"><div><span class="eyebrow">Stratégie IA</span><h2 style="margin-top:7px">${esc(st.name)}</h2><p class="small">Motif : ${esc(st.motif || '')}</p></div><span class="tag ${st.active ? 'good' : 'warn'}">${st.active ? 'En service' : st.waiting ? 'Quota atteint' : 'Retirée'} · ${esc(String(st.used))}/${esc(String(st.quota))}</span></div>
+          <div class="panel"><div class="split"><b>Bilan de cette stratégie</b><span class="tag">${esc(String(st.bilan?.rate ?? 0))}% · ${esc(String(st.bilan?.win ?? 0))} gain(s) · ${esc(String(st.bilan?.loss ?? 0))} perte(s)</span></div>
+            <pre style="white-space:pre-wrap">${esc(st.bilanText || '')}</pre>
+            <h3 style="margin-top:16px">20 dernières prédictions de cette stratégie</h3>
+            ${(st.predictions || []).length ? `<table><thead><tr><th>Jeu</th><th>Costume</th><th>Étape</th><th>État</th><th>Envoi</th><th>Motif (jamais envoyé)</th></tr></thead><tbody>${st.predictions.map(x => `<tr><td class="mono">#N${esc(x.target)}</td><td>${esc(x.suit)}</td><td class="mono">${esc(String(x.step ?? 0))}/${esc(String(x.maxR ?? 0))}</td><td><span class="tag ${x.status === 'gagné' ? 'good' : x.status === 'perdu' ? 'bad' : 'warn'}">${esc(x.status)}</span></td><td>${x.published ? 'Publié' : 'Non publié'}</td><td class="small">${esc(x.motif || '')}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">Aucune prédiction pour cette stratégie.</div>'}
+            ${st.reason ? `<div class="notice warn" style="margin-top:12px">${esc(st.reason)}</div>` : ''}</div></section>`).join('')}
         ${retired.length ? `<section class="section"><div class="section-head"><div><span class="eyebrow">Retirées</span><h2 style="margin-top:7px">Stratégies sorties du panneau</h2></div></div><div class="panel">${retired.map(r => `<div class="notice warn"><b>${esc(r.name)}</b> — ${esc(r.reason || '')} <span class="muted">${formatDate(r.retiredAt)}</span></div>`).join('')}</div></section>` : ''}`;
     }
     async function savePredit() {
-      try { await api('/api/predit/config', 'POST', { enabled: $('#preditEnabled')?.checked, requireCombo: $('#preditCombo')?.checked, minSample: val('preditSample'), maxR: val('preditMaxR'), channels: ids(val('preditChannel')) }); await refresh(); preditPage(); toast('Panneau Prédit enregistré.'); }
+      try { await api('/api/predit/config', 'POST', { enabled: $('#preditEnabled')?.checked, requireCombo: $('#preditCombo')?.checked, minSample: val('preditSample'), maxR: val('preditMaxR'), format: val('preditFormat'), perStrategy: val('preditPerStrategy'), channels: ids(val('preditChannel')) }); await refresh(); preditPage(); toast('Panneau Prédit enregistré.'); }
       catch (e) { toast(e.message, 'error'); }
     }
     async function savePreditChannel() {
@@ -485,7 +532,7 @@
       try {
         const r = await api('/api/diagnostics/channels');
         const row = (c) => `<span class="tag ${c.ok ? 'good' : 'bad'}">${esc(c.title || c.id)}${c.ok ? '' : ' — ' + esc(c.error || 'droit de publier manquant')}</span>`;
-        $('#app').innerHTML = `<div class="section-head" style="padding-top:38px"><div><span class="eyebrow">Vérification</span><h2 style="margin-top:7px">Envoi des prédictions</h2><p class="small">Contrôle du token, des canaux publics et silencieux de chaque stratégie.</p></div><a class="button small ghost" href="#/settings">Retour configuration</a></div>
+        $('#app').innerHTML = `<div class="section-head" style="padding-top:38px"><div><span class="eyebrow">Vérification</span><h2 style="margin-top:7px">Envoi des prédictions</h2><p class="small">Contrôle du token, des canaux publics et silencieux de chaque stratégie.</p></div></div>
         <div class="notice ${r.bot.tokenSet ? '' : 'warn'}">${r.bot.tokenSet ? 'Token Telegram enregistré' + (r.bot.username ? ' (@' + esc(r.bot.username) + ')' : '') : 'Aucun token Telegram : aucune prédiction ne peut partir.'}</div>
         ${r.strategies.map(s => `<div class="panel" style="margin-bottom:12px"><div class="split"><b>${esc(s.name)}</b><span class="tag ${s.ready ? 'good' : 'warn'}">${s.ready ? 'Envoi opérationnel' : 'À configurer'}</span></div>
           <p class="small">Public : ${s.published.length ? s.published.map(row).join(' ') : '<span class="muted">aucun canal</span>'}</p>
@@ -532,7 +579,7 @@
     async function saveProposal(proposal) { try { await api('/api/ai/strategies', 'POST', { proposal }); await refresh(); toast('Plan de stratégie enregistré, désactivé par sécurité.'); } catch(e) { toast(e.message, 'error'); } }
     async function formatsPage() { setNav('formats'); $('#app').innerHTML = '<div class="loading">Chargement des formats…</div>'; try { const r = await api('/api/formats'); $('#app').innerHTML = `<div class="section-head" style="padding-top:38px"><div><span class="eyebrow">Bibliothèque Telegram</span><h2 style="margin-top:7px">Formats de prédiction</h2><p class="small">${r.count} formats affichés avec leur aperçu réel.</p></div><input id="formatSearch" style="max-width:250px" placeholder="Rechercher un format..." oninput="filterFormats()"></div><div id="formatGrid" class="format-grid">${r.formats.map(f => `<article class="format-card" data-search="${esc(`${f.id} ${f.label} ${f.preview}`.toLowerCase())}"><b>FORMAT ${f.id}</b><pre>${esc(f.preview)}</pre></article>`).join('')}</div>`; } catch(e) { toast(e.message, 'error'); } }
     function filterFormats() { const q = val('formatSearch').toLowerCase(); document.querySelectorAll('.format-card').forEach(c => c.style.display = c.dataset.search.includes(q) ? '' : 'none'); }
-    function settingsPage() { setNav('settings'); const bot = snapshot.bot || {}, db = snapshot.db || {}; $('#app').innerHTML = `<div class="section-head" style="padding-top:38px"><div><span class="eyebrow">Système</span><h2 style="margin-top:7px">Configuration générale</h2><p class="small">Les réglages de chaque stratégie restent dans sa propre fiche.</p></div></div><div class="two-col"><div class="panel"><h3>Bot Telegram</h3><div class="notice ${bot.tokenSet ? '' : 'warn'}">${bot.tokenSet ? `Token enregistré : ${esc(bot.tokenMasked || 'masqué')}` : 'Aucun token Telegram configuré.'}</div><div class="field"><label>Token du bot</label><input id="botToken" type="password" autocomplete="off" placeholder="Coller le token Telegram pour le remplacer"></div><div class="field"><label>ID administrateur</label><input id="adminId" type="number" value="${esc(bot.adminId || '')}"></div><div class="field"><label>ID du canal principal</label><input id="mainChannel" placeholder="-1001234567890 ou @moncanal" value="${esc((snapshot.channels || []).filter(c => c.active).map(c => c.id).join(', '))}"></div><div class="toolbar"><button class="button primary" onclick="saveBot()">Enregistrer et redémarrer</button><button class="button orange" onclick="saveMainChannel()">Vérifier le canal et envoyer un message</button></div><div id="settingsMessage"></div></div><div class="panel"><h3>Base de données</h3><div class="notice ${db.ready ? '' : 'warn'}">${db.ready ? 'PostgreSQL connectée et prête.' : 'Base non connectée : le bot peut fonctionner avec l’historique en mémoire.'}</div><div class="field"><label>DATABASE_URL (optionnel)</label><input id="dbUrl" type="password" autocomplete="off" placeholder="URL PostgreSQL Render"></div><button class="button ghost" onclick="saveDb()">Connecter la base</button><p class="small" style="margin-top:15px">Sur Render, préfère la variable d’environnement <code>DATABASE_URL</code>.</p></div></div><div class="section"><div class="panel"><h3>Réglages globaux historiques</h3><div class="three-col"><div class="field"><label>Compteur B</label><input id="globalB" type="number" min="1" value="${snapshot.b}"></div><div class="field"><label>Rattrapages</label><input id="globalR" type="number" min="0" max="9" value="${snapshot.maxR}"></div><div class="field"><label>Format par défaut</label><input id="globalF" type="number" min="1" max="${snapshot.formatCount}" value="${snapshot.format}"></div></div><button class="button primary" onclick="saveGlobals()">Enregistrer les réglages globaux</button> <a class="button ghost" href="#/diagnostics">Vérifier les envois</a> <a class="button ghost" href="#/database">Voir la base de données</a></div></div>`; }
+    function settingsPage() { setNav('settings'); const bot = snapshot.bot || {}, db = snapshot.db || {}; $('#app').innerHTML = `<div class="section-head" style="padding-top:38px"><div><span class="eyebrow">Système</span><h2 style="margin-top:7px">Configuration générale</h2><p class="small">Les réglages de chaque stratégie restent dans sa propre fiche.</p></div></div><div class="two-col"><div class="panel"><h3>Bot Telegram</h3><div class="notice ${bot.tokenSet ? '' : 'warn'}">${bot.tokenSet ? `Token enregistré : ${esc(bot.tokenMasked || 'masqué')}` : 'Aucun token Telegram configuré.'}</div><div class="field"><label>Token du bot</label><input id="botToken" type="password" autocomplete="off" placeholder="Coller le token Telegram pour le remplacer"></div><div class="field"><label>ID administrateur</label><input id="adminId" type="number" value="${esc(bot.adminId || '')}"></div><div class="field"><label>ID du canal principal</label><input id="mainChannel" placeholder="-1001234567890 ou @moncanal" value="${esc((snapshot.channels || []).filter(c => c.active).map(c => c.id).join(', '))}"></div><div class="toolbar"><button class="button primary" onclick="saveBot()">Enregistrer et redémarrer</button><button class="button orange" onclick="saveMainChannel()">Vérifier le canal et envoyer un message</button></div><div id="settingsMessage"></div></div><div class="panel"><h3>Base de données</h3><div class="notice ${db.ready ? '' : 'warn'}">${db.ready ? 'PostgreSQL connectée et prête.' : 'Base non connectée : le bot peut fonctionner avec l’historique en mémoire.'}</div><div class="field"><label>DATABASE_URL (optionnel)</label><input id="dbUrl" type="password" autocomplete="off" placeholder="URL PostgreSQL Render"></div><button class="button ghost" onclick="saveDb()">Connecter la base</button><p class="small" style="margin-top:15px">Sur Render, préfère la variable d’environnement <code>DATABASE_URL</code>.</p></div></div><div class="section"><div class="panel"><h3>Réglages globaux historiques</h3><div class="three-col"><div class="field"><label>Compteur B</label><input id="globalB" type="number" min="1" value="${snapshot.b}"></div><div class="field"><label>Rattrapages</label><input id="globalR" type="number" min="0" max="9" value="${snapshot.maxR}"></div><div class="field"><label>Format par défaut</label><input id="globalF" type="number" min="1" max="${snapshot.formatCount}" value="${snapshot.format}"></div></div><button class="button primary" onclick="saveGlobals()">Enregistrer les réglages globaux</button>  </div></div>`; }
     async function saveBot() { try { if (val('botToken')) await api('/api/bot/token', 'POST', { token: val('botToken') }); await api('/api/bot/admin', 'POST', { adminId: val('adminId') }); await refresh(); settingsPage(); toast('Configuration Telegram enregistrée.'); } catch(e) { toast(e.message, 'error'); } }
     async function saveMainChannel() {
       const box = $('#settingsMessage');
@@ -544,7 +591,34 @@
     }
     async function saveDb() { try { await api('/api/db', 'POST', { url: val('dbUrl') }); await refresh(); settingsPage(); toast('Base connectée.'); } catch(e) { toast(e.message, 'error'); } }
     async function saveGlobals() { try { await api('/api/setb', 'POST', { b: val('globalB') }); await api('/api/setmaxr', 'POST', { maxR: val('globalR') }); await api('/api/setformat', 'POST', { format: val('globalF') }); await refresh(); settingsPage(); toast('Réglages globaux enregistrés.'); } catch(e) { toast(e.message, 'error'); } }
-    async function route() { try { await refresh(); const h = location.hash || '#/'; if (h.startsWith('#/strategy/')) await strategyPage(decodeURIComponent(h.split('/')[2])); else if (h === '#/strategies') strategiesPage(); else if (h === '#/ai') aiPage(); else if (h === '#/ai-strategies') aiStrategiesPage(); else if (h === '#/predit') preditPage(); else if (h === '#/diagnostics') await diagnosticsPage(); else if (h === '#/database') await databasePage(); else if (h === '#/formats') await formatsPage(); else if (h === '#/settings') settingsPage(); else home(); } catch(e) { $('#app').innerHTML = `<div class="notice error">${esc(e.message)}</div>`; } }
+    function injectBack() {
+      const app = $('#app');
+      if (!app) return;
+      if (!location.hash || location.hash === '#/' || location.hash === '#') return;
+      if (app.querySelector('.backbar')) return;
+      const bar = document.createElement('div');
+      bar.className = 'backbar';
+      bar.innerHTML = '<a class="home-back" href="#/">⬅ Retour à l\'accueil</a>';
+      app.prepend(bar);
+    }
+    async function route() {
+      try {
+        await refresh();
+        const h = location.hash || '#/';
+        if (h.startsWith('#/strategy/')) await strategyPage(decodeURIComponent(h.split('/')[2]));
+        else if (h === '#/strategies') strategiesPage();
+        else if (h === '#/ai') aiPage();
+        else if (h === '#/ai-strategies') aiStrategiesPage();
+        else if (h === '#/predit') preditPage();
+        else if (h === '#/diagnostics') await diagnosticsPage();
+        else if (h === '#/database') await databasePage();
+        else if (h === '#/formats') await formatsPage();
+        else if (h === '#/settings') settingsPage();
+        else home();
+      } catch(e) { $('#app').innerHTML = `<div class="notice error">${esc(e.message)}</div>`; }
+      injectBack();
+    }
+    new MutationObserver(() => injectBack()).observe($('#app'), { childList: true });
     window.addEventListener('hashchange', route); route(); setInterval(() => { if (!location.hash || location.hash === '#/') route(); }, 8000);
   </script>
 </body>
