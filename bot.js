@@ -10,7 +10,7 @@ const {
   state, evaluate, verify, registerGames, setOnFinished,
   predictionText, predictionMessage, liveText, stats, SUITS,
   initStrategies, setStrategyConfig, resetStrategy, strategyChannels, parityRuntime,
-  bilanText, canSend, gateView, shadowRuntime,
+  bilanText, canSend, gateView, shadowRuntime, sweepAutoUnlock, unlockGate,
 } = require('./predictor');
 
 let bot = null;
@@ -123,6 +123,7 @@ const HELP =
   '/setstrat <clé> <format|maxr|b|lead|depart|var|decalage|streak|absence|silence|fenetre|template> <valeur>\n' +
   '/ombre — état de la stratégie « Prédiction dans l\'ombre »\n' +
   '/silence <clé> <on|off> [fenêtre] — mode silencieux + nb max de prédictions après une perte\n' +
+  '/debloquer <clé|tout> — débloque immédiatement l\'envoi (déblocage auto après 10 min)\n' +
   '/filtres — état du filtre « double perte » de chaque stratégie\n' +
   '/sauverconfig — enregistrer toutes les configurations en base\n' +
   '/configs — lire les configurations enregistrées en base\n' +
@@ -513,6 +514,17 @@ function wire(b) {
         `• Retour au silence après un gain : ${cfg.resetOnWin === false ? 'non' : 'oui'}\n\n` +
         gateView(key).label
     );
+  });
+
+  b.onText(/^\/debloquer(?:\s+(\w+))?/, (msg, m) => {
+    if (!isAdmin(msg)) return deny(msg.chat.id);
+    const key = (m[1] || '').toLowerCase();
+    const keys = key === 'tout' || key === 'all' || !key
+      ? strategies.LIST.map((d) => d.key)
+      : strategies.BY_KEY[key] ? [key] : null;
+    if (!keys) return b.sendMessage(msg.chat.id, 'ℹ️ Usage : /debloquer <clé|tout>');
+    for (const k of keys) unlockGate(k, true);
+    b.sendMessage(msg.chat.id, `🔓 Débloqué : ${keys.map((k) => strategies.BY_KEY[k].name).join(', ')}`);
   });
 
   b.onText(/^\/filtres\b/, (msg) => {
@@ -953,6 +965,10 @@ async function tick() {
     const games = await api.fetchGames();
     state.lastError = null;
     registerGames(games);
+
+    // déblocage automatique des stratégies bloquées depuis plus de 10 minutes
+    const freed = sweepAutoUnlock();
+    if (freed.length) console.log('🔓 Déblocage automatique : ' + freed.join(', '));
 
     const closed = verify();
     for (const p of closed) {

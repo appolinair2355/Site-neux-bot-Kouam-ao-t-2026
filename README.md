@@ -86,3 +86,23 @@ stratégie trouvée est enregistrée (désactivée) dans « Stratégies IA cré�
 
 La page « Envois » vérifie, pour chaque stratégie, le token du bot, les canaux
 public et silencieux, le droit de publier et la dernière erreur d'envoi.
+
+## Version 3.2 — corrections
+
+1. **Nouveau sabot (retour au jeu n°1)** : la mémoire des jeux est remise à zéro
+   automatiquement (`resetShoe`). Avant, l'ancien numéro (ex. #1440) restait le
+   « dernier tour terminé » : toutes les nouvelles cibles (#1, #2…) étaient vues
+   comme déjà jouées et **plus aucune prédiction ne sortait après le bilan**.
+2. **Déblocage automatique après 10 minutes** : toute stratégie bloquée en mode
+   silencieux est débloquée seule au bout de `autoUnlockMin` minutes (10 par
+   défaut, réglable, 0 = jamais). Déblocage manuel : bouton « Débloquer »,
+   `POST /api/strategies/:key/unlock` ou `/debloquer <clé|tout>` sur Telegram.
+3. **Mode silencieux réglable** : `lossTrigger` = nombre de pertes avant
+   d'ouvrir l'envoi. `1` = envoi dès la première perte (avant, 2 pertes étaient
+   toujours exigées, d'où l'attente).
+4. **Prédiction dans l'ombre / Carte absente** : le comptage d'absence ne
+   s'arrêtait plus dès qu'un tour manquait dans le flux (trous tolérés) ; la
+   stratégie « absence ≥ 4 puis retour → +4 » prédit désormais réellement.
+5. **Analyse cumulative** : paliers 1→4, 1→8, 1→12 … jusqu'au jeu 1440.
+6. **Nouveau panneau « Avis IA sur les stratégies existantes »** : avis et
+   conseils cumulés (`/api/ai/strategy-advice`).

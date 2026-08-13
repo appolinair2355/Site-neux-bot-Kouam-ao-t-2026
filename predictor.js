@@ -127,6 +127,8 @@ function setStrategyConfig(key, patch = {}) {
   if (patch.silent !== undefined) next.silent = !!patch.silent;
   if (patch.lossWindow !== undefined) next.lossWindow = Math.max(1, Math.min(20, parseInt(patch.lossWindow, 10) || 3));
   if (patch.resetOnWin !== undefined) next.resetOnWin = !!patch.resetOnWin;
+  if (patch.lossTrigger !== undefined) next.lossTrigger = Math.max(1, Math.min(5, parseInt(patch.lossTrigger, 10) || 2));
+  if (patch.autoUnlockMin !== undefined) next.autoUnlockMin = Math.max(0, Math.min(240, parseInt(patch.autoUnlockMin, 10) || 0));
   if (patch.template !== undefined) next.template = patch.template ? String(patch.template) : null;
   if (patch.channels !== undefined || patch.channelId !== undefined || patch.publishedChannels !== undefined) {
     const value = patch.publishedChannels !== undefined
@@ -189,14 +191,66 @@ function strategyChannels(key, mode = 'published') {
 //   4) si la fenêtre est dépassée sans 2ᵉ perte → tout repart à zéro ;
 //   5) une fois l'envoi activé, une prédiction gagnée referme l'envoi
 //      (réglage `resetOnWin`, activé par défaut) et on repart à zéro.
+// Déblocage automatique : une stratégie bloquée (mode silencieux, en attente de
+// pertes) est AUTOMATIQUEMENT débloquée au bout de `autoUnlockMin` minutes
+// (10 min par défaut). Le blocage ne peut donc jamais durer indéfiniment.
+const AUTO_UNLOCK_DEFAULT_MIN = 10;
+
+function autoUnlockMs(cfg) {
+  const min = cfg && cfg.autoUnlockMin !== undefined
+    ? parseInt(cfg.autoUnlockMin, 10)
+    : AUTO_UNLOCK_DEFAULT_MIN;
+  if (!Number.isFinite(min) || min <= 0) return 0; // 0 = déblocage auto désactivé
+  return Math.min(240, min) * 60 * 1000;
+}
+
 function gate(key) {
-  if (!state.gates[key]) state.gates[key] = { armed: false, losses: 0, window: 0, since: null };
-  return state.gates[key];
+  if (!state.gates[key]) {
+    state.gates[key] = { armed: false, losses: 0, window: 0, since: null, blockedSince: Date.now(), autoUnlockedAt: null };
+  }
+  const g = state.gates[key];
+  if (g.blockedSince == null) g.blockedSince = Date.now();
+  return g;
 }
 
 function resetGate(key) {
-  state.gates[key] = { armed: false, losses: 0, window: 0, since: null };
+  state.gates[key] = { armed: false, losses: 0, window: 0, since: null, blockedSince: Date.now(), autoUnlockedAt: null };
   return state.gates[key];
+}
+
+// déblocage manuel (bouton du panneau / commande Telegram)
+function unlockGate(key, manual = true) {
+  const g = gate(key);
+  g.armed = true;
+  g.losses = Math.max(g.losses, 1);
+  g.window = 0;
+  g.blockedSince = null;
+  g.autoUnlockedAt = Date.now();
+  g.autoUnlockReason = manual ? 'déblocage manuel' : 'déblocage automatique (10 min)';
+  return g;
+}
+
+// applique le déblocage automatique si le délai est écoulé
+function applyAutoUnlock(key) {
+  const cfg = state.strategies[key];
+  if (!cfg || !cfg.silent) return false;
+  const g = gate(key);
+  if (g.armed) return false;
+  const delay = autoUnlockMs(cfg);
+  if (!delay) return false;
+  if (g.blockedSince == null) { g.blockedSince = Date.now(); return false; }
+  if (Date.now() - g.blockedSince < delay) return false;
+  unlockGate(key, false);
+  return true;
+}
+
+// balayage périodique de toutes les stratégies (appelé par la boucle du bot)
+function sweepAutoUnlock() {
+  const freed = [];
+  for (const key of Object.keys(state.strategies || {})) {
+    if (applyAutoUnlock(key)) freed.push(key);
+  }
+  return freed;
 }
 
 function windowSize(cfg) {
@@ -211,18 +265,29 @@ function noteClosed(pred) {
   const win = pred.status === 'gagné';
   const max = windowSize(cfg);
 
+  // nombre de pertes nécessaires avant d'ouvrir l'envoi (1 = envoi dès la 1ʳᵉ perte)
+  const need = Math.max(1, Math.min(5, parseInt(cfg.lossTrigger, 10) || 2));
+
   if (g.armed) {
     if (win && cfg.resetOnWin !== false) resetGate(pred.strategy);
-    else if (!win) { g.losses = 2; g.window = 0; }
+    else if (!win) { g.losses = need; g.window = 0; }
     return;
   }
   if (g.losses === 0) {
-    if (!win) { g.losses = 1; g.window = 0; g.since = pred.target; }
+    if (!win) {
+      g.losses = 1; g.window = 0; g.since = pred.target;
+      // avec lossTrigger = 1 la première perte suffit : on ouvre l'envoi
+      if (need <= 1) { g.armed = true; g.blockedSince = null; }
+    }
     return;
   }
   // fenêtre ouverte après la 1ʳᵉ perte
   g.window += 1;
-  if (!win) { g.losses = 2; g.armed = true; g.window = 0; return; }
+  if (!win) {
+    g.losses += 1;
+    if (g.losses >= need) { g.armed = true; g.window = 0; g.blockedSince = null; }
+    return;
+  }
   if (g.window >= max) resetGate(pred.strategy);
 }
 
@@ -231,15 +296,25 @@ function canSend(key) {
   const cfg = state.strategies[key];
   if (!cfg) return true;
   if (!cfg.silent) return true;
+  applyAutoUnlock(key);
   return !!gate(key).armed;
 }
 
 // état lisible du filtre (panel web / Telegram)
 function gateView(key) {
   const cfg = state.strategies[key] || {};
+  applyAutoUnlock(key);
   const g = gate(key);
   const max = windowSize(cfg);
+  const need = Math.max(1, Math.min(5, parseInt(cfg.lossTrigger, 10) || 2));
+  const delay = autoUnlockMs(cfg);
+  const waitedMs = g.blockedSince ? Date.now() - g.blockedSince : 0;
   return {
+    lossTrigger: need,
+    autoUnlockMin: delay ? Math.round(delay / 60000) : 0,
+    autoUnlockInSec: delay && g.blockedSince && !g.armed ? Math.max(0, Math.round((delay - waitedMs) / 1000)) : null,
+    autoUnlocked: !!g.autoUnlockedAt,
+    autoUnlockReason: g.autoUnlockReason || null,
     silent: !!cfg.silent,
     lossWindow: max,
     resetOnWin: cfg.resetOnWin !== false,
@@ -251,10 +326,12 @@ function gateView(key) {
     label: !cfg.silent
       ? 'Envoi direct (mode silencieux désactivé)'
       : g.armed
-        ? "Envoi ACTIF : deux pertes confirmées"
-        : g.losses === 1
-          ? `Fenêtre ouverte : ${g.window}/${max} prédiction(s) — on attend une 2ᵉ perte`
-          : "Silence : on attend une première perte",
+        ? (g.autoUnlockReason ? `Envoi ACTIF (${g.autoUnlockReason})` : `Envoi ACTIF : ${need} perte(s) confirmée(s)`)
+        : g.losses >= 1
+          ? `Fenêtre ouverte : ${g.window}/${max} prédiction(s) — ${g.losses}/${need} perte(s)`
+          : delay
+            ? `Silence : on attend une perte (déblocage auto dans ${Math.max(0, Math.round((delay - waitedMs) / 60000))} min)`
+            : "Silence : on attend une première perte",
   };
 }
 
@@ -289,7 +366,58 @@ function nextTarget(current) {
 let onFinishedHook = null;
 function setOnFinished(fn) { onFinishedHook = fn; }
 
+// ---------------------------------------------------------------------------
+// Nouveau sabot : la table repart au jeu n°1
+// ---------------------------------------------------------------------------
+// CORRECTIF : sans remise à zéro, `maxFinishedNumber()` gardait l'ancien numéro
+// (ex. 1440) alors que les nouveaux jeux repartent à 1. Toutes les cibles
+// calculées étaient donc considérées comme « déjà jouées » et PLUS AUCUNE
+// prédiction ne sortait après l'envoi du bilan.
+function resetShoe(reason = 'nouveau sabot') {
+  state.games.clear();
+  state.history = [];
+  state.triggersDone = {};
+  state.lastFinished = null;
+  for (const s of SUITS) state.counters[s] = 0;
+  // les prédictions encore en attente visaient l'ancien sabot : elles sont closes
+  for (const p of state.predictions) {
+    if (p.status === 'en attente') { p.status = 'annulé'; p.badge = '♻️'; }
+  }
+  state.shoeResetAt = Date.now();
+  state.shoeResetReason = reason;
+  return true;
+}
+
+function isNewShoe(incoming) {
+  const maxDone = maxFinishedNumber();
+  if (!maxDone || !incoming.length) return false;
+  const numbers = incoming.map((g) => g.number).filter((n) => Number.isFinite(n));
+  if (!numbers.length) return false;
+  const minIn = Math.min(...numbers);
+  const maxIn = Math.max(...numbers);
+  // le flux redescend nettement sous le dernier tour connu → la table a rebouclé
+  if (maxIn + 10 < maxDone) return true;
+  if (minIn <= 1 && maxDone > 10 && !state.games.has(1)) return true;
+  // même numéro de tour mais contenu différent (ou tour redevenu « en cours ») :
+  // la table a redistribué depuis le début → nouveau sabot
+  for (const g of incoming) {
+    const prev = state.games.get(g.number);
+    if (!prev || !prev.finished) continue;
+    if (!g.finished) return true;
+    if (signatureOf(g) !== signatureOf(prev)) return true;
+  }
+  return false;
+}
+
+function signatureOf(g) {
+  return [
+    (g.player || []).join(','), (g.banker || []).join(','),
+    g.playerValue, g.bankerValue, g.winner || '',
+  ].join('|');
+}
+
 function registerGames(games) {
+  if (isNewShoe(games)) resetShoe();
   // CORRECTIF : l'API renvoie les jeux du plus RÉCENT au plus ancien. Il faut les
   // traiter dans l'ordre CROISSANT, sinon « lastFinished » devient le jeu le plus
   // ancien : toutes les cibles calculées semblent déjà jouées et AUCUNE
@@ -664,7 +792,7 @@ function strategyGames(key, limit = 12) {
 
 function stats(key) {
   const list = key ? state.predictions.filter((p) => p.strategy === key) : state.predictions;
-  const done = list.filter((p) => p.status !== 'en attente');
+  const done = list.filter((p) => p.status !== 'en attente' && p.status !== 'annulé');
   const win = done.filter((p) => p.status === 'gagné').length;
   return {
     total: list.length,
@@ -684,9 +812,11 @@ function shadowRuntime() {
   const last = maxFinishedNumber();
   const suits = SUITS.map((suit) => {
     let gap = 0;
+    let holes = 0;
     for (let n = last; n >= 1; n--) {
       const g = state.games.get(n);
-      if (!g || !g.finished) break;
+      if (!g || !g.finished) { if (++holes > 3) break; continue; }
+      holes = 0;
       const list = scope === 'joueur'
         ? strategies.suitsOf(g.playerSuits)
         : [...strategies.suitsOf(g.playerSuits), ...strategies.suitsOf(g.bankerSuits)];
@@ -798,6 +928,10 @@ module.exports = {
   counterView,
   bilanText,
   parseChannels,
+  resetShoe,
+  unlockGate,
+  applyAutoUnlock,
+  sweepAutoUnlock,
   canSend,
   gateView,
   resetGate,

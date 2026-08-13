@@ -37,6 +37,7 @@ CREATE INDEX IF NOT EXISTS cumulative_played_on_idx ON cumulative_analyses (play
 
 const runtime = {
   date: today(),
+  current: null,
   signature: '',
   checkpoints: [],   // { upTo, firstGame, lastGame, sample, verdict, findings, strategies, generatedAt }
   lastRunAt: null,
@@ -90,6 +91,12 @@ function verdictOf(result) {
   return parts.join(' — ').slice(0, 600);
 }
 
+// libellé lisible : « jeux #1 → #178 (178 jeux) »
+function rangeLabel(firstGame, lastGame, sample) {
+  if (!sample) return 'aucun jeu analysé';
+  return `jeux #${firstGame ?? '?'} → #${lastGame ?? '?'} (${sample} jeu${sample > 1 ? 'x' : ''} analysé${sample > 1 ? 's' : ''})`;
+}
+
 function buildCheckpoint(gamesAsc, upTo, signature) {
   const slice = gamesAsc.slice(0, upTo);
   // localAnalysis attend les jeux du plus récent au plus ancien
@@ -100,6 +107,7 @@ function buildCheckpoint(gamesAsc, upTo, signature) {
     firstGame: numberOf(slice[0]) || null,
     lastGame: numberOf(slice[slice.length - 1]) || null,
     sample: slice.length,
+    range: rangeLabel(numberOf(slice[0]) || null, numberOf(slice[slice.length - 1]) || null, slice.length),
     signature,
     verdict: verdictOf(result),
     confidence: result.confidence || null,
@@ -156,6 +164,7 @@ async function loadFromDb() {
     firstGame: r.first_game != null ? Number(r.first_game) : null,
     lastGame: r.last_game != null ? Number(r.last_game) : null,
     sample: r.sample,
+    range: rangeLabel(r.first_game != null ? Number(r.first_game) : null, r.last_game != null ? Number(r.last_game) : null, r.sample),
     signature: r.strategy_sig,
     verdict: r.verdict,
     confidence: (r.payload || {}).confidence || null,
@@ -199,6 +208,12 @@ async function tick() {
       await saveCheckpoint(cp);
     }
 
+    // palier « en cours » : couvre TOUS les jeux du jour, même hors multiple de 4
+    // (ex. 178 jeux → « jeux #1 → #178 »). Il n'est pas enregistré en base.
+    runtime.current = total
+      ? { ...buildCheckpoint(games, total, signature), partial: total % STEP !== 0 }
+      : null;
+
     runtime.checkpoints.sort((a, b) => a.upTo - b.upTo);
     if (runtime.checkpoints.length > MEM_KEEP) {
       runtime.checkpoints = runtime.checkpoints.slice(-MEM_KEEP);
@@ -224,6 +239,7 @@ async function byDate(date) {
     firstGame: r.first_game != null ? Number(r.first_game) : null,
     lastGame: r.last_game != null ? Number(r.last_game) : null,
     signature: r.strategy_sig, verdict: r.verdict,
+    range: rangeLabel(r.first_game != null ? Number(r.first_game) : null, r.last_game != null ? Number(r.last_game) : null, r.sample),
     findings: (r.payload || {}).findings || [],
     strategies: (r.payload || {}).strategies || [],
     confidence: (r.payload || {}).confidence || null,
@@ -233,7 +249,12 @@ async function byDate(date) {
 
 function status() {
   const last = runtime.checkpoints[runtime.checkpoints.length - 1] || null;
+  const current = runtime.current || last;
   return {
+    current,
+    coverage: current
+      ? { firstGame: current.firstGame, lastGame: current.lastGame, sample: current.sample, label: current.range }
+      : { firstGame: null, lastGame: null, sample: 0, label: rangeLabel(null, null, 0) },
     date: runtime.date,
     step: STEP,
     maxGames: MAX_GAMES,
@@ -247,4 +268,4 @@ function status() {
   };
 }
 
-module.exports = { tick, status, byDate, purgeStaleFor, strategySignature, STEP, MAX_GAMES, runtime };
+module.exports = { tick, status, byDate, rangeLabel, purgeStaleFor, strategySignature, STEP, MAX_GAMES, runtime };

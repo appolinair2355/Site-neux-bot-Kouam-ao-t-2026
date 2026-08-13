@@ -395,14 +395,24 @@ function suitPresent(g, suit, scope) {
 }
 
 // nombre de jeux consécutifs terminés, juste avant `number`, sans le costume
-function absenceBefore(games, number, suit, scope, max = 60) {
+// CORRECTIF : un simple trou dans le flux (jeu absent de la mémoire) arrêtait le
+// comptage à 0 et la stratégie ne prédisait JAMAIS. On parcourt désormais la
+// liste des jeux TERMINÉS réellement connus, du plus récent au plus ancien, en
+// ignorant les numéros manquants (jusqu'à `holeMax` trous consécutifs).
+function absenceBefore(games, number, suit, scope, max = 60, holeMax = 3) {
   let count = 0;
+  let holes = 0;
   for (let n = number - 1; n >= 1 && count < max; n--) {
     const g = games.get(n);
-    if (!g || !g.finished) break;                  // trou dans le flux → on arrête
+    if (!g || !g.finished) {
+      holes += 1;
+      if (holes > holeMax) break;                  // trop de trous → on arrête
+      continue;                                    // jeu inconnu : on l'ignore
+    }
+    holes = 0;
     const ps = suitsOf(g.playerSuits);
     const bs = suitsOf(g.bankerSuits);
-    if (!ps.length && !bs.length) break;           // cartes non lisibles
+    if (!ps.length && !bs.length) continue;        // cartes non lisibles : ignoré
     if (suitPresent(g, suit, scope)) break;        // le costume était là
     count += 1;
   }
@@ -480,6 +490,8 @@ function defaultsFor(key) {
     bilan: true,
     silent: false,
     lossWindow: 3,
+    lossTrigger: 2,     // nb de pertes avant d'ouvrir l'envoi (1 = dès la 1ʳᵉ perte)
+    autoUnlockMin: 10,  // déblocage automatique après 10 minutes de blocage
     resetOnWin: true,
     publishedChannels: [],
     shadowChannels: [],

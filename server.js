@@ -10,11 +10,12 @@ const ai = require('./ai-analyzer');
 const miner = require('./pattern-miner');
 const aiAuto = require('./ai-auto');
 const cumulative = require('./cumulative');
+const advisor = require('./strategy-advisor');
 const {
   state, stats, predictionMessage, recentGames, SUITS,
   setStrategyConfig, resetStrategy, initStrategies, parityRuntime,
   strategyGames, bilanText, gameCategories, gateView, shadowRuntime,
-  predictionsPanel, strategyChannels,
+  predictionsPanel, strategyChannels, unlockGate, sweepAutoUnlock,
 } = require('./predictor');
 const { startLoop, startBot, botStatus, activate, deactivate, persist, sendBilan, dropSender, announceConfig, announceMainBot, resolveChat, testSend, saveConfigsToDb, applyDbConfigs, setMainChannel } = require('./bot');
 
@@ -505,6 +506,38 @@ app.post('/api/ai/cumulative/purge', async (req, res) => {
   const removed = await cumulative.purgeStaleFor(sig);
   const r = await cumulative.tick();
   res.json({ ok: true, removed, recalculated: r.created.length, status: cumulative.status() });
+});
+
+// --- déblocage des prédictions (auto après 10 min, ou manuel) ---------------
+app.post('/api/strategies/:key/unlock', (req, res) => {
+  const key = req.params.key;
+  if (key === 'all' || key === 'tout') {
+    const keys = strategies.LIST.map((d) => d.key);
+    keys.forEach((k) => unlockGate(k, true));
+    return res.json({ ok: true, unlocked: keys });
+  }
+  if (!strategies.BY_KEY[key]) return res.status(404).json({ error: 'Stratégie inconnue' });
+  unlockGate(key, true);
+  res.json({ ok: true, unlocked: [key], gate: gateView(key) });
+});
+
+app.get('/api/gates', (req, res) => {
+  sweepAutoUnlock();
+  res.json({
+    gates: strategies.LIST.map((d) => ({ key: d.key, name: d.name, ...gateView(d.key) })),
+  });
+});
+
+// --- avis IA cumulé sur les stratégies existantes ---------------------------
+app.get('/api/ai/strategy-advice', async (req, res) => {
+  const st = advisor.status();
+  if (!st.lastRunAt) return res.json(await advisor.run({ remote: false }));
+  res.json(st);
+});
+
+app.post('/api/ai/strategy-advice/run', async (req, res) => {
+  const remote = !!(req.body && req.body.remote);
+  res.json(await advisor.run({ remote }));
 });
 
 // --- analyseur automatique en temps réel ------------------------------------

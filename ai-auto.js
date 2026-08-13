@@ -11,6 +11,7 @@ const strategies = require('./strategies');
 const db = require('./db');
 const { state } = require('./predictor');
 const cumulative = require('./cumulative');
+const advisor = require('./strategy-advisor');
 
 const auto = {
   enabled: config.AI_AUTO_ENABLED !== false,
@@ -137,8 +138,11 @@ function start(onChange) {
     try { const r = runLocal(); if (r.isNew && onChange) onChange(); }
     catch (e) { auto.lastError = e.message; }
     // analyse cumulative par paliers de 4 jeux (1→4, 1→8, 1→12 … 1→1440)
-    cumulative.tick().then((r) => { if (r && r.created && r.created.length && onChange) onChange(); })
-      .catch((e) => { auto.lastError = e.message; });
+    cumulative.tick().then((r) => {
+      // avis cumulé sur les stratégies existantes (panneau « Avis IA »)
+      advisor.run({ remote: false }).catch(() => {});
+      if (r && r.created && r.created.length && onChange) onChange();
+    }).catch((e) => { auto.lastError = e.message; });
   };
   const tickRemote = () => {
     refreshPastDays().then(() => runRemote()).then((r) => { if (r && onChange) onChange(); });

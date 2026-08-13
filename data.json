@@ -14,6 +14,8 @@
       "bilan": true,
       "silent": false,
       "lossWindow": 3,
+      "lossTrigger": 2,
+      "autoUnlockMin": 10,
       "resetOnWin": true,
       "publishedChannels": [
         -1003329818758
@@ -46,9 +48,9 @@
       "absence": 4,
       "varStep": 0,
       "decalage": 1,
-      "sentCount": 8,
+      "sentCount": 34,
       "startGame": 1,
-      "lastSentAt": 1786574852695,
+      "lastSentAt": 1786579011754,
       "channelInfos": [
         {
           "id": -1003329818758,
@@ -67,6 +69,8 @@
       "bilan": true,
       "silent": false,
       "lossWindow": 3,
+      "lossTrigger": 2,
+      "autoUnlockMin": 10,
       "resetOnWin": true,
       "publishedChannels": [
         -1003329818758
@@ -99,9 +103,9 @@
       "absence": 4,
       "varStep": 0,
       "decalage": 1,
-      "sentCount": 1,
+      "sentCount": 13,
       "startGame": 1,
-      "lastSentAt": 1786573790382,
+      "lastSentAt": 1786579011526,
       "channelInfos": [
         {
           "id": -1003329818758,
@@ -120,10 +124,25 @@
       "bilan": true,
       "silent": false,
       "lossWindow": 3,
+      "lossTrigger": 2,
+      "autoUnlockMin": 10,
       "resetOnWin": true,
-      "publishedChannels": [],
+      "publishedChannels": [
+        -1002887687164
+      ],
       "shadowChannels": [],
-      "publishedChannelInfos": [],
+      "publishedChannelInfos": [
+        {
+          "id": -1002887687164,
+          "type": "channel",
+          "error": null,
+          "title": "⚜️꧁•⊹٭ 𝕮𝖆𝖗𝖙𝖊 𝖊𝖓𝖘𝖊𝖎𝖌𝖓𝖊- 𝕭𝖔𝖙 𝒥💍𝒦𝐸𝑅 ٭⊹•꧂⚜️",
+          "canPost": true,
+          "username": null,
+          "confirmed": true,
+          "memberCount": 4
+        }
+      ],
       "shadowChannelInfos": [],
       "enabled": true,
       "format": 78,
@@ -132,17 +151,48 @@
       "b": 0,
       "lead": 1,
       "template": null,
-      "channels": []
+      "channels": [
+        -1002887687164
+      ],
+      "sentCount": 9,
+      "lastSentAt": 1786579012195,
+      "channelInfos": [
+        {
+          "id": -1002887687164,
+          "type": "channel",
+          "error": null,
+          "title": "⚜️꧁•⊹٭ 𝕮𝖆𝖗𝖙𝖊 𝖊𝖓𝖘𝖊𝖎𝖌𝖓𝖊- 𝕭𝖔𝖙 𝒥💍𝒦𝐸𝑅 ٭⊹•꧂⚜️",
+          "canPost": true,
+          "username": null,
+          "confirmed": true,
+          "memberCount": 4
+        }
+      ]
     },
     "parite": {
       "token": null,
       "bilan": true,
       "silent": false,
       "lossWindow": 3,
+      "lossTrigger": 2,
+      "autoUnlockMin": 10,
       "resetOnWin": true,
-      "publishedChannels": [],
+      "publishedChannels": [
+        -1003848194038
+      ],
       "shadowChannels": [],
-      "publishedChannelInfos": [],
+      "publishedChannelInfos": [
+        {
+          "id": -1003848194038,
+          "type": "channel",
+          "error": null,
+          "title": "VIP 🏆",
+          "canPost": true,
+          "username": null,
+          "confirmed": true,
+          "memberCount": 3
+        }
+      ],
       "shadowChannelInfos": [],
       "enabled": true,
       "format": 80,
@@ -150,16 +200,37 @@
       "b": 0,
       "lead": 1,
       "startGame": 1,
-      "varStep": 2,
-      "decalage": 1,
+      "varStep": 3,
+      "decalage": 3,
       "template": null,
-      "channels": []
+      "channels": [
+        -1003848194038
+      ],
+      "scope": "tous",
+      "streak": 3,
+      "absence": 4,
+      "sentCount": 10,
+      "lastSentAt": 1786579053554,
+      "channelInfos": [
+        {
+          "id": -1003848194038,
+          "type": "channel",
+          "error": null,
+          "title": "VIP 🏆",
+          "canPost": true,
+          "username": null,
+          "confirmed": true,
+          "memberCount": 3
+        }
+      ]
     },
     "absente": {
       "token": null,
       "bilan": true,
       "silent": false,
       "lossWindow": 3,
+      "lossTrigger": 2,
+      "autoUnlockMin": 10,
       "resetOnWin": true,
       "publishedChannels": [],
       "shadowChannels": [],
@@ -179,20 +250,55 @@
       "bilan": true,
       "silent": true,
       "lossWindow": 3,
+      "lossTrigger": 2,
+      "autoUnlockMin": 10,
       "resetOnWin": true,
-      "publishedChannels": [],
+      "publishedChannels": [
+        -1003848194038
+      ],
       "shadowChannels": [],
-      "publishedChannelInfos": [],
+      "publishedChannelInfos": [
+        {
+          "id": -1003848194038,
+          "type": "channel",
+          "error": null,
+          "title": "VIP 🏆",
+          "canPost": true,
+          "username": null,
+          "confirmed": true,
+          "memberCount": 3
+        }
+      ],
       "shadowChannelInfos": [],
       "enabled": true,
       "format": 84,
-      "maxR": 2,
+      "maxR": 3,
       "b": 0,
       "lead": 4,
-      "absence": 4,
-      "scope": "tous",
+      "absence": 3,
+      "scope": "joueur",
       "template": null,
-      "channels": []
+      "channels": [
+        -1003848194038
+      ],
+      "streak": 3,
+      "varStep": 0,
+      "decalage": 1,
+      "sentCount": 2,
+      "startGame": 1,
+      "lastSentAt": 1786579012411,
+      "channelInfos": [
+        {
+          "id": -1003848194038,
+          "type": "channel",
+          "error": null,
+          "title": "VIP 🏆",
+          "canPost": true,
+          "username": null,
+          "confirmed": true,
+          "memberCount": 3
+        }
+      ]
     }
   },
   "aiAnalyses": [
@@ -220,7 +326,7 @@
         "ties": 0
       },
       "sample": 0,
-      "generatedAt": "2026-08-12T22:49:48.329Z"
+      "generatedAt": "2026-08-13T08:15:05.615Z"
     }
   ],
   "aiStrategies": []
