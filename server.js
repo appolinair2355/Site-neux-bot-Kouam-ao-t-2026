@@ -484,12 +484,18 @@ app.post('/api/ai/compare-days/save', async (req, res) => {
 app.post('/api/ai/strategies', (req, res) => {
   const proposal = req.body && req.body.proposal;
   if (!proposal || typeof proposal !== 'object') return res.status(400).json({ error: 'Proposition de stratégie manquante' });
+  const rate = Number(proposal.rate);
+  if (!Number.isFinite(rate) || rate < 75) {
+    return res.status(400).json({ error: "Réussite insuffisante : seules les stratégies mesurées à 75% ou plus sont enregistrées." });
+  }
   const item = {
     id: `ai-${Date.now()}`,
     name: String(proposal.name || 'Stratégie IA').slice(0, 100),
     logic: String(proposal.logic || '').slice(0, 1000),
     evidence: String(proposal.evidence || '').slice(0, 1000),
     risks: String(proposal.risks || '').slice(0, 1000),
+    rate,
+    support: Number(proposal.support) || null,
     compatibleExisting: strategies.BY_KEY[proposal.compatibleExisting] ? proposal.compatibleExisting : null,
     createdAt: new Date().toISOString(),
     active: false,

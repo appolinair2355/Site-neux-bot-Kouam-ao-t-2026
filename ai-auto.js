@@ -32,8 +32,19 @@ function slug(text) {
 }
 
 // Enregistre une stratégie trouvée par l'analyseur (sans jamais l'activer seule)
+// Seuil minimum de réussite : une stratégie n'est enregistrée dans
+// « Stratégies IA » que si l'analyse lui mesure au moins 75% de réussite.
+const MIN_STRATEGY_RATE = 75;
+
+function proposalRate(proposal) {
+  const r = Number(proposal && proposal.rate);
+  return Number.isFinite(r) ? r : null;
+}
+
 function saveProposal(proposal, origin = 'auto-local') {
   if (!proposal || !proposal.name) return null;
+  const rate = proposalRate(proposal);
+  if (rate == null || rate < MIN_STRATEGY_RATE) return null;
   const name = String(proposal.name).slice(0, 100);
   if ((state.aiStrategies || []).some((s) => slug(s.name) === slug(name))) return null;
   const item = {
@@ -45,6 +56,8 @@ function saveProposal(proposal, origin = 'auto-local') {
     evidence: String(proposal.evidence || '').slice(0, 1000),
     risks: String(proposal.risks || '').slice(0, 1000),
     minimumSample: proposal.minimumSample || null,
+    rate,
+    support: Number(proposal.support) || null,
     compatibleExisting: strategies.BY_KEY[proposal.compatibleExisting] ? proposal.compatibleExisting : null,
     origin,
     createdAt: new Date().toISOString(),
@@ -175,4 +188,4 @@ function status() {
   };
 }
 
-module.exports = { start, stop, status, cumulative, runLocal, runRemote, saveProposal, refreshPastDays, getPastDays: () => pastDays, auto };
+module.exports = { MIN_STRATEGY_RATE, start, stop, status, cumulative, runLocal, runRemote, saveProposal, refreshPastDays, getPastDays: () => pastDays, auto };

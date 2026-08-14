@@ -23,7 +23,8 @@ const SUITS = ['♦️', '❤️', '♣️', '♠️'];
 const panel = {
   enabled: true,
   channels: [],        // canaux Telegram du panneau
-  minSample: 6,        // observations minimum pour certifier une règle à 100%
+  minSample: 6,        // observations minimum pour certifier une règle
+  minRate: 90,         // taux de réussite minimum accepté (90 → 100%)
   maxR: 1,             // rattrapages autorisés sur une prédiction du panneau
   format: 1,           // format de prédiction utilisé pour les messages
   perStrategy: 2,      // nombre de prédictions autorisées par stratégie créée
@@ -64,6 +65,10 @@ function configure(patch = {}) {
   if (patch.enabled !== undefined) panel.enabled = !!patch.enabled;
   if (patch.requireCombo !== undefined) panel.requireCombo = !!patch.requireCombo;
   if (patch.channels !== undefined) panel.channels = parseChannels(patch.channels);
+  if (patch.minRate !== undefined) {
+    const v = parseInt(patch.minRate, 10);
+    panel.minRate = Math.max(50, Math.min(100, Number.isFinite(v) ? v : 90));
+  }
   if (patch.minSample !== undefined) panel.minSample = Math.max(3, Math.min(60, parseInt(patch.minSample, 10) || 6));
   if (patch.maxR !== undefined) panel.maxR = Math.max(0, Math.min(5, parseInt(patch.maxR, 10) || 0));
   if (patch.format !== undefined) panel.format = fmt.clampFormat(patch.format);
@@ -77,6 +82,7 @@ function config() {
     enabled: panel.enabled,
     channels: panel.channels,
     minSample: panel.minSample,
+    minRate: panel.minRate,
     maxR: panel.maxR,
     format: panel.format,
     perStrategy: panel.perStrategy,
@@ -135,7 +141,7 @@ function triggered(rule, game) {
 function certifyDiscoveries() {
   const found = miner.mine(state.history || [], { lead: 2 });
   const list = (found.discoveries || []).filter(
-    (d) => d.rule && Number(d.rate) >= 100 && Number(d.support || 0) >= panel.minSample,
+    (d) => d.rule && Number(d.rate) >= panel.minRate && Number(d.support || 0) >= panel.minSample,
   );
   for (const d of list) {
     const id = `ia:${d.rule.kind}:${d.rule.hand}:${d.rule.token}:${d.rule.k}:${d.rule.suit}`;
@@ -172,7 +178,7 @@ function retire(entry, reason) {
 
 // stratégies encore à 100% ET qui n'ont pas épuisé leur quota de prédictions
 function activeCertified() {
-  return panel.certified.filter((c) => c.rate >= 100 && (c.used || 0) < panel.perStrategy);
+  return panel.certified.filter((c) => c.rate >= panel.minRate && (c.used || 0) < panel.perStrategy);
 }
 
 // ---------------------------------------------------------------------------
@@ -292,14 +298,14 @@ function verify(games) {
       } else {
         entry.loss += 1;
         entry.rate = 0;
-        retire(entry, `Prédiction perdue sur le jeu #N${pred.target} : la règle n'est plus sûre à 100%.`);
+        retire(entry, `Prédiction perdue sur le jeu #N${pred.target} : la règle passe sous le seuil de ${panel.minRate}%.`);
         continue;
       }
       // quota atteint : la stratégie sort du service, on attend une nouvelle
       if ((entry.used || 0) >= panel.perStrategy && !panel.predictions.some(
         (p) => p.status === 'en attente' && p.sources.some((s) => s.id === entry.id),
       )) {
-        retire(entry, `Quota atteint : ${entry.used} prédiction(s) envoyée(s). Le panneau attend une nouvelle stratégie à 100%.`);
+        retire(entry, `Quota atteint : ${entry.used} prédiction(s) envoyée(s). Le panneau attend une nouvelle stratégie à ${panel.minRate}% ou plus.`);
       }
     }
   }
@@ -404,7 +410,7 @@ function strategiesView() {
       sample: entry.sample,
       used: entry.used || 0,
       quota: panel.perStrategy,
-      active: panel.certified.some((c) => c.id === entry.id) && entry.rate >= 100,
+      active: panel.certified.some((c) => c.id === entry.id) && entry.rate >= panel.minRate,
       waiting: (entry.used || 0) >= panel.perStrategy,
       reason: entry.reason || null,
       certifiedAt: entry.certifiedAt,
@@ -429,11 +435,22 @@ async function tick() {
     const closed = verify(games);
     for (const pred of closed) await update(pred);
     const created = mergeCombos(makePredictions(games));
-    for (const pred of created) {
+    // prédictions encore valables mais jamais publiées (canal absent, erreur
+    // Telegram, bot redémarré) : on retente l'envoi à chaque tour.
+    const last = lastFinishedNumber(games);
+    const unsent = panel.predictions.filter(
+      (p) => p.status === 'en attente' && !p.messages.length && p.target > last && !created.includes(p),
+    );
+    for (const pred of [...created, ...unsent]) {
       if (panel.requireCombo && !pred.combo) continue;
       if (pred.messages.length && !pred.resend) continue;
       pred.resend = false;
       await send(pred);
+    }
+    if (!panel.certified.length) {
+      panel.lastError = panel.channels.length
+        ? `Aucune stratégie IA au-dessus de ${panel.minRate}% pour l'instant : rien à envoyer.`
+        : 'Aucun canal configuré pour le panneau Prédit';
     }
     panel.lastScanAt = Date.now();
   } catch (e) {

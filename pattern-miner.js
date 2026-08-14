@@ -175,6 +175,7 @@ function rankBuckets(buckets, build, minRate = MIN_RATE) {
       const rate = pct(hits, b.support);
       if (rate < minRate) continue;
       const built = build(b, suit, rate);
+      if (built.proposal) { built.proposal.rate = rate; built.proposal.support = b.support; }
       const rule = { kind: built.kind, hand: b.hand || 'joueur', token: b.token, value: b.value != null ? b.value : null, k: b.k, suit };
       out.push({ score: rate * Math.log2(b.support + 1), rate, support: b.support, hits: b.hits[suit] || 0, suit, rule, ...built });
     }
@@ -224,6 +225,8 @@ function mineWinnerSequences(games) {
           target: 'jeu suivant',
           suggestedLead: 1,
           minimumSample: 25,
+          rate,
+          support: b.support,
           evidence: `${hits} confirmations sur ${b.support} séquences observées.`,
           risks: 'Les séquences courtes se retournent : vérifier sur un second échantillon.',
           compatibleExisting: null,
@@ -289,6 +292,8 @@ function compareDays(todayGames, pastDays = []) {
       target: 'jeux suivants de la journée de référence',
       suggestedLead: 1,
       minimumSample: 20,
+      rate: best.rate,
+      support: best.run,
       evidence: `Correspondance de ${best.run} jeux consécutifs (${best.rate}% de recouvrement).`,
       risks: 'Une correspondance de journée peut se rompre à tout moment : recontrôler après chaque jeu.',
       compatibleExisting: null,
