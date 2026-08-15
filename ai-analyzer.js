@@ -1,6 +1,6 @@
 // ai-analyzer.js — analyseur Baccarat
 //  1) moteur LOCAL : il analyse lui-même les jeux en temps réel (aucune clé requise)
-//  2) enrichissement Pollinations.ai (clé écrite en dur dans config.js)
+//  2) enrichissement Pollinations.ai (clé fournie par l'environnement)
 'use strict';
 
 const config = require('./config');
@@ -9,7 +9,7 @@ const miner = require('./pattern-miner');
 const MAX_GAMES = 120;
 const SUITS = ['♦️', '❤️', '♣️', '♠️'];
 
-// clé utilisable à chaud (page Analyseur IA) sinon clé en dur du code
+// clé utilisable à chaud (page Analyseur IA) sinon variable d'environnement
 let runtimeKey = '';
 function setApiKey(key) { runtimeKey = String(key || '').trim(); return apiKey(); }
 function apiKey() { return runtimeKey || config.POLLINATIONS.API_KEY || ''; }
@@ -231,7 +231,7 @@ function localAnalysis(rawGames = [], options = {}) {
 // ---------------------------------------------------------------------------
 async function analyze({ games = [], date = null, objective = '', pastDays = [] } = {}) {
   if (!keyLooksValid()) {
-    const error = new Error("Clé Pollinations.ai absente : renseigne-la dans le code (config.js) ou depuis la page Analyseur IA.");
+     const error = new Error("Clé Pollinations.ai absente : configure POLLINATIONS_API_KEY dans l'environnement ou depuis la page Analyseur IA.");
     error.code = 'AI_NOT_CONFIGURED';
     throw error;
   }

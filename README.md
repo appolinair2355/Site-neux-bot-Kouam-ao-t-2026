@@ -15,11 +15,28 @@ des canaux Telegram et analyseur guidé par Pollinations.ai.
 | --- | --- | --- |
 | `BOT_TOKEN` | Oui pour Telegram | Token du bot Telegram |
 | `ADMIN_ID` | Recommandé | Identifiant Telegram de l'administrateur |
-| `DATABASE_URL` | Recommandé | PostgreSQL Render pour conserver l'historique |
+| `DATABASE_URL` | Oui pour la persistance | URL PostgreSQL de la base de données |
+| `POLLINATIONS_API_KEY` | Non | Clé secrète pour l'enrichissement IA distant |
 
 | `POLLINATIONS_MODEL` | Non | Modèle Pollinations, valeur par défaut `openai` |
 
-Les clés et les URLs privées ne sont pas incluses dans le ZIP.
+Les clés et les URLs privées ne sont pas incluses dans le ZIP. Ne les écris jamais dans
+`config.js` ou dans un fichier versionné.
+
+## Persistance PostgreSQL
+
+Au démarrage, le service crée ou met à jour automatiquement ses tables. La base
+conserve :
+
+- les jeux terminés et leurs cartes, points et résultats ;
+- chaque prédiction des stratégies, son statut et ses rattrapages ;
+- toutes les configurations globales et les configurations individuelles des stratégies ;
+- les stratégies découvertes par l'IA, les analyses IA complètes et le panneau « Prédit » ;
+- les réglages du bot, les canaux et l'état de l'analyse automatique.
+
+Le fichier `data.json` n'est qu'un secours local lorsque PostgreSQL est indisponible.
+En déploiement, la base est la source de vérité et les données IA sont relues après
+chaque redémarrage.
 
 ## Fonctionnalités
 
@@ -65,9 +82,9 @@ Les statistiques et les analyses IA décrivent uniquement un historique observé
 Elles ne garantissent pas le résultat d'un jeu et ne doivent pas être présentées
 comme une certitude.
 
-## Analyseur IA (Pollinations.ai en dur)
+## Analyseur IA
 
-Toutes les adresses de l'API sont écrites en dur dans `config.js` :
+Les adresses publiques de l'API sont définies dans `config.js` :
 
 - Base : `https://gen.pollinations.ai`
 - Texte : `https://gen.pollinations.ai/v1/chat/completions`
@@ -76,9 +93,9 @@ Toutes les adresses de l'API sont écrites en dur dans `config.js` :
 - Audio : `https://gen.pollinations.ai/audio/{TEXT}?voice=nova`
 - Modèles : `https://gen.pollinations.ai/v1/models`
 
-La clé se remplace dans `config.js` (`POLLINATIONS.API_KEY`) ou à chaud depuis
-la page « Analyseur IA ». Sans clé valide, le moteur local continue d'analyser
-seul, en temps réel.
+La clé se fournit avec `POLLINATIONS_API_KEY` ou à chaud depuis la page
+« Analyseur IA ». Sans clé valide, le moteur local continue d'analyser seul, en
+temps réel.
 
 L'analyseur tourne automatiquement : analyse locale toutes les 15 s, enrichissement
 Pollinations.ai toutes les 3 min. Chaque constat apparaît dans « Résultats », chaque

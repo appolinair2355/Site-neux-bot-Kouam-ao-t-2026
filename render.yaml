@@ -7,8 +7,13 @@ services:
     startCommand: npm start
     healthCheckPath: /health
     envVars:
-      # DATABASE_URL est déjà écrite en dur dans config.js
       - key: BOT_TOKEN
         sync: false
       - key: ADMIN_ID
         sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: POLLINATIONS_API_KEY
+        sync: false
+      - key: POLLINATIONS_MODEL
+        value: openai

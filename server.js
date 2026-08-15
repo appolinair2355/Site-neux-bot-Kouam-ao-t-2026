@@ -420,6 +420,7 @@ app.post('/api/ai/analyze', async (req, res) => {
       objective: req.body && req.body.objective ? String(req.body.objective).slice(0, 1200) : '',
     });
     state.aiAnalyses = [result, ...state.aiAnalyses].slice(0, 8);
+    if (db.ready) await db.saveAiAnalysis(result, date);
     persist();
     res.json({ ok: true, result });
   } catch (error) {
@@ -604,6 +605,8 @@ app.post('/api/ai/auto/toggle', (req, res) => {
   const on = req.body && req.body.enabled !== false;
   aiAuto.auto.enabled = on;
   if (on) aiAuto.start(persist); else aiAuto.stop();
+  if (db.ready) db.setSetting('ai_auto_enabled', on ? 'true' : 'false');
+  persist();
   res.json({ ok: true, auto: aiAuto.status() });
 });
 
@@ -682,7 +685,10 @@ app.get('/api/diagnostics/channels', async (req, res) => {
 
 app.listen(config.PORT, '0.0.0.0', () => {
   console.log('Tableau de bord sur le port ' + config.PORT);
-  startLoop();
-  aiAuto.start(persist);
-  console.log('🤖 Analyseur IA temps réel démarré (clé en dur : ' + (ai.keyLooksValid() ? 'oui' : 'à remplacer dans config.js') + ')');
+  startLoop().then(() => {
+    if (aiAuto.auto.enabled) aiAuto.start(persist);
+    console.log('🤖 Analyseur IA temps réel démarré (clé environnement : ' + (ai.keyLooksValid() ? 'oui' : 'non configurée') + ')');
+  }).catch((error) => {
+    console.error('Initialisation impossible :', error.message);
+  });
 });

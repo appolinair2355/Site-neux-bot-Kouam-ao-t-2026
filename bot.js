@@ -5,6 +5,7 @@ const api = require('./api');
 const store = require('./store');
 const db = require('./db');
 const predit = require('./predit');
+const aiAuto = require('./ai-auto');
 const fmt = require('./formats');
 const strategies = require('./strategies');
 const {
@@ -1094,6 +1095,7 @@ async function saveConfigsToDb() {
   await db.setSetting('maxR', state.maxR);
   await db.setSetting('format', state.format);
   await db.setSetting('template', state.template || '');
+  await db.setSetting('ai_auto_enabled', aiAuto.auto.enabled ? 'true' : 'false');
   const keys = [];
   for (const def of strategies.LIST) {
     const cfg = state.strategies[def.key];
@@ -1150,6 +1152,10 @@ async function applyDbConfigs() {
     // rien en base encore : on migre ce qui existait localement (data.json)
     for (const item of state.aiStrategies) await db.saveAiStrategy(item);
   }
+  const analyses = await db.loadAiAnalyses(12);
+  if (analyses.length) state.aiAnalyses = analyses;
+  const autoEnabled = await db.getSetting('ai_auto_enabled');
+  if (autoEnabled !== null) aiAuto.auto.enabled = autoEnabled !== 'false';
 
   store.patch({
     strategies: state.strategies,
@@ -1158,7 +1164,9 @@ async function applyDbConfigs() {
     channels: state.channels,
     activeChannels: state.activeChannels,
     aiStrategies: state.aiStrategies,
+    aiAnalyses: state.aiAnalyses,
   });
+  await predit.restoreFromDb();
   return { ok: true, loaded, added: missing, restored, aiStrategiesLoaded: aiRows.length };
 }
 

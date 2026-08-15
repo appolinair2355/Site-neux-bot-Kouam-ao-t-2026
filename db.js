@@ -85,6 +85,22 @@ CREATE TABLE IF NOT EXISTS ai_strategies (
   active      BOOLEAN NOT NULL DEFAULT false,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Toutes les analyses IA sont conservées séparément des stratégies proposées.
+-- Le payload JSONB garde les découvertes, résumés et résultats complets.
+CREATE TABLE IF NOT EXISTS ai_analyses (
+  id           BIGSERIAL PRIMARY KEY,
+  source       TEXT NOT NULL DEFAULT 'local',
+  analyzed_on  DATE,
+  sample       INT,
+  title        TEXT,
+  confidence   TEXT,
+  observation  TEXT,
+  payload      JSONB NOT NULL DEFAULT '{}',
+  generated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ai_analyses_generated_idx ON ai_analyses (generated_at DESC);
 `;
 
 function status() {
@@ -310,6 +326,42 @@ async function deleteAiStrategy(id) {
   return q(`DELETE FROM ai_strategies WHERE id = $1`, [id]);
 }
 
+// ---- analyses IA ------------------------------------------------------------
+async function saveAiAnalysis(result, date = null) {
+  if (!result || typeof result !== 'object') return null;
+  const generatedAt = result.generatedAt || new Date().toISOString();
+  return q(
+    `INSERT INTO ai_analyses
+       (source, analyzed_on, sample, title, confidence, observation, payload, generated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+    [
+      result.source || 'local',
+      normalizeDate(date || result.date) || null,
+      Number.isFinite(Number(result.sample)) ? Number(result.sample) : null,
+      result.title || null,
+      result.confidence || null,
+      result.observation || null,
+      JSON.stringify(result),
+      generatedAt,
+    ]
+  );
+}
+
+async function loadAiAnalyses(limit = 12) {
+  const r = await q(
+    `SELECT payload, generated_at FROM ai_analyses ORDER BY id DESC LIMIT $1`,
+    [Math.max(1, Math.min(100, Number(limit) || 12))]
+  );
+  if (!r) return [];
+  return r.rows.map((row) => {
+    let payload = row.payload || {};
+    if (typeof payload === 'string') {
+      try { payload = JSON.parse(payload || '{}'); } catch (_) { payload = {}; }
+    }
+    return { ...payload, generatedAt: payload.generatedAt || row.generated_at };
+  });
+}
+
 // ---- réglages --------------------------------------------------------------
 async function setSetting(key, value) {
   return q(
@@ -334,6 +386,16 @@ async function saveAppConfig(cfg = {}) {
 
 async function loadAppConfig() {
   const raw = await getSetting('app_config');
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch (_) { return null; }
+}
+
+async function savePreditState(value) {
+  return setSetting('predit_state', JSON.stringify(value || {}));
+}
+
+async function loadPreditState() {
+  const raw = await getSetting('predit_state');
   if (!raw) return null;
   try { return JSON.parse(raw); } catch (_) { return null; }
 }
@@ -364,7 +426,8 @@ async function tableCounts() {
             (SELECT count(*)::int FROM predictions)    AS predictions,
             (SELECT count(*)::int FROM settings)       AS settings,
             (SELECT count(*)::int FROM strategies)     AS strategies,
-            (SELECT count(*)::int FROM ai_strategies)  AS ai_strategies`);
+            (SELECT count(*)::int FROM ai_strategies)  AS ai_strategies,
+            (SELECT count(*)::int FROM ai_analyses)    AS ai_analyses`);
   return r ? r.rows[0] : null;
 }
 
@@ -379,6 +442,8 @@ async function dump(limit = 25) {
     predictions: await lastPredictions(limit),
     strategies: await strategyRows(),
     settings: await allSettings(),
+    aiAnalyses: await loadAiAnalyses(Math.min(limit, 50)),
+    preditState: await loadPreditState(),
   };
 }
 
@@ -485,8 +550,10 @@ module.exports = {
   savePrediction, closePrediction, setSetting, getSetting, normalizeDate,
   saveStrategy, loadStrategies, deleteStrategy, strategyStats, strategyPredictions, clearPredictions,
   saveAiStrategy, loadAiStrategies, deleteAiStrategy,
+  saveAiAnalysis, loadAiAnalyses,
   lastGames, gameByNumber, predictionsByDate, predictionSummary,
   overview, availableDates, readOnlyQuery,
-  saveAppConfig, loadAppConfig, dump, allSettings, lastPredictions, strategyRows, tableCounts,
+  saveAppConfig, loadAppConfig, savePreditState, loadPreditState,
+  dump, allSettings, lastPredictions, strategyRows, tableCounts,
   get ready() { return ready; },
 };

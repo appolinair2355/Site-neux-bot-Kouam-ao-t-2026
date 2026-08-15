@@ -21,6 +21,7 @@
 const miner = require('./pattern-miner');
 const strategies = require('./strategies');
 const store = require('./store');
+const db = require('./db');
 const fmt = require('./formats');
 const { state } = require('./predictor');
 
@@ -97,7 +98,17 @@ function config() {
 }
 
 function persist() {
+  const saved = {
+    config: config(),
+    certified: panel.certified,
+    retired: panel.retired,
+    predictions: panel.predictions,
+    sentCount: panel.sentCount,
+    lastSentAt: panel.lastSentAt,
+    lastScanAt: panel.lastScanAt,
+  };
   try { store.patch({ predit: config() }); } catch (_) {}
+  if (db.ready) db.savePreditState(saved).catch((error) => { panel.lastError = error.message; });
 }
 
 function restore() {
@@ -105,6 +116,33 @@ function restore() {
     const saved = (store.read() || {}).predit;
     if (saved) configure({ ...saved });
   } catch (_) {}
+  return config();
+}
+
+// La base devient la source de vérité sur les déploiements sans disque persistant.
+async function restoreFromDb() {
+  if (!db.ready) return config();
+  const saved = await db.loadPreditState();
+  if (!saved || typeof saved !== 'object') {
+    persist();
+    return config();
+  }
+  if (saved.config) {
+    panel.enabled = saved.config.enabled !== false;
+    panel.requireCombo = !!saved.config.requireCombo;
+    panel.channels = parseChannels(saved.config.channels);
+    panel.minRate = Math.max(50, Math.min(100, parseInt(saved.config.minRate, 10) || 85));
+    panel.minSample = Math.max(3, Math.min(60, parseInt(saved.config.minSample, 10) || 6));
+    panel.maxR = Math.max(0, Math.min(5, parseInt(saved.config.maxR, 10) || 0));
+    panel.format = fmt.clampFormat(saved.config.format);
+    panel.perStrategy = Math.max(1, Math.min(50, parseInt(saved.config.perStrategy, 10) || 1));
+  }
+  if (Array.isArray(saved.certified)) panel.certified = saved.certified;
+  if (Array.isArray(saved.retired)) panel.retired = saved.retired;
+  if (Array.isArray(saved.predictions)) panel.predictions = saved.predictions.slice(0, 200);
+  if (Number.isFinite(Number(saved.sentCount))) panel.sentCount = Number(saved.sentCount);
+  panel.lastSentAt = saved.lastSentAt || null;
+  panel.lastScanAt = saved.lastScanAt || null;
   return config();
 }
 
@@ -485,6 +523,7 @@ async function tick() {
   } catch (e) {
     panel.lastError = e.message;
   } finally {
+    persist();
     busy = false;
   }
   return panel;
@@ -534,4 +573,4 @@ function status() {
   };
 }
 
-module.exports = { panel, status, config, configure, restore, setSender, tick, mirror, test, parseChannels };
+module.exports = { panel, status, config, configure, restore, restoreFromDb, setSender, tick, mirror, test, parseChannels };

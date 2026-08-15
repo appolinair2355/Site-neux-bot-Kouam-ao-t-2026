@@ -2,7 +2,7 @@
 //  • Le moteur local tourne en continu sur les jeux terminés.
 //  • Chaque constat est publié dans « Résultats ».
 //  • Chaque stratégie trouvée est enregistrée dans « Stratégies IA créées ».
-//  • Pollinations.ai enrichit l'analyse à intervalle plus large (clé en dur).
+//  • Pollinations.ai enrichit l'analyse à intervalle plus large (clé d'environnement).
 'use strict';
 
 const config = require('./config');
@@ -80,6 +80,9 @@ function pushResult(result) {
     return false;
   }
   state.aiAnalyses = [result, ...state.aiAnalyses].slice(0, 12);
+  if (db.ready) {
+    db.saveAiAnalysis(result).catch((error) => { auto.lastError = error.message; });
+  }
   return true;
 }
 
