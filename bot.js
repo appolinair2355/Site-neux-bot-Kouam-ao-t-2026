@@ -976,6 +976,10 @@ async function broadcast(pred) {
   if (!canSend(pred.strategy)) {
     pred.silent = true;
     pred.gate = gateView(pred.strategy).label;
+    // « ombre » : un seul canal (public), utilisé uniquement une fois le mode
+    // silencieux débloqué. Tant que le filtre est bloqué, rien n'est envoyé
+    // nulle part (pas de canal silencieux séparé pour cette stratégie).
+    if (pred.strategy === 'ombre') return;
     const shadowIds = strategyChannels(pred.strategy, 'shadow');
     if (!shadowIds.length) return;
     await sendPrediction(pred, sender, shadowIds);
