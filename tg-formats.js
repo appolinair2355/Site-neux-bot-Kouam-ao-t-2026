@@ -89,36 +89,35 @@ function buildTgMessage(formatId, {
   switch (parseInt(formatId)) {
     case 1:
       return {
-        text: `⚜ #N${gameNumber} Игрок    +${sup} ⚜\n◽Масть ${emoji}\n◼️ Результат ${statusLine}`,
+        text: `⚜️ Jeu #N${gameNumber} — Joueur +${sup}\n◽ Couleur : ${emoji}\n◼️ Résultat : ${statusLine}`,
         parse_mode: null,
       };
 
     case 2:
       return {
         text:
-          `🎲𝐁𝐀𝐂𝐂𝐀𝐑𝐀 𝐏𝐑𝐄𝐌𝐈𝐔𝐌+${maxR} ✨🎲\n` +
-          `#N${gameNumber} :${emoji}\n` +
-          `${status === null ? 'En cours' : 'Statut'} :${statusLine}`,
+          `🎲 Prédiction Baccara +${maxR}\n` +
+          `#N${gameNumber} : ${emoji}\n` +
+          `${status === null ? 'En cours' : 'Statut'} : ${statusLine}`,
         parse_mode: null,
       };
 
     case 3:
       return {
         text:
-          `𝐁𝐀𝐂𝐂𝐀𝐑𝐀 𝐏𝐑𝐎 ✨\n` +
-          `🎮GAME: #N${gameNumber}\n` +
-          `🃏Carte ${emoji}:${status === null ? '⌛' : statusLine}\n` +
-          `Mode: Dogon ${maxR}`,
+          `🃏 Prédiction Baccara\n` +
+          `🎮 Jeu : #N${gameNumber}\n` +
+          `🃏 Carte ${emoji} : ${status === null ? '⌛' : statusLine}\n` +
+          `🔁 Rattrapage : +${maxR}`,
         parse_mode: null,
       };
 
     case 4:
       return {
         text:
-          `🎰 PRÉDICTION #N${gameNumber}\n` +
-          `🎯 Couleur: ${emoji} ${name}\n` +
-          `📊 Statut: ${status === null ? 'En cours ⏳' : statusLine}\n` +
-          `🔍 ${status === null ? 'Vérification en cours' : (status === 'gagne' ? 'Vérifié ✓' : 'Résultat final')}`,
+          `🎯 Prédiction #N${gameNumber}\n` +
+          `🎨 Couleur : ${emoji} ${name}\n` +
+          `📊 Statut : ${status === null ? 'En cours ⏳' : statusLine}`,
         parse_mode: null,
       };
 
@@ -129,9 +128,8 @@ function buildTgMessage(formatId, {
       else                         bar = '🟥'.repeat(maxR + 1);
       return {
         text:
-          `🎰 PRÉDICTION #N${gameNumber}\n` +
-          `🎯 Couleur: ${emoji} ${name}\n\n` +
-          `🔍 Vérification jeu #N${gameNumber}\n` +
+          `🎯 Prédiction #N${gameNumber}\n` +
+          `🎨 Couleur : ${emoji} ${name}\n\n` +
           `${bar}\n` +
           `${status === null ? '⏳ Analyse...' : (status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}` : '❌')}`,
         parse_mode: null,
@@ -141,78 +139,63 @@ function buildTgMessage(formatId, {
     case 6:
       return {
         text:
-          `🏆 *PRÉDICTION #N${gameNumber}*\n\n` +
-          `🎯 Couleur: ${emoji} ${name}\n` +
+          `🏆 *Prédiction #N${gameNumber}*\n` +
+          `🎯 Couleur : ${emoji} ${name}\n` +
           (status === null
-            ? `⏳ Statut: En cours`
+            ? `⏳ Statut : En cours`
             : status === 'gagne'
-              ? `✅ Statut: ${statusLine}`
-              : `Statut: ❌`),
+              ? `✅ Statut : ${statusLine}`
+              : `Statut : ❌`),
         parse_mode: 'Markdown',
       };
 
     case 7:
       return {
         text:
-          `<b>#N${gameNumber}</b> — <b>Le</b> <b><i>joueur</i></b> <b><u>recevra</u></b> <b>une</b> <b><i>carte</i></b> ${emoji} <b>${name}</b>\n\n` +
+          `<b>#N${gameNumber}</b> — le joueur recevra une carte <b>${emoji} ${name}</b>\n\n` +
           (status === null
             ? `⏳ <i>En attente du résultat...</i>`
             : status === 'gagne'
               ? `✅ <b>GAGNÉ</b> ${RATR_EMOJI[rattrapage] ?? rattrapage}`
-              : `❌`),
+              : `❌ Perdu`),
         parse_mode: 'HTML',
       };
 
     case 8: {
-      const isBank      = hand === 'banquier';
-      const statusLine8 = status === null    ? '⌛'
-                        : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}GAGNÉ`
-                        :                      '❌';
-      if (isBank) {
-        return {
-          text:
-            `🎮 banquier #N${gameNumber}\n` +
-            `⚜️ Couleur de la carte:${emoji}\n` +
-            `🎰 Poursuite  🔰+${maxR} jeux\n` +
-            `🗯️ Résultats : ${statusLine8}`,
-          parse_mode: null,
-        };
-      } else {
-        return {
-          text:
-            `🤖 joueur #N${gameNumber}\n` +
-            `🔰Couleur de la carte :${emoji}\n` +
-            `🔰 Rattrapages : ${maxR}(🔰+${maxR})\n` +
-            `🧨 Résultats : ${statusLine8}`,
-          parse_mode: null,
-        };
-      }
+      const isBank = hand === 'banquier';
+      const label8 = isBank ? '🏦 Banquier' : '👤 Joueur';
+      const sl8 = status === null ? '⌛ En cours' : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} Gagné` : '❌ Perdu';
+      return {
+        text:
+          `🎮 Jeu #N${gameNumber}\n` +
+          `${label8}\n` +
+          `🎨 Couleur : ${emoji}\n` +
+          `🔁 Rattrapage : +${maxR}\n` +
+          `📊 Résultat : ${sl8}`,
+        parse_mode: null,
+      };
     }
 
     case 9: {
-      const sl9 = status === null    ? '⌛'
-                : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}GAGNÉ`
-                :                      '❌';
+      const sl9 = status === null ? '⌛ En cours' : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} Gagné` : '❌ Perdu';
       return {
         text:
-          `🤖 joueur #N${gameNumber}\n` +
-          `🔰Couleur de la carte :${emoji}\n` +
-          `🔰 Rattrapages : ${maxR}(🔰+${maxR})\n` +
-          `🧨 Résultats : ${sl9}`,
+          `👤 Jeu #N${gameNumber} — Joueur\n` +
+          `🎨 Couleur : ${emoji}\n` +
+          `🔁 Rattrapage : +${maxR}\n` +
+          `📊 Résultat : ${sl9}`,
         parse_mode: null,
       };
     }
 
     case 10: {
-      const sl10 = status === null    ? '⌛'
-                 : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}GAGNÉ`
-                 :                      '❌';
+      const sl10 = status === null ? '⌛ En cours' : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} Gagné` : '❌ Perdu';
       return {
         text:
-          `🎮 banquier #N${gameNumber}\n` +
-          `⚜️ Couleur de la carte:${emoji}\n` +
-          `🎰 Poursuite  🔰+${maxR} jeux\n` +
-          `🗯️ Résultats : ${sl10}`,
+          `🏦 Jeu #N${gameNumber} — Banquier\n` +
+          `🎨 Couleur : ${emoji}\n` +
+          `🔁 Rattrapage : +${maxR}\n` +
+          `📊 Résultat : ${sl10}`,
         parse_mode: null,
       };
     }
@@ -231,7 +214,6 @@ function buildTgMessage(formatId, {
           parse_mode: null,
         };
       } else if (status === 'gagne') {
-        // Phase 1 : affiche le jeu trouvé + cartes (remplacé après 10s par buildDistribFinalMsg)
         return {
           text:
             `🃏 LE JEU VA SE TERMINER SUR LA DISTRIBUTION\n` +
@@ -257,7 +239,6 @@ function buildTgMessage(formatId, {
 
     case 12: {
       const handLabel12 = hand === 'banquier' ? 'Banquier' : 'Joueur';
-      // Mode Pair / Impair
       if (suit === 'pair' || suit === 'impair') {
         const parity      = suit === 'pair' ? 'PAIR' : 'IMPAIR';
         const parityEmoji = suit === 'pair' ? '🟢' : '🔴';
@@ -265,7 +246,7 @@ function buildTgMessage(formatId, {
         const lossMsgP = `❌ Pas de ${suit} sur ${maxR} jeux`;
         return {
           text:
-            `${parityEmoji} PRÉDICTION — ${parity} ${handLabel12.toUpperCase()}\n` +
+            `${parityEmoji} Prédiction — ${parity} ${handLabel12.toUpperCase()}\n` +
             `📌 Jeu #N${gameNumber}\n` +
             `━━━━━━━━━━━━━━━\n` +
             `🎯 Total ${handLabel12} : ${parity}\n` +
@@ -275,7 +256,6 @@ function buildTgMessage(formatId, {
           parse_mode: null,
         };
       }
-      // Mode 2 vs 3 cartes
       const targetCards = suit === 'deux' ? 2 : 3;
       const cardEmoji   = suit === 'deux' ? '2️⃣' : '3️⃣';
       const winMsg   = suit === 'deux'
@@ -286,7 +266,7 @@ function buildTgMessage(formatId, {
         : `❌ Pas de 3 cartes sur ${maxR} jeux`;
       return {
         text:
-          `${cardEmoji} PRÉDICTION — ${targetCards} CARTES ${handLabel12.toUpperCase()}\n` +
+          `${cardEmoji} Prédiction — ${targetCards} CARTES ${handLabel12.toUpperCase()}\n` +
           `📌 Jeu #N${gameNumber}\n` +
           `━━━━━━━━━━━━━━━\n` +
           `🎯 ${handLabel12} aura ${targetCards} cartes\n` +
@@ -297,7 +277,6 @@ function buildTgMessage(formatId, {
       };
     }
 
-    // ── Format 13 : Victoire Pro (Banquier / Joueur) ─────────────────────
     case 13: {
       const sl13 = status === null    ? '⌛ En cours de vérification...'
                  : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} GAGNÉ`
@@ -307,17 +286,16 @@ function buildTgMessage(formatId, {
                        : `${emoji} ${name.toUpperCase()}`;
       return {
         text:
-          `🏆 PRÉDICTION VICTOIRE\n` +
+          `🏆 Prédiction — Victoire\n` +
           `📌 Jeu #N${gameNumber}\n` +
           `━━━━━━━━━━━━━━━━━━\n` +
           `🎯 ${winLabel13} va gagner\n` +
-          `🔰 Rattrapage : +${maxR}\n` +
+          `🔁 Rattrapage : +${maxR}\n` +
           `${sl13}`,
         parse_mode: null,
       };
     }
 
-    // ── Format 14 : Victoire Compact ──────────────────────────────────────
     case 14: {
       const sl14 = status === null    ? '⌛'
                  : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}`
@@ -331,7 +309,6 @@ function buildTgMessage(formatId, {
       };
     }
 
-    // ── Format 15 : Globe Pro (Égalité) ──────────────────────────────────────
     case 15: {
       const sl15 = status === null    ? '⌛ Analyse en cours...'
                  : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} ÉGALITÉ CONFIRMÉE 🎗️`
@@ -339,18 +316,17 @@ function buildTgMessage(formatId, {
       const tieLabel15 = suit === 'TIE' ? '⚖️ Égalité — aucun gagnant' : `🎯 ${emoji} ${name}`;
       return {
         text:
-          `🌐 GLOBE BACCARAT\n` +
+          `🎗️ Prédiction — Égalité\n` +
           `✦✦✦✦✦✦✦✦✦✦✦✦\n` +
           `📌 Jeu #N${gameNumber}\n` +
           `${tieLabel15}\n` +
-          `🔰 Rattrapage : ×${maxR}\n` +
+          `🔁 Rattrapage : ×${maxR}\n` +
           `✦✦✦✦✦✦✦✦✦✦✦✦\n` +
           `${sl15}`,
         parse_mode: null,
       };
     }
 
-    // ── Format 16 : SMS Sharp (Égalité Compact) ───────────────────────────────
     case 16: {
       const sl16 = status === null    ? '⌛'
                  : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}`
@@ -362,27 +338,25 @@ function buildTgMessage(formatId, {
       };
     }
 
-    // ── Format 17 : Split Fire (2+3 Cartes) ──────────────────────────────────
     case 17: {
       const sl17 = status === null    ? '⌛ Vérification...'
-                 : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} SPLIT CONFIRMÉ 🔥`
-                 :                      `❌ Pas de split sur ${maxR} jeux`;
+                 : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} CONFIRMÉ 🔥`
+                 :                      `❌ Pas confirmé sur ${maxR} jeux`;
       const mixLabel17 = suit === 'TWO_THREE'
         ? '🃏 2 cartes / 3 cartes — camp mixte'
         : `🎯 ${emoji} ${name}`;
       return {
         text:
-          `⚡ SPLIT BACCARAT\n` +
-          `🎮 JEU #N${gameNumber}\n` +
+          `⚡ Prédiction — 2 et 3 cartes\n` +
+          `🎮 Jeu #N${gameNumber}\n` +
           `━━━━━━━━━━━━━━━━\n` +
           `${mixLabel17}\n` +
-          `🔰 Rattrapage : +${maxR}\n` +
+          `🔁 Rattrapage : +${maxR}\n` +
           `${sl17}`,
         parse_mode: null,
       };
     }
 
-    // ── Format 18 : Block Badge (2/3 Cartes B) ───────────────────────────────
     case 18: {
       const sl18 = status === null    ? '⌛ Attente...'
                  : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} Validé`
@@ -402,66 +376,58 @@ function buildTgMessage(formatId, {
       };
     }
 
-    // ── Format 19 : Marble VIP ────────────────────────────────────────────────
     case 19:
       return {
         text:
-          `🏛️ CASINO MARBLE VIP\n` +
+          `🎯 Prédiction Baccara\n` +
           `▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n` +
-          `🃏 JEU #N${gameNumber}\n` +
-          `🎯 ${emoji} ${name.toUpperCase()}\n` +
-          `💎 Dogon : +${maxR}\n` +
+          `🎮 Jeu #N${gameNumber}\n` +
+          `${emoji} ${name}\n` +
+          `🔁 Rattrapage : +${maxR}\n` +
           `▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n` +
           `${statusLine}`,
         parse_mode: null,
       };
 
-    // ── Format 20 : Thunder Strike ────────────────────────────────────────────
     case 20:
       return {
-        text: `⚡⚡ #N${gameNumber} ${emoji} ×${maxR} ${statusLine}`,
+        text: `🎯 #N${gameNumber} ${emoji} ×${maxR} ${statusLine}`,
         parse_mode: null,
       };
 
-    // ── Format 21 : Black Prestige ────────────────────────────────────────────
     case 21:
       return {
         text:
-          `🎩 BACCARAT PRESTIGE\n` +
-          `🔹 JEU #N${gameNumber}\n` +
-          `🎯 ${emoji} ${name} — Dogon +${maxR}\n` +
-          `✦ ${statusLine}`,
+          `🎯 Jeu #N${gameNumber}\n` +
+          `${emoji} ${name} — Rattrapage +${maxR}\n` +
+          `${statusLine}`,
         parse_mode: null,
       };
 
-    // ── Format 22 : Live Broadcast (avec main) ────────────────────────────────
     case 22: {
-      const handLabel22 = hand === 'banquier' ? 'BANQUIER' : 'JOUEUR';
+      const handLabel22 = hand === 'banquier' ? 'Banquier' : 'Joueur';
       const handEmoji22 = hand === 'banquier' ? '🏦' : '👤';
       return {
         text:
-          `📣 BACCARAT LIVE\n` +
+          `🎮 Jeu #N${gameNumber}\n` +
           `${handEmoji22} Main : ${handLabel22}\n` +
           `🎯 ${emoji} ${name}\n` +
-          `🎮 #N${gameNumber} · Dogon +${maxR}\n` +
-          `➤ ${statusLine}`,
+          `🔁 Rattrapage : +${maxR}\n` +
+          `${statusLine}`,
         parse_mode: null,
       };
     }
 
-    // ── Format 23 : Red Siren ─────────────────────────────────────────────────
     case 23:
       return {
         text:
-          `🚨🚨 SIGNAL BACCARAT 🚨🚨\n` +
-          `🎮 JEU #N${gameNumber}\n` +
-          `🎯 ${emoji} ${name.toUpperCase()}\n` +
-          `🔄 MAX : +${maxR}\n` +
+          `🚨 Jeu #N${gameNumber}\n` +
+          `🎯 ${emoji} ${name}\n` +
+          `🔁 Rattrapage : +${maxR}\n` +
           `${statusLine}`,
         parse_mode: null,
       };
 
-    // ── Format 24 : Midnight Sky ──────────────────────────────────────────────
     case 24:
       return {
         text:
@@ -470,15 +436,13 @@ function buildTgMessage(formatId, {
         parse_mode: null,
       };
 
-    // ── Format 25 : Data Panel ────────────────────────────────────────────────
     case 25:
       return {
         text:
-          `📊 BACCARAT DATA\n` +
+          `📊 Jeu #N${gameNumber}\n` +
           `┌──────────────────────┐\n` +
-          `│ Jeu   : #N${gameNumber}\n` +
-          `│ Signe : ${emoji} ${name}\n` +
-          `│ Dogon : +${maxR}\n` +
+          `│ Couleur : ${emoji} ${name}\n` +
+          `│ Rattrapage : +${maxR}\n` +
           `└──────────────────────┘\n` +
           `${statusLine}`,
         parse_mode: null,
@@ -486,360 +450,333 @@ function buildTgMessage(formatId, {
 
     // ── Formats 26-35 : TROIS CARTES ─────────────────────────────────────────
 
-    // ── Format 26 : Trio Champion ────────────────────────────────────────────
     case 26: {
-      const h26 = hand === 'banquier' ? '🏦 BANQUIER' : '👤 JOUEUR';
-      const ct26 = suit === 'trois' ? `3️⃣ 3 CARTES — ${h26}` : suit === 'deux' ? `2️⃣ 2 CARTES — ${h26}` : suit === 'WIN_B' ? '🏦 BANQUIER GAGNE' : suit === 'WIN_P' ? '👤 JOUEUR GAGNE' : `${emoji} ${name}`;
-      const sl26 = status === null ? '⌛ Vérification...' : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} CHAMPION 🏆` : `❌ Pas confirmé — ${maxR} essais`;
-      return { text: `🏆 TRIO CHAMPION\n━━━━━━━━━━━━━━━━\n🎮 #N${gameNumber} — ${ct26}\n🔰 Dogon : +${maxR}\n━━━━━━━━━━━━━━━━\n${sl26}`, parse_mode: null };
+      const h26 = hand === 'banquier' ? '🏦 Banquier' : '👤 Joueur';
+      const ct26 = suit === 'trois' ? `3 cartes — ${h26}` : suit === 'deux' ? `2 cartes — ${h26}` : suit === 'WIN_B' ? 'Banquier gagne' : suit === 'WIN_P' ? 'Joueur gagne' : `${emoji} ${name}`;
+      const sl26 = status === null ? '⌛ En cours' : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} Gagné` : '❌ Perdu';
+      return { text: `🎯 Prédiction Baccara\n━━━━━━━━━━━━━━━━\n🎮 Jeu #N${gameNumber} — ${ct26}\n🔁 Rattrapage : +${maxR}\n━━━━━━━━━━━━━━━━\n${sl26}`, parse_mode: null };
     }
 
-    // ── Format 27 : Trio Sniper ───────────────────────────────────────────────
     case 27: {
       const h27 = hand === 'banquier' ? '🏦' : '👤';
-      const ct27 = suit === 'trois' ? '3️⃣' : suit === 'deux' ? '2️⃣' : suit === 'WIN_B' ? '🏦W' : suit === 'WIN_P' ? '👤W' : emoji;
+      const ct27 = suit === 'trois' ? '3 cartes' : suit === 'deux' ? '2 cartes' : suit === 'WIN_B' ? 'Banquier gagne' : suit === 'WIN_P' ? 'Joueur gagne' : name;
       const sl27 = status === null ? '⌛' : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}` : '❌';
-      return { text: `🎯 SNIPER3 #N${gameNumber} ${h27}${ct27} ×${maxR} → ${sl27}`, parse_mode: null };
+      return { text: `🎯 #N${gameNumber} ${h27} ${ct27} · +${maxR} → ${sl27}`, parse_mode: null };
     }
 
-    // ── Format 28 : Trio Diamant ──────────────────────────────────────────────
     case 28: {
-      const h28 = hand === 'banquier' ? '🏦 BANQUIER' : '👤 JOUEUR';
-      const ct28 = suit === 'trois' ? `3 CARTES ${h28}` : suit === 'deux' ? `2 CARTES ${h28}` : suit === 'WIN_B' ? 'BANQUIER GAGNE' : suit === 'WIN_P' ? 'JOUEUR GAGNE' : name.toUpperCase();
-      const sl28 = status === null ? '⌛ En cours...' : status === 'gagne' ? `💎 CONFIRMÉ (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '❌ RATÉ';
-      return { text: `💎 TRIO DIAMANT 💎\n◆ #N${gameNumber} · ${ct28}\n◆ MAX ×${maxR}\n${sl28}`, parse_mode: null };
+      const h28 = hand === 'banquier' ? '🏦 Banquier' : '👤 Joueur';
+      const ct28 = suit === 'trois' ? `3 cartes ${h28}` : suit === 'deux' ? `2 cartes ${h28}` : suit === 'WIN_B' ? 'Banquier gagne' : suit === 'WIN_P' ? 'Joueur gagne' : name;
+      const sl28 = status === null ? '⌛ En cours' : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} Confirmé` : '❌ Raté';
+      return { text: `🃏 Jeu #N${gameNumber}\n${ct28}\n🔁 Rattrapage : +${maxR}\n${sl28}`, parse_mode: null };
     }
 
-    // ── Format 29 : Trio Neon ─────────────────────────────────────────────────
     case 29: {
-      const ct29 = suit === 'trois' ? '3️⃣' : suit === 'deux' ? '2️⃣' : suit === 'WIN_B' ? '🏦' : suit === 'WIN_P' ? '👤' : emoji;
+      const ct29 = suit === 'trois' ? '3 cartes' : suit === 'deux' ? '2 cartes' : suit === 'WIN_B' ? 'Banquier' : suit === 'WIN_P' ? 'Joueur' : emoji;
       const sl29 = status === null ? '⌛' : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}` : '❌';
-      return { text: `〔🟣 TRIO NEON〕\n⟨ #N${gameNumber} · ${ct29} · ×${maxR} ⟩\n⟨ ${sl29} ⟩`, parse_mode: null };
+      return { text: `💠 Jeu #N${gameNumber}\n◆ ${ct29}\n◆ Rattrapage +${maxR}\n${sl29}`, parse_mode: null };
     }
 
-    // ── Format 30 : Trio Terminal ─────────────────────────────────────────────
     case 30: {
-      const h30 = hand === 'banquier' ? 'BANK' : 'PLAY';
-      const ct30 = suit === 'trois' ? '3C' : suit === 'deux' ? '2C' : suit === 'WIN_B' ? 'WIN_B' : suit === 'WIN_P' ? 'WIN_P' : name.toUpperCase().replace(/\s/g, '_');
-      const sl30 = status === null ? 'PENDING' : status === 'gagne' ? `HIT_${RATR_EMOJI[rattrapage] ?? rattrapage}` : 'MISS';
-      return { text: `> TRIO_ENGINE RUN\n> GAME=${gameNumber} TARGET=${ct30} SIDE=${h30}\n> RETRY=${maxR} STATUS=${sl30}`, parse_mode: null };
+      const h30 = hand === 'banquier' ? 'Banquier' : 'Joueur';
+      const ct30 = suit === 'trois' ? '3 cartes' : suit === 'deux' ? '2 cartes' : suit === 'WIN_B' ? 'Banquier gagne' : suit === 'WIN_P' ? 'Joueur gagne' : name;
+      const sl30 = status === null ? '⌛ En cours' : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} Gagné` : '❌ Perdu';
+      return { text: `${ct30} — ${h30} — Jeu #N${gameNumber}\n🔁 +${maxR} · ${sl30}`, parse_mode: null };
     }
 
-    // ── Format 31 : Trio Prestige ─────────────────────────────────────────────
     case 31: {
       const h31 = hand === 'banquier' ? '🏦 Banquier' : '👤 Joueur';
-      const ct31 = suit === 'trois' ? '3️⃣ Trois cartes' : suit === 'deux' ? '2️⃣ Deux cartes' : suit === 'WIN_B' ? '🏆 Banquier gagne' : suit === 'WIN_P' ? '🏆 Joueur gagne' : `${emoji} ${name}`;
-      const sl31 = status === null ? '⌛ Analyse...' : status === 'gagne' ? `✅ Confirmé (${RATR_EMOJI[rattrapage] ?? rattrapage})` : `❌ Raté (${maxR} essais)`;
-      return { text: `🏅 TRIO PRESTIGE\n┌─────────────────────┐\n│ 🎮 #N${gameNumber} · ${h31}\n│ ${ct31} · +${maxR}\n└─────────────────────┘\n${sl31}`, parse_mode: null };
+      const ct31 = suit === 'trois' ? '3 cartes' : suit === 'deux' ? '2 cartes' : suit === 'WIN_B' ? 'Banquier gagne' : suit === 'WIN_P' ? 'Joueur gagne' : `${emoji} ${name}`;
+      const sl31 = status === null ? '⌛ En cours' : status === 'gagne' ? `✅ Confirmé (${RATR_EMOJI[rattrapage] ?? rattrapage})` : `❌ Raté (${maxR} essais)`;
+      return { text: `🎯 Prédiction Baccara\n┌─────────────────────┐\n│ 🎮 #N${gameNumber} · ${h31}\n│ ${ct31} · +${maxR}\n└─────────────────────┘\n${sl31}`, parse_mode: null };
     }
 
-    // ── Format 32 : Trio SMS ──────────────────────────────────────────────────
     case 32: {
-      const ct32 = suit === 'trois' ? '3🃏' : suit === 'deux' ? '2🃏' : suit === 'WIN_B' ? '🏦' : suit === 'WIN_P' ? '👤' : emoji;
+      const ct32 = suit === 'trois' ? '3 cartes' : suit === 'deux' ? '2 cartes' : suit === 'WIN_B' ? 'Banquier' : suit === 'WIN_P' ? 'Joueur' : emoji;
       const sl32 = status === null ? '⌛' : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}` : '❌';
-      return { text: `${ct32} #N${gameNumber} ×${maxR} ${sl32}`, parse_mode: null };
+      return { text: `🎯 #N${gameNumber} ${ct32} ×${maxR} ${sl32}`, parse_mode: null };
     }
 
-    // ── Format 33 : Trio Rocket ───────────────────────────────────────────────
     case 33: {
-      const h33 = hand === 'banquier' ? 'BANQUIER' : 'JOUEUR';
-      const ct33 = suit === 'trois' ? `3 CARTES ${h33}` : suit === 'deux' ? `2 CARTES ${h33}` : suit === 'WIN_B' ? 'BANQUIER GAGNE' : suit === 'WIN_P' ? 'JOUEUR GAGNE' : name.toUpperCase();
-      const sl33 = status === null ? '🚀 LANCEMENT...' : status === 'gagne' ? `🟢 ATTERRI (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '💥 RATÉ';
-      return { text: `🚀 TRIO ROCKET 🚀\n📍 JEU #N${gameNumber}\n⚠️ ${ct33}\n🔁 DOGON : +${maxR}\n${sl33}`, parse_mode: null };
+      const h33 = hand === 'banquier' ? 'Banquier' : 'Joueur';
+      const ct33 = suit === 'trois' ? `3 cartes ${h33}` : suit === 'deux' ? `2 cartes ${h33}` : suit === 'WIN_B' ? 'Banquier gagne' : suit === 'WIN_P' ? 'Joueur gagne' : name;
+      const sl33 = status === null ? '⌛ En cours' : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} Gagné` : '❌ Perdu';
+      return { text: `🎯 Jeu #N${gameNumber}\n${ct33}\n🔁 Rattrapage : +${maxR}\n${sl33}`, parse_mode: null };
     }
 
-    // ── Format 34 : Trio Atom ─────────────────────────────────────────────────
     case 34: {
       const h34 = hand === 'banquier' ? '🏦 Banquier' : '👤 Joueur';
-      const ct34 = suit === 'trois' ? '3️⃣ Trois cartes' : suit === 'deux' ? '2️⃣ Deux cartes' : suit === 'WIN_B' ? '🏆 Victoire Banquier' : suit === 'WIN_P' ? '🏆 Victoire Joueur' : `${emoji} ${name}`;
-      const sl34 = status === null ? '⚛️ Calcul...' : status === 'gagne' ? `✅ Fission (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '💀 Explosion';
-      return { text: `⚛️ TRIO ATOM\n≋≋≋≋≋≋≋≋≋≋≋≋≋\n🎮 #N${gameNumber} · ${h34}\n${ct34} · +${maxR}\n≋≋≋≋≋≋≋≋≋≋≋≋≋\n${sl34}`, parse_mode: null };
+      const ct34 = suit === 'trois' ? '3 cartes' : suit === 'deux' ? '2 cartes' : suit === 'WIN_B' ? 'Victoire Banquier' : suit === 'WIN_P' ? 'Victoire Joueur' : `${emoji} ${name}`;
+      const sl34 = status === null ? '⌛ En cours' : status === 'gagne' ? `✅ Confirmé (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '❌ Perdu';
+      return { text: `🎯 Prédiction Baccara\n≋≋≋≋≋≋≋≋≋≋≋≋≋\n🎮 #N${gameNumber} · ${h34}\n${ct34} · +${maxR}\n≋≋≋≋≋≋≋≋≋≋≋≋≋\n${sl34}`, parse_mode: null };
     }
 
-    // ── Format 35 : Trio Gold Star ────────────────────────────────────────────
     case 35: {
-      const ct35 = suit === 'trois' ? '3️⃣✨' : suit === 'deux' ? '2️⃣✨' : suit === 'WIN_B' ? '🏦✨' : suit === 'WIN_P' ? '👤✨' : `${emoji}✨`;
+      const ct35 = suit === 'trois' ? '3 cartes' : suit === 'deux' ? '2 cartes' : suit === 'WIN_B' ? 'Banquier' : suit === 'WIN_P' ? 'Joueur' : emoji;
       const sl35 = status === null ? '⌛' : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}` : '❌';
-      return { text: `✨ TRIO GOLD STAR ✨\n${ct35} — #N${gameNumber} — +${maxR}\n${sl35}`, parse_mode: null };
+      return { text: `${ct35} — Jeu #N${gameNumber} — +${maxR}\n${sl35}`, parse_mode: null };
     }
 
     // ── Formats 36-45 : DEUX CARTES ───────────────────────────────────────────
 
-    // ── Format 36 : Duo Power ─────────────────────────────────────────────────
     case 36: {
-      const h36 = hand === 'banquier' ? '🏦 BANQUIER' : '👤 JOUEUR';
-      const ct36 = suit === 'deux' ? `2️⃣ 2 CARTES — ${h36}` : suit === 'trois' ? `3️⃣ 3 CARTES — ${h36}` : suit === 'WIN_B' ? '🏦 BANQUIER GAGNE' : suit === 'WIN_P' ? '👤 JOUEUR GAGNE' : `${emoji} ${name}`;
-      const sl36 = status === null ? '⌛ Vérification...' : status === 'gagne' ? `💪 ${RATR_EMOJI[rattrapage] ?? rattrapage} POWER CONFIRMÉ 🎯` : `❌ Pas confirmé — ${maxR} essais`;
-      return { text: `💪 DUO POWER\n━━━━━━━━━━━━━━━━\n🎮 #N${gameNumber} — ${ct36}\n🔰 Dogon : +${maxR}\n━━━━━━━━━━━━━━━━\n${sl36}`, parse_mode: null };
+      const h36 = hand === 'banquier' ? '🏦 Banquier' : '👤 Joueur';
+      const ct36 = suit === 'deux' ? `2 cartes — ${h36}` : suit === 'trois' ? `3 cartes — ${h36}` : suit === 'WIN_B' ? 'Banquier gagne' : suit === 'WIN_P' ? 'Joueur gagne' : `${emoji} ${name}`;
+      const sl36 = status === null ? '⌛ En cours' : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} Gagné` : '❌ Perdu';
+      return { text: `🎯 Prédiction Baccara\n━━━━━━━━━━━━━━━━\n🎮 Jeu #N${gameNumber} — ${ct36}\n🔁 Rattrapage : +${maxR}\n━━━━━━━━━━━━━━━━\n${sl36}`, parse_mode: null };
     }
 
-    // ── Format 37 : Duo Oracle ────────────────────────────────────────────────
     case 37: {
       const h37 = hand === 'banquier' ? '🏦' : '👤';
-      const ct37 = suit === 'deux' ? '2️⃣' : suit === 'trois' ? '3️⃣' : suit === 'WIN_B' ? '🏦' : suit === 'WIN_P' ? '👤' : emoji;
-      const sl37 = status === null ? '🔮 Prédiction...' : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}` : '❌';
-      return { text: `╔══════════════════╗\n🔮 DUO ORACLE — #N${gameNumber}\n╚══════════════════╝\n${h37} ${ct37} · +${maxR}\n${sl37}`, parse_mode: null };
+      const ct37 = suit === 'deux' ? '2 cartes' : suit === 'trois' ? '3 cartes' : suit === 'WIN_B' ? 'Banquier' : suit === 'WIN_P' ? 'Joueur' : emoji;
+      const sl37 = status === null ? '⌛' : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}` : '❌';
+      return { text: `🎯 #N${gameNumber} ${h37} ${ct37} · +${maxR} → ${sl37}`, parse_mode: null };
     }
 
-    // ── Format 38 : Duo Magnet ────────────────────────────────────────────────
     case 38: {
-      const h38 = hand === 'banquier' ? 'BANQUIER' : 'JOUEUR';
-      const ct38 = suit === 'deux' ? `2 CARTES ${h38}` : suit === 'trois' ? `3 CARTES ${h38}` : suit === 'WIN_B' ? 'BANQUIER GAGNE' : suit === 'WIN_P' ? 'JOUEUR GAGNE' : name.toUpperCase();
-      const sl38 = status === null ? '🧲 Attraction...' : status === 'gagne' ? `✅ AIMÉ (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '❌ REJETÉ';
-      return { text: `🧲 DUO MAGNET\n🎮 #N${gameNumber} · ${ct38}\n🔰 MAX ×${maxR}\n${sl38}`, parse_mode: null };
+      const h38 = hand === 'banquier' ? 'Banquier' : 'Joueur';
+      const ct38 = suit === 'deux' ? `2 cartes ${h38}` : suit === 'trois' ? `3 cartes ${h38}` : suit === 'WIN_B' ? 'Banquier gagne' : suit === 'WIN_P' ? 'Joueur gagne' : name;
+      const sl38 = status === null ? '⌛ En cours' : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} Confirmé` : '❌ Raté';
+      return { text: `🃏 Jeu #N${gameNumber}\n${ct38}\n🔁 Rattrapage : +${maxR}\n${sl38}`, parse_mode: null };
     }
 
-    // ── Format 39 : Duo Radar ─────────────────────────────────────────────────
     case 39: {
-      const ct39 = suit === 'deux' ? '2️⃣' : suit === 'trois' ? '3️⃣' : suit === 'WIN_B' ? '🏦' : suit === 'WIN_P' ? '👤' : emoji;
+      const ct39 = suit === 'deux' ? '2 cartes' : suit === 'trois' ? '3 cartes' : suit === 'WIN_B' ? 'Banquier' : suit === 'WIN_P' ? 'Joueur' : emoji;
       const sl39 = status === null ? '⌛' : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}` : '❌';
-      return { text: `📡 DUO RADAR #N${gameNumber}\n${ct39} ×${maxR} → ${sl39}`, parse_mode: null };
+      return { text: `💠 Jeu #N${gameNumber}\n◆ ${ct39}\n◆ Rattrapage +${maxR}\n${sl39}`, parse_mode: null };
     }
 
-    // ── Format 40 : Duo Wave ──────────────────────────────────────────────────
     case 40: {
-      const h40 = hand === 'banquier' ? '🏦 BANK' : '👤 PLAY';
-      const ct40 = suit === 'deux' ? '2️⃣ 2 CARTES' : suit === 'trois' ? '3️⃣ 3 CARTES' : suit === 'WIN_B' ? '🌊 BANK WIN' : suit === 'WIN_P' ? '🌊 PLAY WIN' : `${emoji} ${name.toUpperCase()}`;
-      const sl40 = status === null ? '〰️ WAVE...' : status === 'gagne' ? `🌊 SURF (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '💨 MISSED';
-      return { text: `🌊 DUO WAVE #N${gameNumber}\n${h40} · ${ct40}\n⚡ RETRY ${maxR} · ${sl40}`, parse_mode: null };
+      const h40 = hand === 'banquier' ? '🏦 Banquier' : '👤 Joueur';
+      const ct40 = suit === 'deux' ? '2 cartes' : suit === 'trois' ? '3 cartes' : suit === 'WIN_B' ? 'Banquier gagne' : suit === 'WIN_P' ? 'Joueur gagne' : `${emoji} ${name}`;
+      const sl40 = status === null ? '⌛ En cours' : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} Gagné` : '❌ Perdu';
+      return { text: `${ct40} — ${h40} — Jeu #N${gameNumber}\n🔁 +${maxR} · ${sl40}`, parse_mode: null };
     }
 
-    // ── Format 41 : Duo Insight ───────────────────────────────────────────────
     case 41: {
       const h41 = hand === 'banquier' ? '🏦 Banquier' : '👤 Joueur';
-      const ct41 = suit === 'deux' ? '2️⃣ Deux cartes' : suit === 'trois' ? '3️⃣ Trois cartes' : suit === 'WIN_B' ? '🏆 Banquier gagne' : suit === 'WIN_P' ? '🏆 Joueur gagne' : `${emoji} ${name}`;
-      const sl41 = status === null ? '💡 Analyse...' : status === 'gagne' ? `✅ Insight confirmé (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '❌ Raté';
-      return { text: `💡 DUO INSIGHT\n┌──────────────────┐\n│ #N${gameNumber} · ${h41}\n│ ${ct41} · +${maxR}\n└──────────────────┘\n${sl41}`, parse_mode: null };
+      const ct41 = suit === 'deux' ? '2 cartes' : suit === 'trois' ? '3 cartes' : suit === 'WIN_B' ? 'Banquier gagne' : suit === 'WIN_P' ? 'Joueur gagne' : `${emoji} ${name}`;
+      const sl41 = status === null ? '⌛ En cours' : status === 'gagne' ? `✅ Confirmé (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '❌ Raté';
+      return { text: `🎯 Prédiction Baccara\n┌──────────────────┐\n│ #N${gameNumber} · ${h41}\n│ ${ct41} · +${maxR}\n└──────────────────┘\n${sl41}`, parse_mode: null };
     }
 
-    // ── Format 42 : Duo Arrow ─────────────────────────────────────────────────
     case 42: {
-      const ct42 = suit === 'deux' ? '2🃏' : suit === 'trois' ? '3🃏' : suit === 'WIN_B' ? '🏦' : suit === 'WIN_P' ? '👤' : emoji;
+      const ct42 = suit === 'deux' ? '2 cartes' : suit === 'trois' ? '3 cartes' : suit === 'WIN_B' ? 'Banquier' : suit === 'WIN_P' ? 'Joueur' : emoji;
       const sl42 = status === null ? '⌛' : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}` : '❌';
-      return { text: `🏹 #N${gameNumber} ${ct42} ×${maxR} ${sl42}`, parse_mode: null };
+      return { text: `🎯 #N${gameNumber} ${ct42} ×${maxR} ${sl42}`, parse_mode: null };
     }
 
-    // ── Format 43 : Duo Bell ──────────────────────────────────────────────────
     case 43: {
-      const h43 = hand === 'banquier' ? 'BANQUIER' : 'JOUEUR';
-      const ct43 = suit === 'deux' ? `2 CARTES ${h43}` : suit === 'trois' ? `3 CARTES ${h43}` : suit === 'WIN_B' ? 'BANQUIER GAGNE' : suit === 'WIN_P' ? 'JOUEUR GAGNE' : name.toUpperCase();
-      const sl43 = status === null ? '🔔 SONNERIE...' : status === 'gagne' ? `🔔 DING ! (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '🔕 SILENCE';
-      return { text: `🔔 DUO BELL 🔔\n📍 JEU #N${gameNumber}\n⚠️ ${ct43}\n🔁 DOGON : +${maxR}\n${sl43}`, parse_mode: null };
+      const h43 = hand === 'banquier' ? 'Banquier' : 'Joueur';
+      const ct43 = suit === 'deux' ? `2 cartes ${h43}` : suit === 'trois' ? `3 cartes ${h43}` : suit === 'WIN_B' ? 'Banquier gagne' : suit === 'WIN_P' ? 'Joueur gagne' : name;
+      const sl43 = status === null ? '⌛ En cours' : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} Gagné` : '❌ Perdu';
+      return { text: `🎯 Jeu #N${gameNumber}\n${ct43}\n🔁 Rattrapage : +${maxR}\n${sl43}`, parse_mode: null };
     }
 
-    // ── Format 44 : Duo Crown ─────────────────────────────────────────────────
     case 44: {
       const h44 = hand === 'banquier' ? '🏦 Banquier' : '👤 Joueur';
-      const ct44 = suit === 'deux' ? '2️⃣ Deux cartes' : suit === 'trois' ? '3️⃣ Trois cartes' : suit === 'WIN_B' ? '🏆 Victoire Banquier' : suit === 'WIN_P' ? '🏆 Victoire Joueur' : `${emoji} ${name}`;
-      const sl44 = status === null ? '⌛ Attente royale...' : status === 'gagne' ? `👑 COURONNÉ ! (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '💀 Défaite';
-      return { text: `👑 DUO CROWN\n━━━━━━━━━━━━━━━\n🎮 #N${gameNumber} · ${h44}\n${ct44} · +${maxR}\n━━━━━━━━━━━━━━━\n${sl44}`, parse_mode: null };
+      const ct44 = suit === 'deux' ? '2 cartes' : suit === 'trois' ? '3 cartes' : suit === 'WIN_B' ? 'Victoire Banquier' : suit === 'WIN_P' ? 'Victoire Joueur' : `${emoji} ${name}`;
+      const sl44 = status === null ? '⌛ En cours' : status === 'gagne' ? `✅ Confirmé (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '❌ Perdu';
+      return { text: `🎯 Prédiction Baccara\n━━━━━━━━━━━━━━━\n🎮 #N${gameNumber} · ${h44}\n${ct44} · +${maxR}\n━━━━━━━━━━━━━━━\n${sl44}`, parse_mode: null };
     }
 
-    // ── Format 45 : Duo Zap ───────────────────────────────────────────────────
     case 45: {
-      const ct45 = suit === 'deux' ? '2️⃣⚡' : suit === 'trois' ? '3️⃣⚡' : suit === 'WIN_B' ? '🏦⚡' : suit === 'WIN_P' ? '👤⚡' : `${emoji}⚡`;
+      const ct45 = suit === 'deux' ? '2 cartes' : suit === 'trois' ? '3 cartes' : suit === 'WIN_B' ? 'Banquier' : suit === 'WIN_P' ? 'Joueur' : emoji;
       const sl45 = status === null ? '⌛' : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}` : '❌';
-      return { text: `⚡ DUO ZAP\n${ct45} #N${gameNumber} +${maxR} | ${sl45}`, parse_mode: null };
+      return { text: `${ct45} — Jeu #N${gameNumber} — +${maxR}\n${sl45}`, parse_mode: null };
     }
 
     // ── Formats 46-55 : VICTOIRE ──────────────────────────────────────────────
 
-    // ── Format 46 : Win Champion ──────────────────────────────────────────────
     case 46: {
-      const vl46 = suit === 'WIN_B' ? '🏦 BANQUIER' : suit === 'WIN_P' ? '👤 JOUEUR' : suit === 'TIE' ? '⚖️ ÉGALITÉ' : `${emoji} ${name.toUpperCase()}`;
-      const sl46 = status === null ? '⌛ Analyse...' : status === 'gagne' ? `🏆 ${RATR_EMOJI[rattrapage] ?? rattrapage} VICTOIRE CHAMPION !` : `❌ Pas de victoire — ${maxR} essais`;
-      return { text: `🏆 WIN CHAMPION\n━━━━━━━━━━━━━━━━\n📌 #N${gameNumber}\n🎯 ${vl46} DOMINE\n🔰 Dogon : +${maxR}\n━━━━━━━━━━━━━━━━\n${sl46}`, parse_mode: null };
+      const vl46 = suit === 'WIN_B' ? '🏦 Banquier' : suit === 'WIN_P' ? '👤 Joueur' : suit === 'TIE' ? '⚖️ Égalité' : `${emoji} ${name}`;
+      const sl46 = status === null ? '⌛ En cours' : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} Gagné` : '❌ Perdu';
+      return { text: `🏆 Prédiction — Victoire\n━━━━━━━━━━━━━━━━\n📌 #N${gameNumber}\n🎯 ${vl46}\n🔁 Rattrapage : +${maxR}\n━━━━━━━━━━━━━━━━\n${sl46}`, parse_mode: null };
     }
 
-    // ── Format 47 : Win Star Elite ────────────────────────────────────────────
     case 47: {
       const vl47 = suit === 'WIN_B' ? '🏦 Banquier' : suit === 'WIN_P' ? '👤 Joueur' : suit === 'TIE' ? '⚖️ Égalité' : `${emoji} ${name}`;
-      const sl47 = status === null ? '⌛' : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}` : '❌';
-      return { text: `╔══════════════════╗\n🌟 WIN STAR — #N${gameNumber}\n╚══════════════════╝\n${vl47} · +${maxR}\n${sl47}`, parse_mode: null };
+      const sl47 = status === null ? '⌛' : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}` : '❌';
+      return { text: `🏆 #N${gameNumber} ${vl47} +${maxR} → ${sl47}`, parse_mode: null };
     }
 
-    // ── Format 48 : Win Flash ─────────────────────────────────────────────────
     case 48: {
       const vl48 = suit === 'WIN_B' ? '🏦' : suit === 'WIN_P' ? '👤' : suit === 'TIE' ? '⚖️' : emoji;
       const sl48 = status === null ? '⌛' : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}` : '❌';
-      return { text: `⚡ WIN FLASH #N${gameNumber} ${vl48} +${maxR} ${sl48}`, parse_mode: null };
+      return { text: `🏆 #N${gameNumber} ${vl48} +${maxR} ${sl48}`, parse_mode: null };
     }
 
-    // ── Format 49 : Win Or (Gold) ─────────────────────────────────────────────
     case 49: {
-      const vl49 = suit === 'WIN_B' ? '🏦 BANQUIER' : suit === 'WIN_P' ? '👤 JOUEUR' : suit === 'TIE' ? '⚖️ ÉGALITÉ' : name.toUpperCase();
-      const sl49 = status === null ? '⌛ En cours...' : status === 'gagne' ? `🥇 OR ! (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '❌ Raté';
-      return { text: `🥇 WIN OR BACCARAT 🥇\n🎮 #N${gameNumber}\n🏆 ${vl49}\n⚡ Tentatives : ×${maxR}\n${sl49}`, parse_mode: null };
+      const vl49 = suit === 'WIN_B' ? '🏦 Banquier' : suit === 'WIN_P' ? '👤 Joueur' : suit === 'TIE' ? '⚖️ Égalité' : name;
+      const sl49 = status === null ? '⌛ En cours' : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} Gagné` : '❌ Perdu';
+      return { text: `🏆 Jeu #N${gameNumber}\n🎯 ${vl49}\n🔁 Rattrapage : +${maxR}\n${sl49}`, parse_mode: null };
     }
 
-    // ── Format 50 : Win Diamond VIP ───────────────────────────────────────────
     case 50: {
       const vl50 = suit === 'WIN_B' ? '🏦 Banquier' : suit === 'WIN_P' ? '👤 Joueur' : suit === 'TIE' ? '⚖️ Égalité' : `${emoji} ${name}`;
-      const sl50 = status === null ? '💎 Cristallisation...' : status === 'gagne' ? `💎 Diamond (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '❌ Pas de diamond';
-      return { text: `💎 WIN DIAMOND VIP\n◆──────────────────◆\n│ #N${gameNumber} · ${vl50}\n│ Dogon +${maxR}\n◆──────────────────◆\n${sl50}`, parse_mode: null };
+      const sl50 = status === null ? '⌛ En cours' : status === 'gagne' ? `✅ Confirmé (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '❌ Perdu';
+      return { text: `🏆 Prédiction — Victoire\n◆──────────────────◆\n│ #N${gameNumber} · ${vl50}\n│ Rattrapage +${maxR}\n◆──────────────────◆\n${sl50}`, parse_mode: null };
     }
-    // ── Format 51 : Win Signal ───────────────────────────────────────────────
+
     case 51: {
       const vl51 = suit === 'WIN_B' ? '🏦' : suit === 'WIN_P' ? '👤' : suit === 'TIE' ? '⚖️' : emoji;
       const sl51 = status === null ? '⌛' : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}` : '❌';
-      return { text: `🔔 WIN SIGNAL\n${vl51} #N${gameNumber} +${maxR} → ${sl51}`, parse_mode: null };
+      return { text: `🏆 Victoire\n${vl51} #N${gameNumber} +${maxR} → ${sl51}`, parse_mode: null };
     }
-    // ── Format 52 : Win Alert ────────────────────────────────────────────────
+
     case 52: {
-      const vl52 = suit === 'WIN_B' ? 'BANQUIER GAGNE' : suit === 'WIN_P' ? 'JOUEUR GAGNE' : suit === 'TIE' ? 'ÉGALITÉ' : name.toUpperCase();
-      const sl52 = status === null ? '⏳ ATTENTE' : status === 'gagne' ? `🟢 CONFIRMÉ (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '🔴 RATÉ';
-      return { text: `🚨 WIN ALERT — JEU #N${gameNumber}\n⚠️ ${vl52}\n🔁 MAX ${maxR} | ${sl52}`, parse_mode: null };
+      const vl52 = suit === 'WIN_B' ? 'Banquier gagne' : suit === 'WIN_P' ? 'Joueur gagne' : suit === 'TIE' ? 'Égalité' : name;
+      const sl52 = status === null ? '⏳ En attente' : status === 'gagne' ? `✅ Confirmé (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '❌ Raté';
+      return { text: `🏆 Jeu #N${gameNumber}\n🎯 ${vl52}\n🔁 Rattrapage : +${maxR}\n${sl52}`, parse_mode: null };
     }
-    // ── Format 53 : Win Compact ──────────────────────────────────────────────
+
     case 53: {
       const vl53 = suit === 'WIN_B' ? '🏦' : suit === 'WIN_P' ? '👤' : suit === 'TIE' ? '⚖️' : emoji;
       const sl53 = status === null ? '⌛' : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}` : '❌';
-      return { text: `${vl53}WIN #N${gameNumber} ×${maxR} ${sl53}`, parse_mode: null };
+      return { text: `${vl53} Victoire #N${gameNumber} ×${maxR} ${sl53}`, parse_mode: null };
     }
-    // ── Format 54 : Win HTML ─────────────────────────────────────────────────
+
     case 54: {
-      const vl54 = suit === 'WIN_B' ? '<b>🏦 BANQUIER</b>' : suit === 'WIN_P' ? '<b>👤 JOUEUR</b>' : suit === 'TIE' ? '<b>⚖️ ÉGALITÉ</b>' : `<b>${name}</b>`;
-      const sl54 = status === null ? '⌛ <i>En cours...</i>' : status === 'gagne' ? `✅ <b>GAGNÉ</b> ${RATR_EMOJI[rattrapage] ?? rattrapage}` : `❌ <i>Perdu</i>`;
-      return { text: `🏆 <b>VICTOIRE PREMIUM</b>\n📌 Jeu <b>#N${gameNumber}</b>\n🎯 ${vl54} va gagner\n🔰 Dogon <b>+${maxR}</b>\n${sl54}`, parse_mode: 'HTML' };
+      const vl54 = suit === 'WIN_B' ? '<b>🏦 Banquier</b>' : suit === 'WIN_P' ? '<b>👤 Joueur</b>' : suit === 'TIE' ? '<b>⚖️ Égalité</b>' : `<b>${name}</b>`;
+      const sl54 = status === null ? '⌛ <i>En cours...</i>' : status === 'gagne' ? `✅ <b>Gagné</b> ${RATR_EMOJI[rattrapage] ?? rattrapage}` : `❌ <i>Perdu</i>`;
+      return { text: `🏆 <b>Prédiction — Victoire</b>\n📌 Jeu <b>#N${gameNumber}</b>\n🎯 ${vl54}\n🔁 Rattrapage <b>+${maxR}</b>\n${sl54}`, parse_mode: 'HTML' };
     }
-    // ── Format 55 : Win Dark ─────────────────────────────────────────────────
+
     case 55: {
-      const vl55 = suit === 'WIN_B' ? '◼️ BANQUIER' : suit === 'WIN_P' ? '◽ JOUEUR' : suit === 'TIE' ? '◈ ÉGALITÉ' : `${emoji} ${name.toUpperCase()}`;
-      const sl55 = status === null ? '◈ PENDING...' : status === 'gagne' ? `◉ WIN (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '✖ LOSS';
-      return { text: `◼️◼️◼️ WIN DARK ◼️◼️◼️\n◽ #N${gameNumber} · ${vl55} · +${maxR}\n◼️ ${sl55}`, parse_mode: null };
+      const vl55 = suit === 'WIN_B' ? 'Banquier' : suit === 'WIN_P' ? 'Joueur' : suit === 'TIE' ? 'Égalité' : `${emoji} ${name}`;
+      const sl55 = status === null ? '⌛ En cours' : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} Gagné` : '❌ Perdu';
+      return { text: `🏆 #N${gameNumber} · ${vl55} · +${maxR}\n${sl55}`, parse_mode: null };
     }
 
-    // ── Formats 56-65 : CARTE ENSEIGNE ───────────────────────────────────────
+    // ── Formats 56-65 : COULEUR / ENSEIGNE ───────────────────────────────────
 
-    // ── Format 56 : Enseigne Pro ─────────────────────────────────────────────
     case 56: {
-      const h56 = hand === 'banquier' ? '🏦 BANQUIER' : '👤 JOUEUR';
-      const sl56 = status === null ? '⌛ Vérification...' : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} CONFIRMÉ 🎯` : `❌ Non confirmé sur ${maxR} jeux`;
-      return { text: `🎴 ENSEIGNE PRO BACCARAT\n━━━━━━━━━━━━━━━━\n📌 Jeu #N${gameNumber}\n🎯 Couleur : ${emoji} ${name.toUpperCase()}\n👥 Camp : ${h56}\n🔰 Dogon : +${maxR}\n━━━━━━━━━━━━━━━━\n${sl56}`, parse_mode: null };
+      const h56 = hand === 'banquier' ? '🏦 Banquier' : '👤 Joueur';
+      const sl56 = status === null ? '⌛ En cours' : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} Confirmé` : `❌ Non confirmé sur ${maxR} jeux`;
+      return { text: `🎴 Prédiction — Couleur\n━━━━━━━━━━━━━━━━\n📌 Jeu #N${gameNumber}\n🎯 Couleur : ${emoji} ${name}\n✋ Main : ${h56}\n🔁 Rattrapage : +${maxR}\n━━━━━━━━━━━━━━━━\n${sl56}`, parse_mode: null };
     }
-    // ── Format 57 : Suit VIP ─────────────────────────────────────────────────
+
     case 57: {
       const h57 = hand === 'banquier' ? '🏦' : '👤';
       const sl57 = status === null ? '⌛' : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}` : '❌';
-      return { text: `╔══════════════════╗\n${emoji} SUIT VIP — Jeu #N${gameNumber}\n╚══════════════════╝\n${h57} ${name} · +${maxR}\n${sl57}`, parse_mode: null };
+      return { text: `${emoji} Jeu #N${gameNumber}\n${h57} ${name} · +${maxR}\n${sl57}`, parse_mode: null };
     }
-    // ── Format 58 : Suit Bold ────────────────────────────────────────────────
+
     case 58: {
-      const h58 = hand === 'banquier' ? 'BANQUIER' : 'JOUEUR';
-      const sl58 = status === null ? '⌛ EN COURS...' : status === 'gagne' ? `✅ CONFIRMÉ (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '❌ ÉCHEC';
-      return { text: `${emoji}${emoji} BACCARAT ENSEIGNE ${emoji}${emoji}\n🎮 #N${gameNumber} · ${name.toUpperCase()} ${h58}\n⚡ DOGON MAX : +${maxR}\n${sl58}`, parse_mode: null };
+      const h58 = hand === 'banquier' ? 'Banquier' : 'Joueur';
+      const sl58 = status === null ? '⌛ En cours' : status === 'gagne' ? `✅ Confirmé (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '❌ Échec';
+      return { text: `${emoji} Prédiction Baccara\n🎮 #N${gameNumber} · ${name} · ${h58}\n🔁 Rattrapage : +${maxR}\n${sl58}`, parse_mode: null };
     }
-    // ── Format 59 : Suit Signal ──────────────────────────────────────────────
+
     case 59: {
       const h59e = hand === 'banquier' ? '🏦' : '👤';
       const sl59 = status === null ? '⌛' : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}` : '❌';
-      return { text: `📡 SUIT #N${gameNumber} ${emoji}${name} ${h59e} ×${maxR} ${sl59}`, parse_mode: null };
+      return { text: `🎨 #N${gameNumber} ${emoji} ${name} ${h59e} ×${maxR} ${sl59}`, parse_mode: null };
     }
-    // ── Format 60 : Suit Dark ────────────────────────────────────────────────
+
     case 60: {
-      const h60 = hand === 'banquier' ? 'BANK' : 'PLAY';
-      const sl60 = status === null ? '▒ SCAN...' : status === 'gagne' ? `◉ HIT (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '✖ MISS';
-      return { text: `░░ SUIT DARK ░░\n▓ #N${gameNumber} ▓ ${emoji} ${name.toUpperCase()} ▓ ${h60} ▓ +${maxR}\n▒ ${sl60}`, parse_mode: null };
+      const h60 = hand === 'banquier' ? 'Banquier' : 'Joueur';
+      const sl60 = status === null ? '⌛ En cours' : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} Confirmé` : '❌ Raté';
+      return { text: `🎯 Jeu #N${gameNumber}\n${emoji} ${name} — ${h60}\n🔁 Rattrapage : +${maxR}\n${sl60}`, parse_mode: null };
     }
-    // ── Format 61 : Suit Gold ────────────────────────────────────────────────
+
     case 61: {
       const h61 = hand === 'banquier' ? '🏦 Banquier' : '👤 Joueur';
-      const sl61 = status === null ? '⌛ Analyse...' : status === 'gagne' ? `✨ GOLDEN WIN (${RATR_EMOJI[rattrapage] ?? rattrapage})` : `❌ Raté`;
-      return { text: `✨ 𝐒𝐔𝐈𝐓 𝐆𝐎𝐋𝐃 ✨\n━━━━━━━━━━━━━━━\n🎯 #N${gameNumber} · ${emoji} ${name}\n${h61} · +${maxR}\n━━━━━━━━━━━━━━━\n${sl61}`, parse_mode: null };
+      const sl61 = status === null ? '⌛ En cours' : status === 'gagne' ? `✅ Gagné (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '❌ Raté';
+      return { text: `🎯 Prédiction — Couleur\n━━━━━━━━━━━━━━━\n🎯 #N${gameNumber} · ${emoji} ${name}\n${h61} · +${maxR}\n━━━━━━━━━━━━━━━\n${sl61}`, parse_mode: null };
     }
-    // ── Format 62 : Suit Compact ─────────────────────────────────────────────
+
     case 62: {
       const h62 = hand === 'banquier' ? '🏦' : '👤';
       const sl62 = status === null ? '⌛' : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}` : '❌';
-      return { text: `${emoji}${h62} #N${gameNumber} +${maxR} ${sl62}`, parse_mode: null };
+      return { text: `${emoji} ${h62} #N${gameNumber} +${maxR} ${sl62}`, parse_mode: null };
     }
-    // ── Format 63 : Suit Alert ───────────────────────────────────────────────
+
     case 63: {
-      const h63 = hand === 'banquier' ? 'BANQUIER' : 'JOUEUR';
-      const sl63 = status === null ? '⏳ ATTENTE' : status === 'gagne' ? `🟢 ENSEIGNE CONFIRMÉE (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '🔴 RATÉ';
-      return { text: `🚨 ALERTE ENSEIGNE ${emoji} 🚨\n📍 JEU #N${gameNumber} — ${h63}\n⚠️ COULEUR : ${name.toUpperCase()}\n🔁 DOGON : +${maxR}\n${sl63}`, parse_mode: null };
+      const h63 = hand === 'banquier' ? 'Banquier' : 'Joueur';
+      const sl63 = status === null ? '⏳ En attente' : status === 'gagne' ? `✅ Confirmé (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '❌ Raté';
+      return { text: `🎨 Jeu #N${gameNumber} — ${h63}\n🎯 Couleur : ${name.toUpperCase()}\n🔁 Rattrapage : +${maxR}\n${sl63}`, parse_mode: null };
     }
-    // ── Format 64 : Suit Crystal ─────────────────────────────────────────────
+
     case 64: {
       const h64 = hand === 'banquier' ? '🏦 Banquier' : '👤 Joueur';
-      const sl64 = status === null ? '🔷 Prédiction active...' : status === 'gagne' ? `💎 CRISTAL CONFIRMÉ (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '🔸 Non confirmé';
-      return { text: `💎 CRYSTAL SUIT\n◈ Jeu #N${gameNumber}\n◈ ${emoji} ${name} — ${h64}\n◈ Puissance : ×${maxR}\n${sl64}`, parse_mode: null };
+      const sl64 = status === null ? '⌛ En cours' : status === 'gagne' ? `✅ Confirmé (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '❌ Non confirmé';
+      return { text: `💠 Jeu #N${gameNumber}\n◆ ${emoji} ${name} — ${h64}\n◆ Rattrapage : ×${maxR}\n${sl64}`, parse_mode: null };
     }
-    // ── Format 65 : Suit Block ───────────────────────────────────────────────
+
     case 65: {
-      const sl65 = status === null ? '⌛ Attente' : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}` : '❌';
-      return { text: `【${emoji} SUIT BLOCK 】\n【 Jeu #N${gameNumber} 】\n【 +${maxR} 】 ${sl65}`, parse_mode: null };
+      const sl65 = status === null ? '⌛ En attente' : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}` : '❌';
+      return { text: `${emoji} Jeu #N${gameNumber}\n+${maxR} ${sl65}`, parse_mode: null };
     }
 
     // ── Formats 66-75 : HYBRIDES ─────────────────────────────────────────────
 
-    // ── Format 66 : Multi-Pro ────────────────────────────────────────────────
     case 66: {
-      const h66 = hand === 'banquier' ? '🏦 BANQUIER' : '👤 JOUEUR';
-      const ct66 = suit === 'trois' ? `3️⃣ 3 CARTES` : suit === 'deux' ? `2️⃣ 2 CARTES` : suit === 'WIN_B' ? '🏆 BANQUIER GAGNE' : suit === 'WIN_P' ? '🏆 JOUEUR GAGNE' : suit === 'TIE' ? '⚖️ ÉGALITÉ' : `${emoji} ${name.toUpperCase()}`;
-      const sl66 = status === null ? '⌛ En attente...' : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} CONFIRMÉ` : `❌ Raté (${maxR} essais)`;
-      return { text: `⭐ MULTI PRO BACCARAT\n═══════════════════\n📍 Jeu #N${gameNumber}\n🎯 ${ct66}\n👥 ${h66} · +${maxR}\n═══════════════════\n${sl66}`, parse_mode: null };
+      const h66 = hand === 'banquier' ? '🏦 Banquier' : '👤 Joueur';
+      const ct66 = suit === 'trois' ? '3 cartes' : suit === 'deux' ? '2 cartes' : suit === 'WIN_B' ? 'Banquier gagne' : suit === 'WIN_P' ? 'Joueur gagne' : suit === 'TIE' ? 'Égalité' : `${emoji} ${name}`;
+      const sl66 = status === null ? '⌛ En attente' : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} Confirmé` : `❌ Raté (${maxR} essais)`;
+      return { text: `🎯 Prédiction Baccara\n═══════════════════\n📍 Jeu #N${gameNumber}\n🎯 ${ct66}\n✋ ${h66} · +${maxR}\n═══════════════════\n${sl66}`, parse_mode: null };
     }
-    // ── Format 67 : Total Signal ─────────────────────────────────────────────
+
     case 67: {
-      const ct67 = suit === 'trois' ? '3️⃣' : suit === 'deux' ? '2️⃣' : suit === 'WIN_B' ? '🏦W' : suit === 'WIN_P' ? '👤W' : suit === 'TIE' ? '⚖️' : emoji;
+      const ct67 = suit === 'trois' ? '3 cartes' : suit === 'deux' ? '2 cartes' : suit === 'WIN_B' ? 'Banquier' : suit === 'WIN_P' ? 'Joueur' : suit === 'TIE' ? 'Égalité' : emoji;
       const sl67 = status === null ? '⌛' : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}` : '❌';
-      return { text: `📡 TOTAL SIGNAL\n${ct67} #N${gameNumber} +${maxR} → ${sl67}`, parse_mode: null };
+      return { text: `🎯 ${ct67} #N${gameNumber} +${maxR} → ${sl67}`, parse_mode: null };
     }
-    // ── Format 68 : Full VIP ─────────────────────────────────────────────────
+
     case 68: {
       const h68 = hand === 'banquier' ? '🏦 Banquier' : '👤 Joueur';
-      const ct68 = suit === 'trois' ? '3️⃣ Trois cartes' : suit === 'deux' ? '2️⃣ Deux cartes' : suit === 'WIN_B' ? '🏆 Victoire Banquier' : suit === 'WIN_P' ? '🏆 Victoire Joueur' : suit === 'TIE' ? '⚖️ Égalité' : `${emoji} ${name}`;
-      const sl68 = status === null ? '⌛ Prédiction active...' : status === 'gagne' ? `✅ Confirmé (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '❌ Manqué';
-      return { text: `╔══════════════════╗\n💎 FULL VIP BACCARAT\n╚══════════════════╝\n📌 #N${gameNumber} · ${h68}\n🎯 ${ct68}\n🔰 Dogon ×${maxR}\n${sl68}`, parse_mode: null };
+      const ct68 = suit === 'trois' ? '3 cartes' : suit === 'deux' ? '2 cartes' : suit === 'WIN_B' ? 'Victoire Banquier' : suit === 'WIN_P' ? 'Victoire Joueur' : suit === 'TIE' ? 'Égalité' : `${emoji} ${name}`;
+      const sl68 = status === null ? '⌛ En cours' : status === 'gagne' ? `✅ Confirmé (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '❌ Raté';
+      return { text: `🎯 Prédiction Baccara\n📌 #N${gameNumber} · ${h68}\n🎯 ${ct68}\n🔁 Rattrapage ×${maxR}\n${sl68}`, parse_mode: null };
     }
-    // ── Format 69 : Pro Compact ──────────────────────────────────────────────
+
     case 69: {
-      const ct69 = suit === 'trois' ? '3🃏' : suit === 'deux' ? '2🃏' : suit === 'WIN_B' ? '🏦W' : suit === 'WIN_P' ? '👤W' : suit === 'TIE' ? '⚖️' : emoji;
+      const ct69 = suit === 'trois' ? '3 cartes' : suit === 'deux' ? '2 cartes' : suit === 'WIN_B' ? 'Banquier' : suit === 'WIN_P' ? 'Joueur' : suit === 'TIE' ? 'Égalité' : emoji;
       const h69 = hand === 'banquier' ? '🏦' : '👤';
       const sl69 = status === null ? '⌛' : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}` : '❌';
-      return { text: `${ct69}${h69} #N${gameNumber} ×${maxR} ${sl69}`, parse_mode: null };
+      return { text: `${ct69} ${h69} #N${gameNumber} ×${maxR} ${sl69}`, parse_mode: null };
     }
-    // ── Format 70 : Elite Plus ───────────────────────────────────────────────
+
     case 70: {
-      const h70 = hand === 'banquier' ? '🏦 BANK' : '👤 PLAYER';
-      const ct70 = suit === 'trois' ? `3️⃣ 3 CARDS` : suit === 'deux' ? `2️⃣ 2 CARDS` : suit === 'WIN_B' ? '🏆 BANK WIN' : suit === 'WIN_P' ? '🏆 PLAYER WIN' : `${emoji} ${name.toUpperCase()}`;
-      const sl70 = status === null ? '⏳ LIVE' : status === 'gagne' ? `🟢 WIN (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '🔴 LOSE';
-      return { text: `🏅 ELITE PLUS\n▶ #N${gameNumber} | ${h70}\n▶ ${ct70} | RETRY ${maxR}\n▶ ${sl70}`, parse_mode: null };
+      const h70 = hand === 'banquier' ? '🏦 Banquier' : '👤 Joueur';
+      const ct70 = suit === 'trois' ? '3 cartes' : suit === 'deux' ? '2 cartes' : suit === 'WIN_B' ? 'Banquier gagne' : suit === 'WIN_P' ? 'Joueur gagne' : `${emoji} ${name}`;
+      const sl70 = status === null ? '⏳ En cours' : status === 'gagne' ? `✅ Gagné (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '❌ Perdu';
+      return { text: `🎯 Jeu #N${gameNumber} — ${h70}\n${ct70} — Rattrapage +${maxR}\n${sl70}`, parse_mode: null };
     }
-    // ── Format 71 : Diamond Pro ──────────────────────────────────────────────
+
     case 71: {
       const h71 = hand === 'banquier' ? '🏦 Banquier' : '👤 Joueur';
-      const ct71 = suit === 'trois' ? '3️⃣ 3 cartes' : suit === 'deux' ? '2️⃣ 2 cartes' : suit === 'WIN_B' ? '🏆 Banquier gagne' : suit === 'WIN_P' ? '🏆 Joueur gagne' : `${emoji} ${name}`;
-      const sl71 = status === null ? '◇ En cours...' : status === 'gagne' ? `💎 CONFIRMÉ (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '◈ Non confirmé';
-      return { text: `💎 DIAMOND PRO\n◆ Jeu #N${gameNumber} — ${h71}\n◆ ${ct71}\n◆ Dogon : +${maxR}\n${sl71}`, parse_mode: null };
+      const ct71 = suit === 'trois' ? '3 cartes' : suit === 'deux' ? '2 cartes' : suit === 'WIN_B' ? 'Banquier gagne' : suit === 'WIN_P' ? 'Joueur gagne' : `${emoji} ${name}`;
+      const sl71 = status === null ? '⌛ En cours' : status === 'gagne' ? `✅ Confirmé (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '❌ Non confirmé';
+      return { text: `💠 Jeu #N${gameNumber} — ${h71}\n◆ ${ct71}\n◆ Rattrapage : +${maxR}\n${sl71}`, parse_mode: null };
     }
-    // ── Format 72 : Crown Multi ──────────────────────────────────────────────
+
     case 72: {
       const h72 = hand === 'banquier' ? '🏦 Banquier' : '👤 Joueur';
-      const ct72 = suit === 'trois' ? '3️⃣ Trois cartes' : suit === 'deux' ? '2️⃣ Deux cartes' : suit === 'WIN_B' ? '🏆 Victoire Banquier' : suit === 'WIN_P' ? '🏆 Victoire Joueur' : `${emoji} ${name}`;
-      const sl72 = status === null ? '⌛ En attente...' : status === 'gagne' ? `👑 VICTOIRE (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '💀 Défaite';
-      return { text: `👑 CROWN MULTI CASINO\n━━━━━━━━━━━━━━━\n🎮 #N${gameNumber} · ${h72}\n${ct72} · +${maxR}\n━━━━━━━━━━━━━━━\n${sl72}`, parse_mode: null };
+      const ct72 = suit === 'trois' ? '3 cartes' : suit === 'deux' ? '2 cartes' : suit === 'WIN_B' ? 'Victoire Banquier' : suit === 'WIN_P' ? 'Victoire Joueur' : `${emoji} ${name}`;
+      const sl72 = status === null ? '⌛ En attente' : status === 'gagne' ? `✅ Gagné (${RATR_EMOJI[rattrapage] ?? rattrapage})` : '❌ Perdu';
+      return { text: `🎯 Prédiction Baccara\n━━━━━━━━━━━━━━━\n🎮 #N${gameNumber} · ${h72}\n${ct72} · +${maxR}\n━━━━━━━━━━━━━━━\n${sl72}`, parse_mode: null };
     }
-    // ── Format 73 : Tiger Multi ──────────────────────────────────────────────
+
     case 73: {
-      const ct73 = suit === 'trois' ? '3️⃣🐯' : suit === 'deux' ? '2️⃣🐯' : suit === 'WIN_B' ? '🏦🐯' : suit === 'WIN_P' ? '👤🐯' : `${emoji}🐯`;
+      const ct73 = suit === 'trois' ? '3 cartes' : suit === 'deux' ? '2 cartes' : suit === 'WIN_B' ? 'Banquier' : suit === 'WIN_P' ? 'Joueur' : emoji;
       const sl73 = status === null ? '⌛' : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}` : '❌';
-      return { text: `🐯 TIGER MULTI 🐯\n${ct73} — #N${gameNumber} — ×${maxR}\n${sl73}`, parse_mode: null };
+      return { text: `${ct73} — Jeu #N${gameNumber} — ×${maxR}\n${sl73}`, parse_mode: null };
     }
-    // ── Format 74 : Flash Multi ──────────────────────────────────────────────
+
     case 74: {
       const h74 = hand === 'banquier' ? '🏦' : '👤';
-      const ct74 = suit === 'trois' ? '3️⃣' : suit === 'deux' ? '2️⃣' : suit === 'WIN_B' ? '🏆B' : suit === 'WIN_P' ? '🏆P' : emoji;
+      const ct74 = suit === 'trois' ? '3 cartes' : suit === 'deux' ? '2 cartes' : suit === 'WIN_B' ? 'Banquier' : suit === 'WIN_P' ? 'Joueur' : emoji;
       const sl74 = status === null ? '⌛' : status === 'gagne' ? `✅${RATR_EMOJI[rattrapage] ?? rattrapage}` : '❌';
-      return { text: `⚡ FLASH ${ct74}${h74} #N${gameNumber} +${maxR} ${sl74}`, parse_mode: null };
+      return { text: `${ct74} ${h74} #N${gameNumber} +${maxR} ${sl74}`, parse_mode: null };
     }
-    // ── Format 75 : Ultra Pro ────────────────────────────────────────────────
+
     case 75: {
-      const h75 = hand === 'banquier' ? '🏦 BANQUIER' : '👤 JOUEUR';
-      const ct75 = suit === 'trois' ? `3️⃣ 3 CARTES — ${h75}` : suit === 'deux' ? `2️⃣ 2 CARTES — ${h75}` : suit === 'WIN_B' ? '🏆 BANQUIER GAGNE' : suit === 'WIN_P' ? '🏆 JOUEUR GAGNE' : suit === 'TIE' ? '⚖️ ÉGALITÉ' : `${emoji} ${name.toUpperCase()}`;
-      const sl75 = status === null ? '⌛ Analyse en cours...' : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} ULTRA CONFIRMÉ 🌟` : `❌ Pas confirmé après ${maxR} essais`;
-      return { text: `🌟 ═══ ULTRA PRO BACCARAT ═══ 🌟\n📍 Jeu #N${gameNumber}\n🎯 ${ct75}\n🔰 Dogon max : ×${maxR}\n━━━━━━━━━━━━━━━━━━━━━━\n${sl75}`, parse_mode: null };
+      const h75 = hand === 'banquier' ? '🏦 Banquier' : '👤 Joueur';
+      const ct75 = suit === 'trois' ? '3 cartes' : suit === 'deux' ? '2 cartes' : suit === 'WIN_B' ? 'Banquier gagne' : suit === 'WIN_P' ? 'Joueur gagne' : suit === 'TIE' ? 'Égalité' : `${emoji} ${name}`;
+      const sl75 = status === null ? '⌛ Analyse en cours' : status === 'gagne' ? `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} Confirmé` : `❌ Non confirmé après ${maxR} essais`;
+      return { text: `🎯 Prédiction Baccara\n━━━━━━━━━━━━━━━━━━━━━━\n📍 Jeu #N${gameNumber} · ${h75}\n🎯 ${ct75}\n🔁 Rattrapage max : ×${maxR}\n━━━━━━━━━━━━━━━━━━━━━━\n${sl75}`, parse_mode: null };
     }
 
     // ── Format 76 : Cartes Signature ────────────────────────────────────────
@@ -863,25 +800,24 @@ function buildTgMessage(formatId, {
       };
     }
 
-    // ── Format 77 : Absence Victoire (V1 Joueur / V2 Banquier) ─────────────
+    // ── Format 77 : Absence de victoire (Joueur / Banquier) ────────────────
     case 77: {
-      // V1 = Victoire Joueur (WIN_P), V2 = Victoire Banquier (WIN_B)
-      const v77 = suit === 'WIN_P' ? 'V1' : suit === 'WIN_B' ? 'V2' : suit === 'TIE' ? 'Ég.' : name;
+      const v77 = suit === 'WIN_P' ? 'Joueur' : suit === 'WIN_B' ? 'Banquier' : suit === 'TIE' ? 'Égalité' : name;
       let sl77;
       if (status === null) {
-        sl77 = `⏳ 💧 Poursuite ${maxR}!! (🔰+ ${maxR}Risque`;
+        sl77 = `⏳ En cours — Rattrapage +${maxR}`;
       } else if (status === 'gagne') {
-        sl77 = `✅${RATR_EMOJI[rattrapage] ?? rattrapage} 💧 Poursuite ${maxR}!! (🔰+ ${rattrapage}Risque`;
+        sl77 = `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage} Gagné`;
       } else {
-        sl77 = `❌ 💧 Poursuite ${maxR}!! (🔰+ ${maxR}Risque`;
+        sl77 = `❌ Perdu — Rattrapage +${maxR}`;
       }
       return {
-        text: `🌈 Jeux № ${gameNumber} 🔹 Prediction: ${v77} 🌹Statut :${sl77}`,
+        text: `🌈 Jeu #N${gameNumber}\n🔹 Prédiction : ${v77}\n${sl77}`,
         parse_mode: null,
       };
     }
 
-    // ── Format 78 : Cartes joueur/banquier (💠 Jeux №) ─────────────────────
+    // ── Format 78 : Cartes joueur/banquier ──────────────────────────────────
     case 78: {
       const cl78 = cardsLabel || (suit === 'deux' ? '2/2' : '3/3');
       const h78 = 'Joueur';
@@ -900,7 +836,7 @@ function buildTgMessage(formatId, {
       };
     }
 
-    // ── Format 79 : Distribution encadrée (⚜ Baccara ⚜) ────────────────────
+    // ── Format 79 : Distribution encadrée ───────────────────────────────────
     case 79: {
       const cl79 = cardsLabel || (suit === 'trois' ? '3/3' : '2/2');
       let sl79;
@@ -917,7 +853,7 @@ function buildTgMessage(formatId, {
       };
     }
 
-    // ── Formats 80 à 83 : Pair / Impair (stratégie VAR) ────────────────────
+    // ── Formats 80 à 83 : Pair / Impair ─────────────────────────────────────
     case 80: {
       const p80 = suit === 'pair' ? 'PAIR 🟢' : 'IMPAIR 🔴';
       let sl80;
@@ -926,7 +862,7 @@ function buildTgMessage(formatId, {
       else                         sl80 = '❌';
       return {
         text:
-          `🎴 *BACCARA — PAIR / IMPAIR*\n` +
+          `🎴 Baccara — Pair / Impair\n` +
           `🔢 Jeu : #N${gameNumber}\n` +
           `🎯 Prédiction : ${p80}\n` +
           `🔁 Rattrapage : +${maxR}\n` +
@@ -952,7 +888,7 @@ function buildTgMessage(formatId, {
       else if (status === 'gagne') sl82 = `GAGNÉ ✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}`;
       else                         sl82 = 'PERDU ❌';
       return {
-        text: `🌈 Jeux № ${gameNumber} 🔹 Point Joueur : ${e82} ${p82} 🌹 Statut : ${sl82} (Poursuite ${maxR})`,
+        text: `🌈 Jeu #N${gameNumber} · Point Joueur : ${e82} ${p82} · Statut : ${sl82} (Rattrapage +${maxR})`,
         parse_mode: null,
       };
     }
@@ -960,7 +896,7 @@ function buildTgMessage(formatId, {
     case 83: {
       const p83 = suit === 'pair' ? '🟢 P A I R' : '🔴 I M P A I R';
       let sl83;
-      if (status === null)         sl83 = '🎁En cours ⏳';
+      if (status === null)         sl83 = '⏳ En cours';
       else if (status === 'gagne') sl83 = `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}`;
       else                         sl83 = '❌';
       return {
@@ -974,7 +910,6 @@ function buildTgMessage(formatId, {
       };
     }
 
-
     // ── Formats 84 à 86 : Prédiction dans l'ombre (retour de carte) ────────
     case 84: {
       let sl84;
@@ -983,7 +918,7 @@ function buildTgMessage(formatId, {
       else                         sl84 = '❌';
       return {
         text:
-          `🕯️ PRÉDICTION DANS L'OMBRE\n` +
+          `🕯️ Prédiction dans l'ombre\n` +
           `🔢 Jeu : #N${gameNumber}\n` +
           `🎯 Carte : ${emoji} ${name}\n` +
           `🔁 Rattrapage : +${maxR}\n` +
@@ -1002,7 +937,7 @@ function buildTgMessage(formatId, {
 
     case 86: {
       let sl86;
-      if (status === null)         sl86 = '🎁 En cours ⏳';
+      if (status === null)         sl86 = '⏳ En cours';
       else if (status === 'gagne') sl86 = `✅ ${RATR_EMOJI[rattrapage] ?? rattrapage}`;
       else                         sl86 = '❌';
       return {
@@ -1016,8 +951,7 @@ function buildTgMessage(formatId, {
       };
     }
 
-
-    // ── Format 87 : NOUVEAU FORMAT de prédiction (format officiel) ─────────
+    // ── Format 87 : Prédiction complète ─────────────────────────────────────
     case 87: {
       let sl87;
       if (status === null)         sl87 = '⏳ En attente';
@@ -1041,6 +975,7 @@ function buildTgMessage(formatId, {
         parse_mode: null,
       };
     }
+
 
     // ── Format 88 : LUXE BACCARA (format compact demandé) ─────────────────
     case 88: {
