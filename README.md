@@ -121,3 +121,20 @@ public et silencieux, le droit de publier et la dernière erreur d'envoi.
 - Dès qu'une stratégie certifiée perd une prédiction, elle est retirée automatiquement du panneau.
 - API : `GET /api/predit`, `POST /api/predit/config`, `POST /api/predit/channel`,
   `DELETE /api/predit/channel`, `POST /api/predit/test`, `POST /api/predit/scan`.
+
+## Correctif : les deux modes silencieux (intervalle 0-4, max = 4)
+
+### 1ᵉʳ mode silencieux (filtre « double perte », `silent` + `lossInterval`)
+- **Phase 1** : aucune référence, on attend la 1ʳᵉ perte → elle devient la référence.
+- **Phase 2** : on mesure l'écart (prédictions terminées) depuis la référence.
+  - perte avec écart **≥ intervalle max (4)** → trop loin : elle devient la **nouvelle référence** ;
+  - perte avec écart **< 4** → **confirmée**, `N = écart` → phase 3.
+- **Phase 3** : décompte silencieux ; la prédiction en **position N** est envoyée publiquement.
+  Une perte avant la position N interrompt le décompte et devient la nouvelle référence.
+  `N = 1` → la prédiction suivante part directement.
+
+### 2ᵉ mode silencieux (`silenceMode` + `silenceInterval`)
+Même détection de référence et d'intervalle, mais **aucun décompte** : il ne compte ni la 1ʳᵉ
+ni la 2ᵉ prédiction. Dès que la 2ᵉ perte tombe **dans l'intervalle**, la prédiction du
+**jeu suivant** est envoyée dans le canal silencieux (`silenceCount` prédictions au total).
+`silenceOffset` n'est plus utilisé (conservé pour compatibilité).

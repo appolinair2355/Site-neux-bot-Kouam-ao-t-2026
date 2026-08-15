@@ -11,7 +11,7 @@ const {
   state, evaluate, verify, registerGames, setOnFinished,
   predictionText, predictionMessage, liveText, stats, SUITS,
   initStrategies, setStrategyConfig, resetStrategy, strategyChannels, parityRuntime,
-  bilanText, canSend, gateView, autoView, noteSent, shadowRuntime, sweepAutoUnlock, unlockGate,
+  bilanText, canSend, noteGateSent, gateView, autoView, noteSent, shadowRuntime, sweepAutoUnlock, unlockGate,
   silenceView, silenceShouldSend, noteSilenceSent,
 } = require('./predictor');
 
@@ -499,14 +499,16 @@ function wire(b) {
     );
   });
 
-  b.onText(/^\/silence(?:\s+(\w+))?(?:\s+(\w+))?(?:\s+(\d+))?/, (msg, m) => {
+  b.onText(/^\/silence(?:\s+(\w+))?(?:\s+(\w+))?(?:\s+(\d+))?(?:\s+(\d+))?(?:\s+(\w+))?/, (msg, m) => {
     if (!isAdmin(msg)) return deny(msg.chat.id);
     const key = (m[1] || '').toLowerCase();
     if (!strategies.BY_KEY[key])
-      return b.sendMessage(msg.chat.id, 'ℹ️ Usage : /silence <clé> <on|off> [nombre max de prédictions après une perte]');
+      return b.sendMessage(msg.chat.id, 'ℹ️ Usage : /silence <clé> <on|off> [nombre max de prédictions après une perte] [intervalle MAX (écart) avant confirmation] [unique:on|off]');
     const patch = {};
     if (m[2]) patch.silent = /^(on|oui|1|actif|true)$/i.test(m[2]);
     if (m[3]) patch.lossWindow = parseInt(m[3], 10);
+    if (m[4]) patch.lossInterval = parseInt(m[4], 10);
+    if (m[5]) patch.sendOnlyNext = /^(on|oui|1|actif|true|unique)$/i.test(m[5]);
     const cfg = setStrategyConfig(key, patch);
     persist();
     b.sendMessage(
@@ -514,6 +516,8 @@ function wire(b) {
       `🔕 ${strategies.BY_KEY[key].name}\n` +
         `• Mode silencieux : ${cfg.silent ? 'activé' : 'désactivé'}\n` +
         `• Prédictions max après une perte : ${cfg.lossWindow}\n` +
+        `• Intervalle MAX (écart) avant confirmation : ${cfg.lossInterval || 0}\n` +
+        `• Envoi : ${cfg.sendOnlyNext ? 'une seule prédiction puis retour au silence' : 'continu jusqu’à un gain'}\n` +
         `• Retour au silence après un gain : ${cfg.resetOnWin === false ? 'non' : 'oui'}\n\n` +
         gateView(key).label
     );
@@ -534,7 +538,7 @@ function wire(b) {
     if (m[2]) patch.silenceMode = /^(on|oui|1|actif|true)$/i.test(m[2]);
     if (m[3]) patch.silenceTrigger = m[3].toLowerCase();
     if (m[4]) { const n = parseInt(m[4], 10); if (patch.silenceTrigger === 'rattrapage' || (m[3] || '').toLowerCase() === 'rattrapage') patch.silenceRatCount = n; else patch.silenceLossCount = n; }
-    if (m[5]) patch.silenceOffset = parseInt(m[5], 10);
+    if (m[5]) patch.silenceInterval = parseInt(m[5], 10);
     if (m[6]) patch.silenceCount = parseInt(m[6], 10);
     if (m[7]) patch.silenceRatLevel = parseInt(m[7], 10);
     setStrategyConfig(key, patch);
@@ -972,6 +976,9 @@ async function broadcast(pred) {
   try { await predit.mirror(pred); } catch (e) { predit.panel.lastError = e.message; }
   // le déclencheur automatique consomme l'autorisation d'envoi
   if (pred.messages.length) noteSent(pred.strategy);
+  // le filtre « double perte » consomme aussi l'autorisation si l'envoi est
+  // limité à une seule prédiction (sendOnlyNext)
+  if (pred.messages.length) noteGateSent(pred.strategy);
   pred.gate = gateView(pred.strategy).label;
 }
 

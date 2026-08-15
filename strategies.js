@@ -482,17 +482,24 @@ function defaultsFor(key) {
   if (!s) return null;
   // token / canal / bilan : réglables stratégie par stratégie
   // réglages communs à TOUTES les stratégies :
-  //   silent      → mode silencieux (envoi seulement après confirmation par 2 pertes)
-  //   lossWindow  → nombre MAX de prédictions attendues après une perte
-  //   resetOnWin  → après activation, une prédiction gagnée referme l'envoi
+  //   silent        → mode silencieux (envoi seulement après confirmation par 2 pertes)
+  //   lossWindow    → nombre MAX de prédictions attendues après une perte
+  //   lossInterval  → intervalle MAXIMUM (écart) autorisé entre la perte de
+  //                   référence et la perte de confirmation (0-4 → max 4)
+  //                   pour que celle-ci compte comme confirmation (0 = aucun minimum)
+  //   resetOnWin    → après activation, une prédiction gagnée referme l'envoi
+  //   sendOnlyNext  → une fois confirmé, n'envoie QUE la prédiction suivante puis
+  //                   repasse en silence (au lieu d'envoyer en continu jusqu'au gain)
   return {
     token: null,
     bilan: true,
     silent: false,
     lossWindow: 3,
     lossTrigger: 2,     // nb de pertes avant d'ouvrir l'envoi (1 = dès la 1ʳᵉ perte)
+    lossInterval: 4,    // intervalle MAX (écart) entre la perte de référence et la perte de confirmation
     autoUnlockMin: 10,  // déblocage automatique après 10 minutes de blocage
     resetOnWin: true,
+    sendOnlyNext: false, // n'envoyer que la prédiction suivante après confirmation
     // --- Déclencheur automatique (commun à TOUTES les stratégies) -----------
     //  autoEnabled     → active le mode « déclencheur + N prédictions »
     //  autoTrigger     → 'perte' ou 'rattrapage'
@@ -510,15 +517,19 @@ function defaultsFor(key) {
     //  silenceLossCount  → nb de pertes déclenchantes (1 ou 2)
     //  silenceRatLevel   → niveau de rattrapage déclencheur (2, 3 ou 4)
     //  silenceRatCount   → nb de fois ce rattrapage (1 ou 2)
-    //  silenceOffset     → +N jeux après le jeu déclencheur (ex. #23 +10 → #33)
+    //  silenceInterval   → intervalle MAX (écart) pour la perte de confirmation
+    //                      (vide = reprend lossInterval)
+    //  silenceOffset     → conservé pour compatibilité (non utilisé : le 2ᵉ mode
+    //                      envoie la prédiction du jeu SUIVANT la confirmation)
     //  silenceCount      → nb de prédictions envoyées avant remise à zéro
     //  silenceChannels   → canaux qui reçoivent ces prédictions
     silenceMode: false,
     silenceTrigger: 'perte',
-    silenceLossCount: 1,
+    silenceLossCount: 2,
     silenceRatLevel: 2,
     silenceRatCount: 1,
-    silenceOffset: 10,
+    silenceOffset: 0,
+    silenceInterval: 4,
     silenceCount: 6,
     silenceChannels: [],
     silenceChannelInfos: [],

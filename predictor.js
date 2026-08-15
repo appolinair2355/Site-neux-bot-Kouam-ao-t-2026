@@ -131,6 +131,8 @@ function setStrategyConfig(key, patch = {}) {
   if (patch.lossWindow !== undefined) next.lossWindow = Math.max(1, Math.min(20, parseInt(patch.lossWindow, 10) || 3));
   if (patch.resetOnWin !== undefined) next.resetOnWin = !!patch.resetOnWin;
   if (patch.lossTrigger !== undefined) next.lossTrigger = Math.max(1, Math.min(5, parseInt(patch.lossTrigger, 10) || 2));
+  if (patch.lossInterval !== undefined) next.lossInterval = Math.max(0, Math.min(20, parseInt(patch.lossInterval, 10) || 0));
+  if (patch.sendOnlyNext !== undefined) next.sendOnlyNext = !!patch.sendOnlyNext;
   // déclencheur automatique (perte / rattrapage + nombre de prédictions)
   if (patch.autoEnabled !== undefined) next.autoEnabled = !!patch.autoEnabled;
   if (patch.autoTrigger !== undefined) next.autoTrigger = patch.autoTrigger === 'rattrapage' ? 'rattrapage' : 'perte';
@@ -143,7 +145,8 @@ function setStrategyConfig(key, patch = {}) {
   if (patch.silenceLossCount !== undefined) next.silenceLossCount = Math.max(1, Math.min(5, parseInt(patch.silenceLossCount, 10) || 1));
   if (patch.silenceRatLevel !== undefined) next.silenceRatLevel = Math.max(1, Math.min(9, parseInt(patch.silenceRatLevel, 10) || 2));
   if (patch.silenceRatCount !== undefined) next.silenceRatCount = Math.max(1, Math.min(5, parseInt(patch.silenceRatCount, 10) || 1));
-  if (patch.silenceOffset !== undefined) next.silenceOffset = Math.max(1, Math.min(99, parseInt(patch.silenceOffset, 10) || 1));
+  if (patch.silenceOffset !== undefined) next.silenceOffset = Math.max(0, Math.min(99, parseInt(patch.silenceOffset, 10) || 0));
+  if (patch.silenceInterval !== undefined) next.silenceInterval = Math.max(0, Math.min(20, parseInt(patch.silenceInterval, 10) || 0));
   if (patch.silenceCount !== undefined) next.silenceCount = Math.max(1, Math.min(50, parseInt(patch.silenceCount, 10) || 1));
   if (patch.silenceChannels !== undefined || patch.silenceChannelId !== undefined) {
     const value = patch.silenceChannels !== undefined ? patch.silenceChannels : patch.silenceChannelId;
@@ -186,7 +189,10 @@ function setStrategyConfig(key, patch = {}) {
   if (patch.silenceMode !== undefined || patch.silenceTrigger !== undefined
       || patch.silenceLossCount !== undefined || patch.silenceRatLevel !== undefined
       || patch.silenceRatCount !== undefined || patch.silenceOffset !== undefined
-      || patch.silenceCount !== undefined) resetSilenceGate(key);
+      || patch.silenceCount !== undefined || patch.silenceInterval !== undefined) resetSilenceGate(key);
+  // l'intervalle max est partagé par les deux modes : on repart d'un état propre
+  if (patch.lossInterval !== undefined || patch.lossTrigger !== undefined
+      || patch.lossWindow !== undefined) { resetGate(key); resetSilenceGate(key); }
   if (key === 'costume') pullCostume();
   return next;
 }
@@ -241,17 +247,24 @@ function autoUnlockMs(cfg) {
   return Math.min(240, min) * 60 * 1000;
 }
 
+function emptyGate() {
+  return {
+    armed: false, losses: 0, window: 0, since: null,
+    counting: false, need: 0, seen: 0,
+    blockedSince: Date.now(), autoUnlockedAt: null,
+  };
+}
+
 function gate(key) {
-  if (!state.gates[key]) {
-    state.gates[key] = { armed: false, losses: 0, window: 0, since: null, blockedSince: Date.now(), autoUnlockedAt: null };
-  }
+  if (!state.gates[key]) state.gates[key] = emptyGate();
   const g = state.gates[key];
   if (g.blockedSince == null) g.blockedSince = Date.now();
+  if (g.counting === undefined) { g.counting = false; g.need = 0; g.seen = 0; }
   return g;
 }
 
 function resetGate(key) {
-  state.gates[key] = { armed: false, losses: 0, window: 0, since: null, blockedSince: Date.now(), autoUnlockedAt: null };
+  state.gates[key] = emptyGate();
   return state.gates[key];
 }
 
@@ -296,6 +309,34 @@ function windowSize(cfg) {
   return Math.max(1, Math.min(20, parseInt(cfg && cfg.lossWindow, 10) || 3));
 }
 
+// intervalle MAXIMUM (écart, en nombre de prédictions terminées) autorisé entre
+// la perte de référence et la perte suivante pour que celle-ci CONFIRME.
+// Intervalle configuré 0-4 (max = 4) :
+//   • écart < 4  → perte confirmée (N = écart) ;
+//   • écart >= 4 → perte trop loin : elle devient la NOUVELLE référence.
+// 0 = aucune limite (toute perte suivante confirme).
+function lossIntervalMax(cfg) {
+  return Math.max(0, Math.min(20, parseInt(cfg && cfg.lossInterval, 10) || 0));
+}
+
+// (compat) ancien nom conservé pour les appels externes
+function lossIntervalMin(cfg) { return lossIntervalMax(cfg); }
+
+// phase 2 : cette perte devient la référence, la fenêtre d'écart repart de 0
+function startWindow(key, target) {
+  const g = gate(key);
+  g.armed = false;
+  g.counting = false;
+  g.seen = 0;
+  g.need = 0;
+  g.losses = 1;
+  g.window = 0;
+  g.since = target;
+  if (g.blockedSince == null) g.blockedSince = Date.now();
+  g.autoUnlockReason = null;
+  return g;
+}
+
 // mise à jour du filtre à chaque prédiction terminée
 function noteClosed(pred) {
   const cfg = state.strategies[pred.strategy];
@@ -308,28 +349,66 @@ function noteClosed(pred) {
 
   // nombre de pertes nécessaires avant d'ouvrir l'envoi (1 = envoi dès la 1ʳᵉ perte)
   const need = Math.max(1, Math.min(5, parseInt(cfg.lossTrigger, 10) || 2));
+  const maxGap = lossIntervalMax(cfg);
 
+  // --- envoi déjà ouvert (prédiction publiée) -----------------------------
   if (g.armed) {
-    if (win && cfg.resetOnWin !== false) resetGate(pred.strategy);
-    else if (!win) { g.losses = need; g.window = 0; }
+    if (win) { if (cfg.resetOnWin !== false) resetGate(pred.strategy); return; }
+    // perte : elle devient la nouvelle référence → retour phase 2
+    startWindow(pred.strategy, pred.target);
     return;
   }
+
+  // --- phase 3 : décompte silencieux vers la position N -------------------
+  if (g.counting) {
+    g.seen += 1;
+    if (!win) {
+      // interruption : la perte devient la nouvelle référence → phase 2
+      startWindow(pred.strategy, pred.target);
+      return;
+    }
+    if (g.seen >= Math.max(1, g.need) - 1) {
+      g.counting = false;
+      g.armed = true;
+      g.blockedSince = null;
+    }
+    return;
+  }
+
+  // --- phase 1 : aucune référence, on attend la 1ʳᵉ perte ----------------
   if (g.losses === 0) {
     if (!win) {
-      g.losses = 1; g.window = 0; g.since = pred.target;
+      startWindow(pred.strategy, pred.target);
       // avec lossTrigger = 1 la première perte suffit : on ouvre l'envoi
       if (need <= 1) { g.armed = true; g.blockedSince = null; }
     }
     return;
   }
-  // fenêtre ouverte après la 1ʳᵉ perte
+
+  // --- phase 2 : fenêtre ouverte, on mesure l'écart ----------------------
   g.window += 1;
   if (!win) {
+    if (maxGap && g.window >= maxGap) {
+      // trop loin : cette perte devient la nouvelle référence
+      startWindow(pred.strategy, pred.target);
+      return;
+    }
     g.losses += 1;
-    if (g.losses >= need) { g.armed = true; g.window = 0; g.blockedSince = null; }
+    if (g.losses >= need) {
+      // perte confirmée : N = écart mesuré → phase 3 (décompte silencieux)
+      const N = Math.max(1, g.window);
+      g.window = 0;
+      if (N <= 1) {
+        // N = 1 → la prochaine prédiction part directement en public
+        g.armed = true; g.counting = false; g.need = 1; g.seen = 0; g.blockedSince = null;
+      } else {
+        g.counting = true; g.need = N; g.seen = 0;
+      }
+    }
     return;
   }
-  if (g.window >= max) resetGate(pred.strategy);
+  // sans intervalle max configuré, on garde la limite « lossWindow »
+  if (!maxGap && g.window >= max) resetGate(pred.strategy);
 }
 
 
@@ -433,38 +512,59 @@ function autoView(key) {
 }
 
 // ---------------------------------------------------------------------------
-// Mode d'activation SILENCIEUX
+// Mode d'activation SILENCIEUX — 2ᵉ MODE
 // ---------------------------------------------------------------------------
-// Principe demandé :
-//   1) on attend le déclencheur : « 1 (ou 2) perte(s) » OU « 1 (ou 2) fois un
-//      rattrapage 2 / 3 / 4 » ;
-//   2) on note le NUMÉRO DU JEU où le déclencheur est tombé (ex. #N23) et on
-//      ajoute le décalage configuré (+10) → premier jeu visé = #N33 ;
-//   3) toutes les prédictions dont le jeu visé est ≥ à ce numéro partent dans
-//      le canal silencieux configuré ;
-//   4) après `silenceCount` prédictions envoyées (ex. 6), la fenêtre est
-//      remise à zéro et le bot attend un nouveau déclencheur.
+// Différence avec le 1ᵉʳ mode silencieux (filtre « double perte ») : ici il n'y
+// a AUCUN décompte de position N. Le 2ᵉ mode ne compte ni la 1ʳᵉ ni la 2ᵉ
+// prédiction : dès que la 2ᵉ perte tombe DANS l'intervalle configuré, la
+// prédiction du JEU SUIVANT est envoyée directement.
+//   1) on attend l'événement de référence (perte, ou rattrapage ≥ niveau) ;
+//   2) on mesure l'écart (nombre de prédictions terminées) jusqu'à l'événement
+//      suivant : écart ≥ intervalle max → trop loin, il devient la nouvelle
+//      référence ; écart < intervalle max → CONFIRMÉ ;
+//   3) confirmation → la prédiction suivante part immédiatement dans le canal
+//      silencieux configuré (pas de décompte) ;
+//   4) après `silenceCount` prédictions envoyées, la fenêtre repart à zéro.
 function silenceCfg(cfg) {
+  const inherited = Math.max(0, Math.min(20, parseInt(cfg && cfg.lossInterval, 10) || 0));
+  const own = cfg && cfg.silenceInterval !== undefined && cfg.silenceInterval !== null
+    ? Math.max(0, Math.min(20, parseInt(cfg.silenceInterval, 10) || 0))
+    : null;
   return {
     enabled: !!(cfg && cfg.silenceMode),
     trigger: cfg && cfg.silenceTrigger === 'rattrapage' ? 'rattrapage' : 'perte',
     lossCount: Math.max(1, Math.min(5, parseInt(cfg && cfg.silenceLossCount, 10) || 1)),
     ratLevel: Math.max(1, Math.min(9, parseInt(cfg && cfg.silenceRatLevel, 10) || 2)),
     ratCount: Math.max(1, Math.min(5, parseInt(cfg && cfg.silenceRatCount, 10) || 1)),
-    offset: Math.max(1, Math.min(99, parseInt(cfg && cfg.silenceOffset, 10) || 1)),
+    offset: Math.max(0, Math.min(99, parseInt(cfg && cfg.silenceOffset, 10) || 0)),
+    interval: own === null ? inherited : own,
     count: Math.max(1, Math.min(50, parseInt(cfg && cfg.silenceCount, 10) || 1)),
   };
 }
 
+function emptySilenceGate() {
+  return { hits: 0, armed: false, from: null, sent: 0, window: 0, since: null, triggeredAt: null, reason: null };
+}
+
 function silenceGate(key) {
-  if (!state.silenceGates[key]) {
-    state.silenceGates[key] = { hits: 0, armed: false, from: null, sent: 0, triggeredAt: null, reason: null };
-  }
-  return state.silenceGates[key];
+  if (!state.silenceGates[key]) state.silenceGates[key] = emptySilenceGate();
+  const g = state.silenceGates[key];
+  if (g.window === undefined) { g.window = 0; g.since = null; }
+  return g;
 }
 
 function resetSilenceGate(key) {
-  state.silenceGates[key] = { hits: 0, armed: false, from: null, sent: 0, triggeredAt: null, reason: null };
+  state.silenceGates[key] = emptySilenceGate();
+  return state.silenceGates[key];
+}
+
+// nouvelle référence pour le 2ᵉ mode
+function openSilenceWindow(key, target, label) {
+  state.silenceGates[key] = {
+    hits: 1, armed: false, from: null, sent: 0,
+    window: 0, since: target, triggeredAt: target,
+    reason: label || `référence #N${target}`,
+  };
   return state.silenceGates[key];
 }
 
@@ -479,19 +579,47 @@ function noteClosedSilence(pred) {
   const s = silenceCfg(cfg);
   if (!s.enabled) return;
   const g = silenceGate(pred.strategy);
-  if (g.armed) return;                       // fenêtre déjà ouverte
-  if (!isSilenceEvent(pred, s)) return;
-  g.hits += 1;
+  const ev = isSilenceEvent(pred, s);
   const need = s.trigger === 'perte' ? s.lossCount : s.ratCount;
+  const label = s.trigger === 'perte' ? 'perte' : `rattrapage ${s.ratLevel}`;
+
+  // fenêtre d'envoi ouverte : un nouvel événement redevient la référence
+  if (g.armed) {
+    if (ev) openSilenceWindow(pred.strategy, pred.target, `nouvelle référence (${label} sur #N${pred.target})`);
+    return;
+  }
+
+  // phase 1 : aucune référence
+  if (!g.hits || g.since == null) {
+    if (!ev) return;
+    openSilenceWindow(pred.strategy, pred.target, `référence : ${label} sur #N${pred.target}`);
+    if (need <= 1) armSilence(pred.strategy, pred.target, `${label} sur #N${pred.target}`);
+    return;
+  }
+
+  // phase 2 : mesure de l'écart jusqu'à l'événement suivant
+  g.window += 1;
+  if (!ev) return;
+  if (s.interval && g.window >= s.interval) {
+    openSilenceWindow(pred.strategy, pred.target, `écart ${g.window} trop grand → nouvelle référence #N${pred.target}`);
+    return;
+  }
+  g.hits += 1;
   if (g.hits < need) return;
+  armSilence(pred.strategy, pred.target, `${need} ${label}(s) confirmée(s) sur #N${pred.target} (écart ${g.window})`);
+}
+
+// ouverture immédiate de l'envoi silencieux (jeu suivant, sans décompte)
+function armSilence(key, target, reason) {
+  const g = silenceGate(key);
   g.armed = true;
   g.hits = 0;
+  g.window = 0;
   g.sent = 0;
-  g.triggeredAt = pred.target;
-  g.from = Number(pred.target) + s.offset;   // ex. 23 + 10 → 33
-  g.reason = s.trigger === 'perte'
-    ? `${need} perte(s), dernière sur #N${pred.target}`
-    : `${need} fois rattrapage ${s.ratLevel}, dernier sur #N${pred.target}`;
+  g.triggeredAt = target;
+  g.from = null;             // pas de décalage : la prédiction suivante part
+  g.reason = reason;
+  return g;
 }
 
 // cette prédiction doit-elle partir dans le canal silencieux ?
@@ -500,9 +628,9 @@ function silenceShouldSend(pred) {
   const s = silenceCfg(cfg);
   if (!s.enabled) return false;
   const g = silenceGate(pred.strategy);
-  if (!g.armed || g.from == null) return false;
+  if (!g.armed) return false;
   if (g.sent >= s.count) { resetSilenceGate(pred.strategy); return false; }
-  return Number(pred.target) >= Number(g.from);
+  return true;
 }
 
 // consommation après un envoi silencieux
@@ -531,18 +659,26 @@ function silenceView(key) {
     ratLevel: s.ratLevel,
     ratCount: s.ratCount,
     offset: s.offset,
+    interval: s.interval,
     count: s.count,
     armed: !!g.armed,
     hits: g.hits,
+    window: g.window,
+    since: g.since,
     from: g.from,
     sent: g.sent,
     triggeredAt: g.triggeredAt,
+    reason: g.reason || null,
     channels: strategyChannels(key, 'silence'),
     label: !s.enabled
       ? "Mode d'activation silencieux désactivé"
       : g.armed
-        ? `Fenêtre ouverte depuis #N${g.from} (+${s.offset}) — ${g.sent}/${s.count} prédiction(s) envoyée(s)`
-        : `En attente de ${wait} (puis départ au jeu déclencheur +${s.offset}, ${s.count} prédiction(s))`,
+        ? `Envoi silencieux ACTIF (${g.reason || 'confirmé'}) — ${g.sent}/${s.count} prédiction(s) envoyée(s)`
+        : g.since != null
+          ? `Référence #N${g.since} — écart ${g.window}` +
+            (s.interval ? ` (confirmation si écart < ${s.interval})` : '') +
+            ` — ${g.hits}/${need} ${s.trigger === 'perte' ? 'perte(s)' : 'rattrapage(s)'}`
+          : `En attente de ${wait} (puis envoi de la prédiction SUIVANTE, ${s.count} au total)`,
   };
 }
 
@@ -557,6 +693,17 @@ function canSend(key) {
   return !!gate(key).armed;
 }
 
+// consommation après un envoi public déclenché par le filtre « double perte » :
+// si `sendOnlyNext` est activé, une seule prédiction part puis le filtre repasse
+// en silence (attente d'une nouvelle 1ʳᵉ perte) au lieu d'envoyer en continu.
+function noteGateSent(key) {
+  const cfg = state.strategies[key];
+  if (!cfg || cfg.autoEnabled || !cfg.silent || !cfg.sendOnlyNext) return;
+  const g = gate(key);
+  if (!g.armed) return;
+  resetGate(key);
+}
+
 // état lisible du filtre (panel web / Telegram)
 function gateView(key) {
   const cfg = state.strategies[key] || {};
@@ -564,10 +711,13 @@ function gateView(key) {
   const g = gate(key);
   const max = windowSize(cfg);
   const need = Math.max(1, Math.min(5, parseInt(cfg.lossTrigger, 10) || 2));
+  const maxGap = lossIntervalMax(cfg);
   const delay = autoUnlockMs(cfg);
   const waitedMs = g.blockedSince ? Date.now() - g.blockedSince : 0;
+  const phase = g.armed ? 3 : g.counting ? 3 : g.losses >= 1 ? 2 : 1;
   return {
     lossTrigger: need,
+    lossInterval: maxGap,
     autoUnlockMin: delay ? Math.round(delay / 60000) : 0,
     autoUnlockInSec: delay && g.blockedSince && !g.armed ? Math.max(0, Math.round((delay - waitedMs) / 1000)) : null,
     autoUnlocked: !!g.autoUnlockedAt,
@@ -577,22 +727,34 @@ function gateView(key) {
     silence: silenceView(key),
     lossWindow: max,
     resetOnWin: cfg.resetOnWin !== false,
+    sendOnlyNext: !!cfg.sendOnlyNext,
     armed: !!g.armed,
     losses: g.losses,
     used: g.window,
-    left: g.losses === 1 ? Math.max(0, max - g.window) : null,
+    phase,
+    counting: !!g.counting,
+    position: g.need || null,
+    seen: g.seen || 0,
+    since: g.since,
+    left: g.losses === 1 && !maxGap ? Math.max(0, max - g.window) : null,
     sending: canSend(key),
     label: cfg.autoEnabled
       ? autoView(key).label
       : !cfg.silent
       ? 'Envoi direct (mode silencieux désactivé)'
       : g.armed
-        ? (g.autoUnlockReason ? `Envoi ACTIF (${g.autoUnlockReason})` : `Envoi ACTIF : ${need} perte(s) confirmée(s)`)
-        : g.losses >= 1
-          ? `Fenêtre ouverte : ${g.window}/${max} prédiction(s) — ${g.losses}/${need} perte(s)`
-          : delay
-            ? `Silence : on attend une perte (déblocage auto dans ${Math.max(0, Math.round((delay - waitedMs) / 60000))} min)`
-            : "Silence : on attend une première perte",
+        ? (g.autoUnlockReason
+            ? `Envoi ACTIF (${g.autoUnlockReason})`
+            : `Phase 3 — prédiction ${g.need ? `n°${g.need} ` : ''}ENVOYÉE publiquement${cfg.sendOnlyNext ? ' — puis retour au silence' : ''}`)
+        : g.counting
+          ? `Phase 3 — décompte silencieux : ${g.seen}/${Math.max(1, g.need) - 1} avant la position N=${g.need}`
+          : g.losses >= 1
+            ? `Phase 2 — référence #N${g.since} · écart ${g.window}` +
+              (maxGap ? ` (confirmation si écart < ${maxGap})` : ` (fenêtre ${g.window}/${max})`) +
+              ` — ${g.losses}/${need} perte(s)`
+            : delay
+              ? `Phase 1 — on attend la 1ʳᵉ perte (déblocage auto dans ${Math.max(0, Math.round((delay - waitedMs) / 60000))} min)`
+              : "Phase 1 — on attend la 1ʳᵉ perte",
   };
 }
 
@@ -1212,6 +1374,7 @@ module.exports = {
   applyAutoUnlock,
   sweepAutoUnlock,
   canSend,
+  noteGateSent,
   gateView,
   autoView,
   autoGate,
