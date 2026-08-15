@@ -151,7 +151,7 @@ function setStrategyConfig(key, patch = {}) {
     next.silent = false;
   }
   // déclencheur automatique (perte / rattrapage + nombre de prédictions)
-  if (patch.autoEnabled !== undefined) next.autoEnabled = !!patch.autoEnabled;
+  if (patch.autoEnabled !== undefined) next.autoEnabled = key === 'ombre' ? false : !!patch.autoEnabled;
   if (patch.autoTrigger !== undefined) next.autoTrigger = patch.autoTrigger === 'rattrapage' ? 'rattrapage' : 'perte';
   if (patch.autoRattrapage !== undefined) next.autoRattrapage = Math.max(1, Math.min(9, parseInt(patch.autoRattrapage, 10) || 1));
   if (patch.autoSkip !== undefined) next.autoSkip = Math.max(0, Math.min(20, parseInt(patch.autoSkip, 10) || 0));
@@ -522,13 +522,12 @@ function autoView(key) {
 function canSend(key) {
   const cfg = state.strategies[key];
   if (!cfg) return true;
-  // « ombre » : le mode silencieux passe AVANT tout le reste. Même si le
-  // déclencheur automatique est activé, il ne peut qu'ajouter une condition,
-  // jamais remplacer les phases du filtre silencieux.
+  // « ombre » : seul le mode silencieux 1 décide de l'envoi. Le déclencheur
+  // automatique ne s'applique pas à cette stratégie (elle n'a qu'un seul
+  // filtre, pas deux qui se cumulent).
   if (key === 'ombre') {
     applyAutoUnlock(key);
-    if (!gate(key).armed) return false;
-    return cfg.autoEnabled ? !!autoGate(key).armed : true;
+    return !!gate(key).armed;
   }
   // le déclencheur automatique remplace le filtre « double perte » quand il est actif
   if (cfg.autoEnabled) return !!autoGate(key).armed;
