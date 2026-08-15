@@ -1,14 +1,20 @@
-// predit.js — panneau « Prédit » : prédictions automatiques 100% sûres
+// predit.js — panneau « Prédit » : prédictions automatiques haute fiabilité
 //
 //  • SEULES les stratégies CRÉÉES PAR L'IA (règles découvertes par l'analyseur)
-//    qui atteignent 100% de réussite entrent dans ce panneau. Les stratégies
+//    qui atteignent AU MOINS le seuil configuré (85% par défaut, réglable de
+//    50% à 100% via minRate) entrent dans ce panneau. Les stratégies
 //    existantes du bot ne sont JAMAIS utilisées ici.
+//  • PRIORITÉ AUX DÉCLENCHEURS À 100% : tant qu'au moins une règle certifiée
+//    à 100% est disponible (quota non atteint) ou a une prédiction en cours,
+//    les règles en dessous de 100% sont mises en attente et ne prédisent
+//    pas. Elles ne reprennent que lorsque plus aucune règle à 100% n'est
+//    disponible.
 //  • Le message envoyé dans le canal utilise le FORMAT DE PRÉDICTION CONFIGURÉ
 //    (les 88 formats). Le motif de la prédiction n'apparaît jamais dans le
 //    message : il est gardé dans l'historique de la stratégie.
 //  • Chaque stratégie certifiée ne prédit qu'un nombre configuré de fois
 //    (ex. 2). Ensuite elle est mise en pause et le panneau attend une NOUVELLE
-//    stratégie à 100% pour continuer à prédire.
+//    stratégie certifiée pour continuer à prédire.
 //  • Dès qu'une stratégie certifiée perd, elle est retirée automatiquement.
 'use strict';
 
@@ -24,12 +30,12 @@ const panel = {
   enabled: true,
   channels: [],        // canaux Telegram du panneau
   minSample: 6,        // observations minimum pour certifier une règle
-  minRate: 90,         // taux de réussite minimum accepté (90 → 100%)
+  minRate: 85,          // taux de réussite minimum accepté (réglable 50-100 ; 100 = parfait, prioritaire)
   maxR: 1,             // rattrapages autorisés sur une prédiction du panneau
   format: 1,           // format de prédiction utilisé pour les messages
   perStrategy: 2,      // nombre de prédictions autorisées par stratégie créée
   requireCombo: false, // n'envoyer QUE les prédictions confirmées par 2 règles
-  certified: [],       // règles IA actuellement à 100%
+  certified: [],       // règles IA actuellement au-dessus du seuil
   retired: [],         // règles retirées (perdues ou quota atteint)
   predictions: [],     // prédictions du panneau (les 200 dernières)
   sentCount: 0,
@@ -67,7 +73,7 @@ function configure(patch = {}) {
   if (patch.channels !== undefined) panel.channels = parseChannels(patch.channels);
   if (patch.minRate !== undefined) {
     const v = parseInt(patch.minRate, 10);
-    panel.minRate = Math.max(50, Math.min(100, Number.isFinite(v) ? v : 90));
+    panel.minRate = Math.max(50, Math.min(100, Number.isFinite(v) ? v : 85));
   }
   if (patch.minSample !== undefined) panel.minSample = Math.max(3, Math.min(60, parseInt(patch.minSample, 10) || 6));
   if (patch.maxR !== undefined) panel.maxR = Math.max(0, Math.min(5, parseInt(patch.maxR, 10) || 0));
@@ -176,9 +182,22 @@ function retire(entry, reason) {
   panel.retired = [{ ...entry, reason, retiredAt: new Date().toISOString() }, ...panel.retired].slice(0, 30);
 }
 
-// stratégies encore à 100% ET qui n'ont pas épuisé leur quota de prédictions
+// stratégies encore au-dessus du seuil ET qui n'ont pas épuisé leur quota,
+// triées par fiabilité décroissante : les 100% arrivent toujours en tête.
 function activeCertified() {
-  return panel.certified.filter((c) => c.rate >= panel.minRate && (c.used || 0) < panel.perStrategy);
+  return panel.certified
+    .filter((c) => c.rate >= panel.minRate && (c.used || 0) < panel.perStrategy)
+    .sort((a, b) => b.rate - a.rate);
+}
+
+// un déclencheur à 100% est-il disponible pour prédire (quota restant), ou
+// a-t-il déjà une prédiction en cours ? Tant que la réponse est oui, les
+// déclencheurs en dessous de 100% ne sont PAS prioritaires : ils patientent.
+function hasPerfectPriority(active) {
+  if (active.some((c) => c.rate >= 100)) return true;
+  return panel.predictions.some(
+    (p) => p.status === 'en attente' && p.sources.some((s) => s.rate >= 100),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -201,8 +220,14 @@ function makePredictions(games) {
   const last = lastFinishedNumber(games);
   if (!last) return [];
   const created = [];
-  for (const entry of activeCertified()) {
+  const active = activeCertified();
+  // priorité au(x) déclencheur(s) à 100% : tant que l'un d'eux est
+  // disponible ou a déjà une prédiction en cours, les règles < 100% sont
+  // écartées de ce tour (elles ne sont pas supprimées, juste mises en attente).
+  const perfectPriority = hasPerfectPriority(active);
+  for (const entry of active) {
     if (!entry.rule) continue;
+    if (perfectPriority && entry.rate < 100) continue;
     for (let i = games.length - 1; i >= 0 && i >= games.length - 6; i -= 1) {
       const g = games[i];
       if (!triggered(entry.rule, g)) continue;
@@ -479,6 +504,7 @@ async function test() {
 
 function status() {
   const active = activeCertified();
+  const perfectPriority = hasPerfectPriority(active);
   return {
     ...config(),
     running: panel.enabled,
@@ -487,10 +513,14 @@ function status() {
       id: c.id, type: c.type, name: c.name, finding: c.finding, motif: c.motif || '',
       rate: c.rate, sample: c.sample, used: c.used || 0, quota: panel.perStrategy,
       win: c.win, loss: c.loss, certifiedAt: c.certifiedAt,
+      // en attente = règle valide (>= minRate) mais mise en pause ce tour
+      // car une règle à 100% est prioritaire
+      waitingForPerfect: perfectPriority && c.rate < 100 && (c.used || 0) < panel.perStrategy,
     })),
     retired: panel.retired.slice(0, 10),
     autoDouble: active.length >= 2,
     activeCount: active.length,
+    perfectPriorityActive: perfectPriority,
     strategies: strategiesView(),
     globalBilan: bilanOf(panel.predictions),
     sentCount: panel.sentCount,

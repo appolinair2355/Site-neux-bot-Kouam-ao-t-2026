@@ -39,7 +39,6 @@ const state = {
   sendErrors: {},          // clé de stratégie -> dernière erreur d'envoi Telegram
   gates: {},               // clé de stratégie -> filtre d'envoi « double perte »
   autoGates: {},           // clé de stratégie -> déclencheur automatique (perte/rattrapage + N)
-  silenceGates: {},        // clé de stratégie -> mode d'activation silencieux (déclencheur + jeu +N)
   freshFinished: [],       // tours terminés depuis la dernière évaluation
   startedAt: Date.now(),
 };
@@ -58,6 +57,13 @@ function initStrategies() {
     // Migration douce : l'ancien champ `channels` devient le canal public.
     if (!Array.isArray(cur.publishedChannels)) cur.publishedChannels = Array.isArray(cur.channels) ? cur.channels : [];
     if (!Array.isArray(cur.shadowChannels)) cur.shadowChannels = [];
+    // Nettoyage : le mode d'activation silencieux (2ᵉ mode) a été retiré du
+    // projet, et le mode silencieux 1 (`silent`) est désormais réservé à la
+    // stratégie « ombre ». On purge toute trace d'une config antérieure.
+    for (const f of ['silenceMode', 'silenceTrigger', 'silenceLossCount', 'silenceRatLevel',
+      'silenceRatCount', 'silenceOffset', 'silenceInterval', 'silenceCount',
+      'silenceChannels', 'silenceChannelInfos']) delete cur[f];
+    if (s.key === 'ombre') { cur.silent = true; cur.autoUnlockMin = 0; } else cur.silent = false;
   }
   syncCostume();
   return state.strategies;
@@ -126,35 +132,32 @@ function setStrategyConfig(key, patch = {}) {
   // stratégie « Prédiction dans l'ombre » : jeux d'absence minimum + périmètre
   if (patch.absence !== undefined) next.absence = Math.max(1, Math.min(30, parseInt(patch.absence, 10) || 4));
   if (patch.scope !== undefined) next.scope = patch.scope === 'joueur' ? 'joueur' : 'tous';
-  // mode silencieux (commun à toutes les stratégies)
-  if (patch.silent !== undefined) next.silent = !!patch.silent;
-  if (patch.lossWindow !== undefined) next.lossWindow = Math.max(1, Math.min(20, parseInt(patch.lossWindow, 10) || 3));
-  if (patch.resetOnWin !== undefined) next.resetOnWin = !!patch.resetOnWin;
-  if (patch.lossTrigger !== undefined) next.lossTrigger = Math.max(1, Math.min(5, parseInt(patch.lossTrigger, 10) || 2));
-  if (patch.lossInterval !== undefined) next.lossInterval = Math.max(0, Math.min(20, parseInt(patch.lossInterval, 10) || 0));
-  if (patch.sendOnlyNext !== undefined) next.sendOnlyNext = !!patch.sendOnlyNext;
+  // mode silencieux 1 — RÉSERVÉ à la stratégie « ombre », et OBLIGATOIRE pour
+  // elle : ombre fonctionne exclusivement via ce filtre, `silent` ne peut donc
+  // jamais y être désactivé (patch.silent est ignoré pour cette clé). Pour
+  // toute autre stratégie, ces champs sont ignorés et forcés à leur valeur
+  // neutre : plus aucun mode silencieux configurable ailleurs dans le projet.
+  if (key === 'ombre') {
+    next.silent = true;
+    // aucun déblocage automatique : le mode silencieux garde la priorité
+    next.autoUnlockMin = 0;
+    if (patch.lossWindow !== undefined) next.lossWindow = Math.max(1, Math.min(20, parseInt(patch.lossWindow, 10) || 3));
+    if (patch.resetOnWin !== undefined) next.resetOnWin = !!patch.resetOnWin;
+    if (patch.lossTrigger !== undefined) next.lossTrigger = Math.max(1, Math.min(5, parseInt(patch.lossTrigger, 10) || 2));
+    if (patch.lossInterval !== undefined) next.lossInterval = Math.max(0, Math.min(20, parseInt(patch.lossInterval, 10) || 0));
+    if (patch.sendOnlyNext !== undefined) next.sendOnlyNext = !!patch.sendOnlyNext;
+
+  } else {
+    next.silent = false;
+  }
   // déclencheur automatique (perte / rattrapage + nombre de prédictions)
   if (patch.autoEnabled !== undefined) next.autoEnabled = !!patch.autoEnabled;
   if (patch.autoTrigger !== undefined) next.autoTrigger = patch.autoTrigger === 'rattrapage' ? 'rattrapage' : 'perte';
   if (patch.autoRattrapage !== undefined) next.autoRattrapage = Math.max(1, Math.min(9, parseInt(patch.autoRattrapage, 10) || 1));
   if (patch.autoSkip !== undefined) next.autoSkip = Math.max(0, Math.min(20, parseInt(patch.autoSkip, 10) || 0));
   if (patch.autoSend !== undefined) next.autoSend = Math.max(1, Math.min(10, parseInt(patch.autoSend, 10) || 1));
-  // --- mode d'activation silencieux --------------------------------------
-  if (patch.silenceMode !== undefined) next.silenceMode = !!patch.silenceMode;
-  if (patch.silenceTrigger !== undefined) next.silenceTrigger = patch.silenceTrigger === 'rattrapage' ? 'rattrapage' : 'perte';
-  if (patch.silenceLossCount !== undefined) next.silenceLossCount = Math.max(1, Math.min(5, parseInt(patch.silenceLossCount, 10) || 1));
-  if (patch.silenceRatLevel !== undefined) next.silenceRatLevel = Math.max(1, Math.min(9, parseInt(patch.silenceRatLevel, 10) || 2));
-  if (patch.silenceRatCount !== undefined) next.silenceRatCount = Math.max(1, Math.min(5, parseInt(patch.silenceRatCount, 10) || 1));
-  if (patch.silenceOffset !== undefined) next.silenceOffset = Math.max(0, Math.min(99, parseInt(patch.silenceOffset, 10) || 0));
-  if (patch.silenceInterval !== undefined) next.silenceInterval = Math.max(0, Math.min(20, parseInt(patch.silenceInterval, 10) || 0));
-  if (patch.silenceCount !== undefined) next.silenceCount = Math.max(1, Math.min(50, parseInt(patch.silenceCount, 10) || 1));
-  if (patch.silenceChannels !== undefined || patch.silenceChannelId !== undefined) {
-    const value = patch.silenceChannels !== undefined ? patch.silenceChannels : patch.silenceChannelId;
-    next.silenceChannels = parseChannels(value);
-    if (JSON.stringify(next.silenceChannels) !== JSON.stringify(cur.silenceChannels || [])) next.silenceChannelInfos = [];
-  }
-  if (patch.silenceChannelInfos !== undefined) next.silenceChannelInfos = patch.silenceChannelInfos || [];
-  if (patch.autoUnlockMin !== undefined) next.autoUnlockMin = Math.max(0, Math.min(240, parseInt(patch.autoUnlockMin, 10) || 0));
+  // Mode d'activation silencieux (2ᵉ mode) SUPPRIMÉ : plus aucun champ
+  // `silence*` n'est accepté ici, pour aucune stratégie.
   if (patch.template !== undefined) next.template = patch.template ? String(patch.template) : null;
   if (patch.channels !== undefined || patch.channelId !== undefined || patch.publishedChannels !== undefined) {
     const value = patch.publishedChannels !== undefined
@@ -188,11 +191,6 @@ function setStrategyConfig(key, patch = {}) {
   if (['autoEnabled', 'autoTrigger', 'autoRattrapage', 'autoSkip', 'autoSend'].some(changed)) {
     resetAutoGate(key);
   }
-  // mode d'activation silencieux (mode 2) — réglages `silence*` uniquement
-  if (['silenceMode', 'silenceTrigger', 'silenceLossCount', 'silenceRatLevel',
-       'silenceRatCount', 'silenceOffset', 'silenceCount', 'silenceInterval'].some(changed)) {
-    resetSilenceGate(key);
-  }
   // mode silencieux 1 (filtre pertes) — réglages `loss*` uniquement
   if (['silent', 'lossInterval', 'lossTrigger', 'lossWindow'].some(changed)) {
     resetGate(key);
@@ -211,18 +209,17 @@ function resetStrategy(key) {
 function strategyChannels(key, mode = 'published') {
   const c = state.strategies[key];
   if (!c) return mode === 'published' ? state.activeChannels : [];
-  if (mode === 'silence') {
-    const own = Array.isArray(c.silenceChannels) ? c.silenceChannels : [];
-    if (own.length) return own;
-    return Array.isArray(c.shadowChannels) ? c.shadowChannels : [];
-  }
-  if (mode === 'shadow') return Array.isArray(c.shadowChannels) ? c.shadowChannels : [];
   const configured = Array.isArray(c.publishedChannels)
     ? c.publishedChannels
     : Array.isArray(c.channels) && c.channels.length ? c.channels : state.activeChannels;
-  const shadow = new Set(Array.isArray(c.shadowChannels) ? c.shadowChannels : []);
   // Un canal ne reçoit jamais les deux catégories pour une même stratégie.
-  return configured.filter((id) => !shadow.has(id));
+  // En cas de doublon, le canal PUBLIC est prioritaire : auparavant la liste
+  // publique était vidée et PLUS AUCUNE prédiction publique ne partait.
+  if (mode === 'shadow') {
+    const pub = new Set(configured);
+    return (Array.isArray(c.shadowChannels) ? c.shadowChannels : []).filter((id) => !pub.has(id));
+  }
+  return configured;
 }
 
 
@@ -290,6 +287,10 @@ function unlockGate(key, manual = true) {
 function applyAutoUnlock(key) {
   const cfg = state.strategies[key];
   if (!cfg || !cfg.silent) return false;
+  // « ombre » : le mode silencieux est PRIORITAIRE et ne peut jamais être
+  // contourné par un déblocage automatique — seules les phases 1/2/3 ouvrent
+  // l'envoi public (un déblocage manuel reste possible via /debloquer).
+  if (key === 'ombre') return false;
   const g = gate(key);
   if (g.armed) return false;
   const delay = autoUnlockMs(cfg);
@@ -346,7 +347,6 @@ function noteClosed(pred) {
   const cfg = state.strategies[pred.strategy];
   if (!cfg) return;
   noteClosedAuto(pred);
-  noteClosedSilence(pred);
   const g = gate(pred.strategy);
   const win = pred.status === 'gagné';
   const max = windowSize(cfg);
@@ -515,180 +515,21 @@ function autoView(key) {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Mode d'activation SILENCIEUX — 2ᵉ MODE
-// ---------------------------------------------------------------------------
-// Différence avec le 1ᵉʳ mode silencieux (filtre « double perte ») : ici il n'y
-// a AUCUN décompte de position N. Le 2ᵉ mode ne compte ni la 1ʳᵉ ni la 2ᵉ
-// prédiction : dès que la 2ᵉ perte tombe DANS l'intervalle configuré, la
-// prédiction du JEU SUIVANT est envoyée directement.
-//   1) on attend l'événement de référence (perte, ou rattrapage ≥ niveau) ;
-//   2) on mesure l'écart (nombre de prédictions terminées) jusqu'à l'événement
-//      suivant : écart ≥ intervalle max → trop loin, il devient la nouvelle
-//      référence ; écart < intervalle max → CONFIRMÉ ;
-//   3) confirmation → la prédiction suivante part immédiatement dans le canal
-//      silencieux configuré (pas de décompte) ;
-//   4) après `silenceCount` prédictions envoyées, la fenêtre repart à zéro.
-function silenceCfg(cfg) {
-  // ⚠️ Réglages STRICTEMENT indépendants du mode silencieux 1 : aucun héritage
-  // de `lossInterval` / `lossTrigger` / `lossWindow`.
-  const own = Math.max(0, Math.min(20, parseInt(cfg && cfg.silenceInterval, 10) || 0));
-  return {
-    enabled: !!(cfg && cfg.silenceMode),
-    trigger: cfg && cfg.silenceTrigger === 'rattrapage' ? 'rattrapage' : 'perte',
-    lossCount: Math.max(1, Math.min(5, parseInt(cfg && cfg.silenceLossCount, 10) || 1)),
-    ratLevel: Math.max(1, Math.min(9, parseInt(cfg && cfg.silenceRatLevel, 10) || 2)),
-    ratCount: Math.max(1, Math.min(5, parseInt(cfg && cfg.silenceRatCount, 10) || 1)),
-    offset: Math.max(0, Math.min(99, parseInt(cfg && cfg.silenceOffset, 10) || 0)),
-    interval: own,
-    count: Math.max(1, Math.min(50, parseInt(cfg && cfg.silenceCount, 10) || 1)),
-  };
-}
+// (mode d'activation silencieux — 2ᵉ mode — retiré du projet)
 
-function emptySilenceGate() {
-  return { hits: 0, armed: false, from: null, sent: 0, window: 0, since: null, triggeredAt: null, reason: null };
-}
-
-function silenceGate(key) {
-  if (!state.silenceGates[key]) state.silenceGates[key] = emptySilenceGate();
-  const g = state.silenceGates[key];
-  if (g.window === undefined) { g.window = 0; g.since = null; }
-  return g;
-}
-
-function resetSilenceGate(key) {
-  state.silenceGates[key] = emptySilenceGate();
-  return state.silenceGates[key];
-}
-
-// nouvelle référence pour le 2ᵉ mode
-function openSilenceWindow(key, target, label) {
-  state.silenceGates[key] = {
-    hits: 1, armed: false, from: null, sent: 0,
-    window: 0, since: target, triggeredAt: target,
-    reason: label || `référence #N${target}`,
-  };
-  return state.silenceGates[key];
-}
-
-function isSilenceEvent(pred, s) {
-  if (s.trigger === 'perte') return pred.status === 'perdu';
-  return (pred.step || 0) >= s.ratLevel;
-}
-
-// mise à jour à chaque prédiction terminée
-function noteClosedSilence(pred) {
-  const cfg = state.strategies[pred.strategy];
-  const s = silenceCfg(cfg);
-  if (!s.enabled) return;
-  const g = silenceGate(pred.strategy);
-  const ev = isSilenceEvent(pred, s);
-  const need = s.trigger === 'perte' ? s.lossCount : s.ratCount;
-  const label = s.trigger === 'perte' ? 'perte' : `rattrapage ${s.ratLevel}`;
-
-  // fenêtre d'envoi ouverte : un nouvel événement redevient la référence
-  if (g.armed) {
-    if (ev) openSilenceWindow(pred.strategy, pred.target, `nouvelle référence (${label} sur #N${pred.target})`);
-    return;
-  }
-
-  // phase 1 : aucune référence
-  if (!g.hits || g.since == null) {
-    if (!ev) return;
-    openSilenceWindow(pred.strategy, pred.target, `référence : ${label} sur #N${pred.target}`);
-    if (need <= 1) armSilence(pred.strategy, pred.target, `${label} sur #N${pred.target}`);
-    return;
-  }
-
-  // phase 2 : mesure de l'écart jusqu'à l'événement suivant
-  g.window += 1;
-  if (!ev) return;
-  if (s.interval && g.window >= s.interval) {
-    openSilenceWindow(pred.strategy, pred.target, `écart ${g.window} trop grand → nouvelle référence #N${pred.target}`);
-    return;
-  }
-  g.hits += 1;
-  if (g.hits < need) return;
-  armSilence(pred.strategy, pred.target, `${need} ${label}(s) confirmée(s) sur #N${pred.target} (écart ${g.window})`);
-}
-
-// ouverture immédiate de l'envoi silencieux (jeu suivant, sans décompte)
-function armSilence(key, target, reason) {
-  const g = silenceGate(key);
-  g.armed = true;
-  g.hits = 0;
-  g.window = 0;
-  g.sent = 0;
-  g.triggeredAt = target;
-  g.from = null;             // pas de décalage : la prédiction suivante part
-  g.reason = reason;
-  return g;
-}
-
-// cette prédiction doit-elle partir dans le canal silencieux ?
-function silenceShouldSend(pred) {
-  const cfg = state.strategies[pred.strategy];
-  const s = silenceCfg(cfg);
-  if (!s.enabled) return false;
-  const g = silenceGate(pred.strategy);
-  if (!g.armed) return false;
-  if (g.sent >= s.count) { resetSilenceGate(pred.strategy); return false; }
-  return true;
-}
-
-// consommation après un envoi silencieux
-function noteSilenceSent(key) {
-  const s = silenceCfg(state.strategies[key]);
-  if (!s.enabled) return;
-  const g = silenceGate(key);
-  if (!g.armed) return;
-  g.sent += 1;
-  if (g.sent >= s.count) resetSilenceGate(key);
-}
-
-// état lisible du mode silencieux
-function silenceView(key) {
-  const cfg = state.strategies[key] || {};
-  const s = silenceCfg(cfg);
-  const g = silenceGate(key);
-  const need = s.trigger === 'perte' ? s.lossCount : s.ratCount;
-  const wait = s.trigger === 'perte'
-    ? `${need} perte(s)`
-    : `${need} fois un rattrapage ${s.ratLevel}`;
-  return {
-    enabled: s.enabled,
-    trigger: s.trigger,
-    lossCount: s.lossCount,
-    ratLevel: s.ratLevel,
-    ratCount: s.ratCount,
-    offset: s.offset,
-    interval: s.interval,
-    count: s.count,
-    armed: !!g.armed,
-    hits: g.hits,
-    window: g.window,
-    since: g.since,
-    from: g.from,
-    sent: g.sent,
-    triggeredAt: g.triggeredAt,
-    reason: g.reason || null,
-    channels: strategyChannels(key, 'silence'),
-    label: !s.enabled
-      ? "Mode d'activation silencieux désactivé"
-      : g.armed
-        ? `Envoi silencieux ACTIF (${g.reason || 'confirmé'}) — ${g.sent}/${s.count} prédiction(s) envoyée(s)`
-        : g.since != null
-          ? `Référence #N${g.since} — écart ${g.window}` +
-            (s.interval ? ` (confirmation si écart < ${s.interval})` : '') +
-            ` — ${g.hits}/${need} ${s.trigger === 'perte' ? 'perte(s)' : 'rattrapage(s)'}`
-          : `En attente de ${wait} (puis envoi de la prédiction SUIVANTE, ${s.count} au total)`,
-  };
-}
 
 // une prédiction de cette stratégie peut-elle partir dans le canal ?
 function canSend(key) {
   const cfg = state.strategies[key];
   if (!cfg) return true;
+  // « ombre » : le mode silencieux passe AVANT tout le reste. Même si le
+  // déclencheur automatique est activé, il ne peut qu'ajouter une condition,
+  // jamais remplacer les phases du filtre silencieux.
+  if (key === 'ombre') {
+    applyAutoUnlock(key);
+    if (!gate(key).armed) return false;
+    return cfg.autoEnabled ? !!autoGate(key).armed : true;
+  }
   // le déclencheur automatique remplace le filtre « double perte » quand il est actif
   if (cfg.autoEnabled) return !!autoGate(key).armed;
   if (!cfg.silent) return true;
@@ -727,7 +568,6 @@ function gateView(key) {
     autoUnlockReason: g.autoUnlockReason || null,
     silent: !!cfg.silent,
     auto: autoView(key),
-    silence: silenceView(key),
     lossWindow: max,
     resetOnWin: cfg.resetOnWin !== false,
     sendOnlyNext: !!cfg.sendOnlyNext,
@@ -741,7 +581,8 @@ function gateView(key) {
     since: g.since,
     left: g.losses === 1 && !maxGap ? Math.max(0, max - g.window) : null,
     sending: canSend(key),
-    label: cfg.autoEnabled
+    priority: key === 'ombre' ? 'silencieux' : cfg.autoEnabled ? 'auto' : 'direct',
+    label: cfg.autoEnabled && key !== 'ombre'
       ? autoView(key).label
       : !cfg.silent
       ? 'Envoi direct (mode silencieux désactivé)'
@@ -1383,11 +1224,6 @@ module.exports = {
   autoGate,
   resetAutoGate,
   noteSent,
-  silenceView,
-  silenceGate,
-  resetSilenceGate,
-  silenceShouldSend,
-  noteSilenceSent,
   resetGate,
   noteClosed,
   shadowRuntime,

@@ -138,3 +138,44 @@ Même détection de référence et d'intervalle, mais **aucun décompte** : il n
 ni la 2ᵉ prédiction. Dès que la 2ᵉ perte tombe **dans l'intervalle**, la prédiction du
 **jeu suivant** est envoyée dans le canal silencieux (`silenceCount` prédictions au total).
 `silenceOffset` n'est plus utilisé (conservé pour compatibilité).
+
+
+## Version 3.3 — vérification complète et priorité du mode silencieux
+
+### Bugs corrigés
+1. **`/jeu <n>` répondait deux fois** : la commande était captée à la fois par
+   `/live` et par la fiche d'un jeu de la base. `/jeu` seul = jeu en cours,
+   `/jeu 1234` = fiche du jeu dans la base.
+2. **`/strategies` déclenchait aussi `/strategie`** (double réponse) : la
+   commande `/strategie` n'accepte plus le pluriel.
+3. **Canal présent dans les deux listes** : quand le même identifiant était
+   enregistré en public ET en silencieux, la liste publique était vidée et
+   **plus aucune prédiction publique ne partait**. Désormais le canal public
+   est prioritaire et le doublon est simplement retiré de la liste silencieuse.
+4. **Déblocage automatique qui court-circuitait « ombre »** : au bout de 10 min
+   la stratégie était armée sans avoir suivi ses phases. Supprimé pour
+   « ombre » (`autoUnlockMin` forcé à 0).
+5. Toutes les routes HTTP (`/api/...`) et toutes les commandes Telegram
+   documentées ont été testées : elles répondent toutes.
+
+### Priorité du mode silencieux pour la stratégie « ombre »
+- Le mode silencieux est **toujours actif** et **non désactivable** pour
+  « ombre » ; il passe **avant** tout autre filtre.
+- Aucun déblocage automatique : seules les phases 1 → 2 → 3 ouvrent le canal
+  public (le déblocage manuel `/debloquer ombre` reste possible).
+- Si le déclencheur automatique est activé, il ne peut qu'**ajouter** une
+  condition : la prédiction ne part en public que si le filtre silencieux est
+  en phase 3 **et** que le déclencheur est armé.
+- Tant que le filtre n'est pas ouvert, la prédiction part **uniquement dans le
+  canal silencieux** ; le champ `priority` de l'API vaut `silencieux`.
+
+### `/ombrecompte` — suivi dynamique
+Recalculé à chaque appel (aucun cache), il affiche :
+- la **phase actuelle** (1 attente de la 1ʳᵉ perte · 2 référence posée et mesure
+  de l'écart · 3 décompte silencieux puis envoi public) ;
+- la perte de **référence** (#N) et l'**écart** mesuré depuis celle-ci ;
+- le nombre de **pertes confirmées** sur le total requis (`lossTrigger`) ;
+- la **position N** à atteindre et le décompte `seen/N-1` en phase 3 ;
+- le **canal utilisé pour la prochaine prédiction** (public ou silencieux) ;
+- les réglages en cours et, le cas échéant, l'état du déclencheur automatique.
+Les mêmes informations sont exposées sur `GET /api/ombre` et `GET /api/gates`.

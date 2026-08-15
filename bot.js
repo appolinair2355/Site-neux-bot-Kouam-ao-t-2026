@@ -12,7 +12,6 @@ const {
   predictionText, predictionMessage, liveText, stats, SUITS,
   initStrategies, setStrategyConfig, resetStrategy, strategyChannels, parityRuntime,
   bilanText, canSend, noteGateSent, gateView, autoView, noteSent, shadowRuntime, sweepAutoUnlock, unlockGate,
-  silenceView, silenceShouldSend, noteSilenceSent,
 } = require('./predictor');
 
 let bot = null;
@@ -113,7 +112,6 @@ const HELP =
   '/setb <n> — compteur B (apparitions consécutives max)\n' +
   '/setmaxr <n> — nombre de rattrapages vérifiés\n' +
   '/setformat <1-87> — style du message de prédiction (87 = nouveau format)\n' +
-  '/modesilence <clé> <on|off> [perte|rattrapage] [n] [+N] [nb] [niveau] — mode d\'activation silencieux\n' +
   '/formats [page] — liste des 87 styles (80-83 pair/impair, 84-86 ombre, 87 nouveau format)\n' +
   '/apercu <n> — aperçu complet d\'un style (⌛ / ✅ / ❌)\n' +
   '/settemplate <texte> — style personnalisé ({game} {emoji} {suit} {status} {maxR})\n' +
@@ -125,7 +123,8 @@ const HELP =
   '/desactiverstrat <clé> — désactiver une stratégie\n' +
   '/setstrat <clé> <format|maxr|b|lead|depart|var|decalage|streak|absence|silence|fenetre|template> <valeur>\n' +
   '/ombre — état de la stratégie « Prédiction dans l\'ombre »\n' +
-  '/silence <clé> <on|off> [fenêtre] — mode silencieux + nb max de prédictions après une perte\n' +
+  '/ombrecompte — comptage en temps réel du mode silencieux (phase actuelle, référence, écart, décompte, canal utilisé)\n' +
+  '/silence <clé> <on|off> [fenêtre] — mode silencieux 1 (réservé à la stratégie « ombre »)\n' +
   '/debloquer <clé|tout> — débloque immédiatement l\'envoi (déblocage auto après 10 min)\n' +
   '/filtres — état du filtre « double perte » de chaque stratégie\n' +
   '/sauverconfig — enregistrer toutes les configurations en base\n' +
@@ -176,7 +175,8 @@ function wire(b) {
     b.sendMessage(msg.chat.id, HELP, { parse_mode: 'Markdown' })
   );
 
-  b.onText(/^\/(live|encours|jeu)\b/, (msg) =>
+  // /jeu SEUL = jeu en cours ; /jeu <n> est traité plus bas (fiche d'un jeu de la base)
+  b.onText(/^\/(?:live|encours)\b|^\/jeu(?:@\w+)?\s*$/, (msg) =>
     b.sendMessage(msg.chat.id, liveText(), { parse_mode: 'Markdown' })
   );
 
@@ -411,7 +411,7 @@ function wire(b) {
     b.sendMessage(msg.chat.id, `🧠 *Stratégies*\n\n${lines.join('\n\n')}\n\n➡️ /strategie <clé>`, { parse_mode: 'Markdown' });
   });
 
-  b.onText(/^\/strategie(?:\s+(\w+))?/, (msg, m) => {
+  b.onText(/^\/strategie(?!s)(?:\s+(\w+))?/, (msg, m) => {
     const key = (m[1] || '').toLowerCase();
     const d = strategies.BY_KEY[key];
     if (!d) return b.sendMessage(msg.chat.id, `ℹ️ Usage : /strategie <${strategies.LIST.map((x) => x.key).join('|')}>`);
@@ -474,8 +474,12 @@ function wire(b) {
     };
     if (!map[field]) return b.sendMessage(msg.chat.id, '⚠️ Champ inconnu (format, formatdistribution, maxr, b, lead, depart, var, decalage, streak, absence, scope, silence, fenetre, resetgain, template).');
     const target = map[field];
+    if (target === 'silent')
+      return b.sendMessage(msg.chat.id, 'ℹ️ Le mode silencieux 1 est toujours actif pour « ombre » et n\'est pas désactivable ; il n\'existe pour aucune autre stratégie.');
+    if ((target === 'lossWindow' || target === 'resetOnWin') && key !== 'ombre')
+      return b.sendMessage(msg.chat.id, '⚠️ Le mode silencieux est réservé à la stratégie « ombre ».');
     let parsed = value;
-    if (target === 'silent' || target === 'resetOnWin') parsed = /^(1|oui|on|true|actif)$/i.test(value);
+    if (target === 'resetOnWin') parsed = /^(1|oui|on|true|actif)$/i.test(value);
     const cfg = setStrategyConfig(key, { [target]: parsed });
     persist();
     b.sendMessage(msg.chat.id, `✅ ${strategies.BY_KEY[key].name} → ${field} = ${cfg[target]}\n\n${fmt.formatPreview(cfg.format, { maxR: cfg.maxR })}`);
@@ -499,58 +503,81 @@ function wire(b) {
     );
   });
 
-  b.onText(/^\/silence(?:\s+(\w+))?(?:\s+(\w+))?(?:\s+(\d+))?(?:\s+(\d+))?(?:\s+(\w+))?/, (msg, m) => {
+  // comptage détaillé, en temps réel, du filtre silencieux de la stratégie « ombre » :
+  // à chaque appel, l'état est recalculé à la volée (aucun cache) à partir des
+  // pertes/gains réellement enregistrés, donc toujours à jour.
+  b.onText(/^\/ombrecompte\b/, (msg) => {
+    const g = gateView('ombre');
+    const phaseTitle = {
+      1: '1️⃣ Phase 1 — en attente de la première perte',
+      2: '2️⃣ Phase 2 — perte de référence posée, mesure de l\'écart',
+      3: g.armed ? '3️⃣ Phase 3 — envoi public autorisé' : '3️⃣ Phase 3 — décompte silencieux en cours',
+    }[g.phase] || `Phase ${g.phase}`;
+
+    const lines = [`🕯️ *Comptage en temps réel — Prédiction dans l'ombre*`, '',
+      '🔕 Priorité : le mode silencieux passe AVANT tout (pas de déblocage automatique).', '',
+      phaseTitle, ''];
+
+    if (g.phase === 1) {
+      lines.push('• Aucune perte de référence pour l\'instant.');
+      lines.push('• Dès qu\'une prédiction silencieuse perd, le comptage démarre (phase 2).');
+    } else if (g.phase === 2) {
+      lines.push(`• Perte de référence : #N${g.since ?? '—'}`);
+      lines.push(
+        g.lossInterval
+          ? `• Écart mesuré depuis cette perte : ${g.used} (confirmation si écart < ${g.lossInterval})`
+          : `• Écart mesuré depuis cette perte : ${g.used}/${g.lossWindow} (fenêtre max)`
+      );
+      lines.push(`• Pertes confirmées : ${g.losses}/${g.lossTrigger} nécessaire(s)`);
+      lines.push('• Une nouvelle perte dans la fenêtre confirme ; un gain ou un écart trop grand relance la référence.');
+    } else if (g.counting) {
+      const need = Math.max(1, g.position || 1) - 1;
+      lines.push(`• Position à atteindre avant l'envoi public : N = ${g.position}`);
+      lines.push(`• Prédictions gagnées comptées en silence : ${g.seen}/${need}`);
+      lines.push('• Toute perte pendant ce décompte relance le comptage (retour phase 2).');
+    } else if (g.armed) {
+      lines.push('• Le seuil est atteint : la *prochaine prédiction* part publiquement dans le canal.');
+      if (g.sendOnlyNext) lines.push('• Une seule prédiction sera envoyée, puis retour immédiat au silence.');
+      if (g.resetOnWin !== false) lines.push('• Un gain après l\'envoi remet le comptage à zéro.');
+    }
+
+    lines.push('');
+    lines.push(
+      `⚙️ Réglages : ${g.lossTrigger} perte(s) requise(s) · intervalle max ${g.lossInterval || 'illimité'} · fenêtre ${g.lossWindow}`
+    );
+    if (g.auto && g.auto.enabled) {
+      lines.push(`🤖 Déclencheur auto (condition supplémentaire) : ${g.auto.label}`);
+    }
+    lines.push('');
+    lines.push(`📤 Prochaine prédiction : ${g.sending ? 'CANAL PUBLIC' : 'CANAL SILENCIEUX uniquement'}`);
+    lines.push(`📡 ${g.label}`);
+
+    b.sendMessage(msg.chat.id, lines.join('\n'), { parse_mode: 'Markdown' });
+  });
+
+  b.onText(/^\/silence(?:\s+(\w+))?(?:\s+(\d+))?(?:\s+(\d+))?(?:\s+(\w+))?/, (msg, m) => {
     if (!isAdmin(msg)) return deny(msg.chat.id);
     const key = (m[1] || '').toLowerCase();
     if (!strategies.BY_KEY[key])
-      return b.sendMessage(msg.chat.id, 'ℹ️ Usage : /silence <clé> <on|off> [nombre max de prédictions après une perte] [intervalle MAX (écart) avant confirmation] [unique:on|off]');
+      return b.sendMessage(msg.chat.id, 'ℹ️ Usage : /silence <clé> [nombre max de prédictions après une perte] [intervalle MAX (écart) avant confirmation] [unique:on|off]');
+    if (key !== 'ombre')
+      return b.sendMessage(msg.chat.id, '⚠️ Le mode silencieux est réservé à la stratégie « ombre » et y est toujours actif (non désactivable).');
     const patch = {};
-    if (m[2]) patch.silent = /^(on|oui|1|actif|true)$/i.test(m[2]);
-    if (m[3]) patch.lossWindow = parseInt(m[3], 10);
-    if (m[4]) patch.lossInterval = parseInt(m[4], 10);
-    if (m[5]) patch.sendOnlyNext = /^(on|oui|1|actif|true|unique)$/i.test(m[5]);
+    if (m[2]) patch.lossWindow = parseInt(m[2], 10);
+    if (m[3]) patch.lossInterval = parseInt(m[3], 10);
+    if (m[4]) patch.sendOnlyNext = /^(on|oui|1|actif|true|unique)$/i.test(m[4]);
     const cfg = setStrategyConfig(key, patch);
     persist();
     b.sendMessage(
       msg.chat.id,
       `🔕 ${strategies.BY_KEY[key].name}\n` +
-        `• Mode silencieux : ${cfg.silent ? 'activé' : 'désactivé'}\n` +
+        `• Mode silencieux : toujours activé (non désactivable pour cette stratégie)\n` +
         `• Prédictions max après une perte : ${cfg.lossWindow}\n` +
         `• Intervalle MAX (écart) avant confirmation : ${cfg.lossInterval || 0}\n` +
         `• Envoi : ${cfg.sendOnlyNext ? 'une seule prédiction puis retour au silence' : 'continu jusqu’à un gain'}\n` +
         `• Retour au silence après un gain : ${cfg.resetOnWin === false ? 'non' : 'oui'}\n\n` +
         gateView(key).label
     );
-  });
-
-  // Nouveau mode d'activation silencieux :
-  // /modesilence <clé> <on|off> [perte|rattrapage] [nb déclencheurs] [+N] [nb prédictions]
-  b.onText(/^\/modesilence(?:\s+(\w+))?(?:\s+(\w+))?(?:\s+(perte|rattrapage))?(?:\s+(\d+))?(?:\s+\+?(\d+))?(?:\s+(\d+))?(?:\s+(\d+))?/i, (msg, m) => {
-    if (!isAdmin(msg)) return deny(msg.chat.id);
-    const key = (m[1] || '').toLowerCase();
-    if (!strategies.BY_KEY[key]) {
-      return b.sendMessage(msg.chat.id,
-        "ℹ️ Usage : /modesilence <clé> <on|off> [perte|rattrapage] [nombre de déclencheurs] [décalage +N] [nombre de prédictions]\n" +
-        "Exemple : /modesilence costume on perte 1 10 6\n" +
-        "Rattrapage : /modesilence <clé> on rattrapage <nb de fois> <+N> <nb préd.> <niveau 2|3|4>");
-    }
-    const patch = {};
-    if (m[2]) patch.silenceMode = /^(on|oui|1|actif|true)$/i.test(m[2]);
-    if (m[3]) patch.silenceTrigger = m[3].toLowerCase();
-    if (m[4]) { const n = parseInt(m[4], 10); if (patch.silenceTrigger === 'rattrapage' || (m[3] || '').toLowerCase() === 'rattrapage') patch.silenceRatCount = n; else patch.silenceLossCount = n; }
-    if (m[5]) patch.silenceInterval = parseInt(m[5], 10);
-    if (m[6]) patch.silenceCount = parseInt(m[6], 10);
-    if (m[7]) patch.silenceRatLevel = parseInt(m[7], 10);
-    setStrategyConfig(key, patch);
-    persist();
-    const v = silenceView(key);
-    b.sendMessage(msg.chat.id,
-      `🤫 ${strategies.BY_KEY[key].name}\n` +
-      `• Mode d'activation silencieux : ${v.enabled ? 'activé' : 'désactivé'}\n` +
-      `• Déclencheur : ${v.trigger === 'perte' ? `${v.lossCount} perte(s)` : `${v.ratCount} fois rattrapage ${v.ratLevel}`}\n` +
-      `• Décalage : +${v.offset} jeux après le jeu déclencheur\n` +
-      `• Prédictions envoyées avant l'arrêt : ${v.count}\n` +
-      `• Canal : ${(v.channels || []).join(', ') || 'aucun'}\n\n${v.label}`);
   });
 
   b.onText(/^\/debloquer(?:\s+(\w+))?/, (msg, m) => {
@@ -822,7 +849,7 @@ async function announceConfig(key, mode = 'published') {
       `🤖 Bot : @${state.botUsername || 'bot'} (token des réglages)\n` +
       `🎯 Format ${cfg.format} • +${cfg.maxR} rattrapage(s)\n` +
       `📊 Bilan automatique : ${cfg.bilan === false ? 'non' : 'oui'}\n` +
-      `🧭 Routage : ${mode === 'published' ? 'prédictions activées' : mode === 'silence' ? "prédictions du mode d'activation silencieux" : 'prédictions silencieuses'}\n\n` +
+      `🧭 Routage : ${mode === 'published' ? 'prédictions activées' : 'prédictions silencieuses'}\n\n` +
       `Ce canal recevra désormais les ${mode === 'published' ? 'prédictions publiées' : 'prédictions silencieuses'} de cette stratégie. 🚀`;
     try {
       // l'envoi est tenté même si getChat a échoué : certains canaux ne
@@ -841,8 +868,7 @@ async function announceConfig(key, mode = 'published') {
     }
     infos.push(info);
   }
-  if (mode === 'silence') cfg.silenceChannelInfos = infos;
-  else if (mode === 'shadow') cfg.shadowChannelInfos = infos;
+  if (mode === 'shadow') cfg.shadowChannelInfos = infos;
   else {
     cfg.channelInfos = infos;
     cfg.publishedChannelInfos = infos;
@@ -866,7 +892,7 @@ async function testSend(key, mode = 'published') {
   if (!ids.length) return { ok: false, error: `Aucun canal ${mode === 'published' ? 'public' : 'silencieux'} configuré pour cette stratégie` };
   const cfg = state.strategies[key] || {};
   const preview = fmt.formatPreview(cfg.format, { maxR: cfg.maxR });
-  const text = `🧪 TEST D'ENVOI\n\n🧠 ${def.name}\n🧭 ${mode === 'published' ? 'Canal public' : mode === 'silence' ? "Canal du mode d'activation silencieux" : 'Canal silencieux'}\n\n${preview}\n\nSi tu vois ce message, le routage est correctement configuré. ✅`;
+  const text = `🧪 TEST D'ENVOI\n\n🧠 ${def.name}\n🧭 ${mode === 'published' ? 'Canal public' : 'Canal silencieux'}\n\n${preview}\n\nSi tu vois ce message, le routage est correctement configuré. ✅`;
   const sent = [];
   const failed = [];
   for (const id of ids) {
@@ -938,26 +964,9 @@ async function broadcast(pred) {
     state.sendErrors[pred.strategy] = 'Aucun token Telegram configuré';
     return;
   }
-  // ── Mode d'activation SILENCIEUX (mode 2) ───────────────────────────────
-  // Totalement INDÉPENDANT du mode silencieux 1 : il possède ses propres
-  // réglages (silence*) et son propre canal. Il alimente le canal du mode
-  // d'activation silencieux et n'empêche JAMAIS le mode 1 de publier.
-  const stratCfg = state.strategies[pred.strategy] || {};
-  if (stratCfg.silenceMode) {
-    pred.silenceMode = true;
-    pred.gate = silenceView(pred.strategy).label;
-    if (silenceShouldSend(pred)) {
-      const silIds = strategyChannels(pred.strategy, 'silence');
-      if (!silIds.length) state.sendErrors[pred.strategy] = 'Aucun canal silencieux configuré';
-      else {
-        await sendPrediction(pred, sender, silIds);
-        if (pred.messages.length) noteSilenceSent(pred.strategy);
-      }
-    }
-    pred.gate = silenceView(pred.strategy).label;
-  }
-
   // ── Mode silencieux 1 (filtre pertes → publication publique) ─────────────
+  // Seul mode silencieux qui subsiste dans le projet, et uniquement pour la
+  // stratégie « ombre » (voir strategies.js / predictor.js).
   // Phase 1 : on attend la 1ʳᵉ perte (référence).
   // Phase 2 : on mesure l'écart jusqu'à la perte suivante ; écart >= intervalle
   //           MAX → nouvelle référence ; écart < intervalle MAX → confirmé, N = écart.
@@ -1127,14 +1136,26 @@ async function applyDbConfigs() {
   // base vide OU nouvelles stratégies absentes → on les enregistre tout de suite
   const missing = strategies.LIST.filter((d) => !loaded.includes(d.key)).map((d) => d.key);
   if (missing.length) await saveConfigsToDb();
+
+  // Stratégies IA : la base est la source de vérité (data.json est perdu à
+  // chaque redéploiement/redémarrage sur les plateformes sans disque persistant).
+  const aiRows = await db.loadAiStrategies();
+  if (aiRows.length) {
+    state.aiStrategies = aiRows;
+  } else if ((state.aiStrategies || []).length) {
+    // rien en base encore : on migre ce qui existait localement (data.json)
+    for (const item of state.aiStrategies) await db.saveAiStrategy(item);
+  }
+
   store.patch({
     strategies: state.strategies,
     botToken: state.botToken,
     adminId: state.adminId,
     channels: state.channels,
     activeChannels: state.activeChannels,
+    aiStrategies: state.aiStrategies,
   });
-  return { ok: true, loaded, added: missing, restored };
+  return { ok: true, loaded, added: missing, restored, aiStrategiesLoaded: aiRows.length };
 }
 
 async function startLoop() {

@@ -482,7 +482,9 @@ function defaultsFor(key) {
   if (!s) return null;
   // token / canal / bilan : réglables stratégie par stratégie
   // réglages communs à TOUTES les stratégies :
-  //   silent        → mode silencieux (envoi seulement après confirmation par 2 pertes)
+  //   silent        → mode silencieux 1 (envoi seulement après confirmation par
+  //                   pertes). RÉSERVÉ à la stratégie « ombre » : pour toute
+  //                   autre stratégie, ce réglage est ignoré et reste à false.
   //   lossWindow    → nombre MAX de prédictions attendues après une perte
   //   lossInterval  → intervalle MAXIMUM (écart) autorisé entre la perte de
   //                   référence et la perte de confirmation (0-4 → max 4)
@@ -511,28 +513,9 @@ function defaultsFor(key) {
     autoRattrapage: 2,
     autoSkip: 3,
     autoSend: 1,
-    // --- Mode d'activation SILENCIEUX (nouveau) ----------------------------
-    //  silenceMode       → active le mode
-    //  silenceTrigger    → 'perte' ou 'rattrapage'
-    //  silenceLossCount  → nb de pertes déclenchantes (1 ou 2)
-    //  silenceRatLevel   → niveau de rattrapage déclencheur (2, 3 ou 4)
-    //  silenceRatCount   → nb de fois ce rattrapage (1 ou 2)
-    //  silenceInterval   → intervalle MAX (écart) pour la perte de confirmation
-    //                      (vide = reprend lossInterval)
-    //  silenceOffset     → conservé pour compatibilité (non utilisé : le 2ᵉ mode
-    //                      envoie la prédiction du jeu SUIVANT la confirmation)
-    //  silenceCount      → nb de prédictions envoyées avant remise à zéro
-    //  silenceChannels   → canaux qui reçoivent ces prédictions
-    silenceMode: false,
-    silenceTrigger: 'perte',
-    silenceLossCount: 2,
-    silenceRatLevel: 2,
-    silenceRatCount: 1,
-    silenceOffset: 0,
-    silenceInterval: 4,
-    silenceCount: 6,
-    silenceChannels: [],
-    silenceChannelInfos: [],
+    // Mode d'activation silencieux (2ᵉ mode) SUPPRIMÉ du projet : seul le mode
+    // silencieux 1 (silent / loss*) subsiste, et uniquement pour la stratégie
+    // « ombre ». Aucun autre mode silencieux configurable n'existe.
     publishedChannels: [],
     shadowChannels: [],
     publishedChannelInfos: [],

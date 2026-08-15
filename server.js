@@ -225,10 +225,8 @@ function strategyPayload(key) {
     channels: cfg.publishedChannels || cfg.channels || [],
     publishedChannels: cfg.publishedChannels || cfg.channels || [],
     shadowChannels: cfg.shadowChannels || [],
-    silenceChannels: cfg.silenceChannels || [],
     channelInfos: cfg.publishedChannelInfos || cfg.channelInfos || [],
     shadowChannelInfos: cfg.shadowChannelInfos || [],
-    silenceChannelInfos: cfg.silenceChannelInfos || [],
     sentCount: cfg.sentCount || 0,
     lastSentAt: cfg.lastSentAt || null,
     bot: botStatus(),
@@ -334,10 +332,10 @@ app.post('/api/strategies/:key', async (req, res) => {
     req.body.channels !== undefined ||
     req.body.channelId !== undefined ||
     req.body.publishedChannels !== undefined ||
-    req.body.shadowChannels !== undefined || req.body.silenceChannels !== undefined
+    req.body.shadowChannels !== undefined
   );
   const notice = touched
-    ? await announceConfig(req.params.key, req.body.mode === 'shadow' ? 'shadow' : req.body.mode === 'silence' ? 'silence' : 'published')
+    ? await announceConfig(req.params.key, req.body.mode === 'shadow' ? 'shadow' : 'published')
     : null;
   await cumulative.purgeStaleFor(cumulative.strategySignature());
   cumulative.tick();
@@ -348,7 +346,7 @@ app.post('/api/strategies/:key', async (req, res) => {
 app.post('/api/strategies/:key/channel', async (req, res) => {
   const key = req.params.key;
   if (!strategies.BY_KEY[key]) return res.status(404).json({ error: 'Stratégie inconnue' });
-  const mode = req.body.mode === 'shadow' ? 'shadow' : req.body.mode === 'silence' ? 'silence' : 'published';
+  const mode = req.body.mode === 'shadow' ? 'shadow' : 'published';
   const raw = String(req.body.channelId || '').trim();
   if (!raw) return res.status(400).json({ error: "Renseigne l'ID du canal (ex : -1001234567890 ou @moncanal)" });
   if (!botStatus().tokenSet) {
@@ -362,14 +360,11 @@ app.post('/api/strategies/:key/channel', async (req, res) => {
       error: `Le bot n'est pas administrateur de « ${check.chat.title} » avec le droit « Publier des messages ».`,
     });
   }
-  const cfg = setStrategyConfig(key, mode === 'silence'
-    ? { silenceChannelId: String(check.chat.id) }
-    : mode === 'shadow'
-      ? { shadowChannelId: String(check.chat.id) }
-      : { publishedChannels: [String(check.chat.id)] });
+  const cfg = setStrategyConfig(key, mode === 'shadow'
+    ? { shadowChannelId: String(check.chat.id) }
+    : { publishedChannels: [String(check.chat.id)] });
   const notice = await announceConfig(key, mode);
-  if (mode === 'silence') cfg.silenceChannelInfos = notice.channels || [check.chat];
-  else if (mode === 'shadow') cfg.shadowChannelInfos = notice.channels || [check.chat];
+  if (mode === 'shadow') cfg.shadowChannelInfos = notice.channels || [check.chat];
   else cfg.publishedChannelInfos = notice.channels || [check.chat];
   persist();
   if (db.ready) await db.saveStrategy(key, strategies.BY_KEY[key].name, cfg);
@@ -379,10 +374,8 @@ app.post('/api/strategies/:key/channel', async (req, res) => {
 // retirer le canal d'une stratégie
 app.delete('/api/strategies/:key/channel', async (req, res) => {
   if (!strategies.BY_KEY[req.params.key]) return res.status(404).json({ error: 'Stratégie inconnue' });
-  const mode = req.body && (req.body.mode === 'shadow' || req.body.mode === 'silence') ? req.body.mode : 'published';
-  const cfg = mode === 'silence'
-    ? setStrategyConfig(req.params.key, { silenceChannels: [], silenceChannelInfos: [] })
-    : mode === 'shadow'
+  const mode = req.body && req.body.mode === 'shadow' ? 'shadow' : 'published';
+  const cfg = mode === 'shadow'
     ? setStrategyConfig(req.params.key, { shadowChannels: [], shadowChannelInfos: [] })
     : setStrategyConfig(req.params.key, { publishedChannels: [], publishedChannelInfos: [], channels: [], channelInfos: [] });
   persist();
@@ -393,7 +386,7 @@ app.delete('/api/strategies/:key/channel', async (req, res) => {
 // test d'envoi réel dans le canal configuré
 app.post('/api/strategies/:key/test', async (req, res) => {
   if (!strategies.BY_KEY[req.params.key]) return res.status(404).json({ error: 'Stratégie inconnue' });
-  const r = await testSend(req.params.key, req.body && (req.body.mode === 'shadow' || req.body.mode === 'silence') ? req.body.mode : 'published');
+  const r = await testSend(req.params.key, req.body && req.body.mode === 'shadow' ? 'shadow' : 'published');
   persist();
   if (!r.ok) return res.status(400).json({ error: r.error || (r.failed || []).map((f) => `${f.id} : ${f.error}`).join(' / ') });
   res.json(r);
@@ -481,7 +474,7 @@ app.post('/api/ai/compare-days/save', async (req, res) => {
   res.json({ ok: true, created, total: result.proposals.length });
 });
 
-app.post('/api/ai/strategies', (req, res) => {
+app.post('/api/ai/strategies', async (req, res) => {
   const proposal = req.body && req.body.proposal;
   if (!proposal || typeof proposal !== 'object') return res.status(400).json({ error: 'Proposition de stratégie manquante' });
   const rate = Number(proposal.rate);
@@ -502,6 +495,7 @@ app.post('/api/ai/strategies', (req, res) => {
   };
   state.aiStrategies = [item, ...state.aiStrategies].slice(0, 30);
   persist();
+  if (db.ready) await db.saveAiStrategy(item);
   res.json({ ok: true, strategy: item });
 });
 
@@ -623,9 +617,10 @@ app.get('/api/ai/models', async (req, res) => {
   catch (e) { res.status(502).json({ error: e.message }); }
 });
 
-app.delete('/api/ai/strategies/:id', (req, res) => {
+app.delete('/api/ai/strategies/:id', async (req, res) => {
   state.aiStrategies = (state.aiStrategies || []).filter((s) => s.id !== req.params.id);
   persist();
+  if (db.ready) await db.deleteAiStrategy(req.params.id);
   res.json({ ok: true, savedStrategies: state.aiStrategies });
 });
 
@@ -669,8 +664,8 @@ app.get('/api/diagnostics/channels', async (req, res) => {
   const out = [];
   for (const def of strategies.LIST) {
     const cfg = state.strategies[def.key] || {};
-    const entry = { key: def.key, name: def.name, enabled: !!cfg.enabled, silent: !!cfg.silent, silenceMode: !!cfg.silenceMode, published: [], shadow: [], silence: [], sendError: state.sendErrors[def.key] || null, sentCount: cfg.sentCount || 0, lastSentAt: cfg.lastSentAt || null };
-    for (const mode of ['published', 'shadow', 'silence']) {
+    const entry = { key: def.key, name: def.name, enabled: !!cfg.enabled, silent: !!cfg.silent, published: [], shadow: [], sendError: state.sendErrors[def.key] || null, sentCount: cfg.sentCount || 0, lastSentAt: cfg.lastSentAt || null };
+    for (const mode of ['published', 'shadow']) {
       const ids = strategyChannels(def.key, mode);
       for (const id of ids) {
         const check = bot.tokenSet ? await resolveChat(id) : { ok: false, error: 'Aucun token Telegram configuré' };

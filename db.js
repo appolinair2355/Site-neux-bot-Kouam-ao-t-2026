@@ -66,6 +66,25 @@ ALTER TABLE predictions ADD COLUMN IF NOT EXISTS strategy TEXT DEFAULT 'costume'
 ALTER TABLE predictions ADD COLUMN IF NOT EXISTS label    TEXT;
 ALTER TABLE predictions DROP CONSTRAINT IF EXISTS predictions_target_suit_hand_key;
 CREATE UNIQUE INDEX IF NOT EXISTS predictions_uniq_idx ON predictions (strategy, target, suit);
+
+-- stratégies proposées par l'IA (taux >= 75% au moment de la création) :
+-- enregistrées durablement, indépendamment du fichier local data.json.
+CREATE TABLE IF NOT EXISTS ai_strategies (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  logic       TEXT,
+  trigger_txt TEXT,
+  target_txt  TEXT,
+  evidence    TEXT,
+  risks       TEXT,
+  rate        NUMERIC,
+  support     INT,
+  minimum_sample INT,
+  compatible_existing TEXT,
+  origin      TEXT,
+  active      BOOLEAN NOT NULL DEFAULT false,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 `;
 
 function status() {
@@ -245,6 +264,52 @@ async function clearPredictions(key) {
     : q(`DELETE FROM predictions`);
 }
 
+// ---- stratégies IA (créées automatiquement ou manuellement, >= 75%) --------
+async function saveAiStrategy(item) {
+  return q(
+    `INSERT INTO ai_strategies (id, name, logic, trigger_txt, target_txt, evidence, risks,
+        rate, support, minimum_sample, compatible_existing, origin, active, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, coalesce($14, now()))
+     ON CONFLICT (id) DO UPDATE SET
+       name=EXCLUDED.name, logic=EXCLUDED.logic, trigger_txt=EXCLUDED.trigger_txt,
+       target_txt=EXCLUDED.target_txt, evidence=EXCLUDED.evidence, risks=EXCLUDED.risks,
+       rate=EXCLUDED.rate, support=EXCLUDED.support, minimum_sample=EXCLUDED.minimum_sample,
+       compatible_existing=EXCLUDED.compatible_existing, origin=EXCLUDED.origin,
+       active=EXCLUDED.active`,
+    [
+      item.id, item.name, item.logic || null, item.trigger || null, item.target || null,
+      item.evidence || null, item.risks || null, item.rate, item.support || null,
+      item.minimumSample || null, item.compatibleExisting || null, item.origin || null,
+      !!item.active, item.createdAt || null,
+    ]
+  );
+}
+
+async function loadAiStrategies() {
+  const r = await q(`SELECT * FROM ai_strategies ORDER BY created_at DESC LIMIT 40`);
+  if (!r) return [];
+  return r.rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    logic: row.logic || '',
+    trigger: row.trigger_txt || '',
+    target: row.target_txt || '',
+    evidence: row.evidence || '',
+    risks: row.risks || '',
+    rate: row.rate == null ? null : Number(row.rate),
+    support: row.support,
+    minimumSample: row.minimum_sample,
+    compatibleExisting: row.compatible_existing,
+    origin: row.origin,
+    active: row.active,
+    createdAt: row.created_at,
+  }));
+}
+
+async function deleteAiStrategy(id) {
+  return q(`DELETE FROM ai_strategies WHERE id = $1`, [id]);
+}
+
 // ---- réglages --------------------------------------------------------------
 async function setSetting(key, value) {
   return q(
@@ -295,10 +360,11 @@ function maskConfig(key, value) {
 
 async function tableCounts() {
   const r = await q(
-    `SELECT (SELECT count(*)::int FROM games)       AS games,
-            (SELECT count(*)::int FROM predictions) AS predictions,
-            (SELECT count(*)::int FROM settings)    AS settings,
-            (SELECT count(*)::int FROM strategies)  AS strategies`);
+    `SELECT (SELECT count(*)::int FROM games)          AS games,
+            (SELECT count(*)::int FROM predictions)    AS predictions,
+            (SELECT count(*)::int FROM settings)       AS settings,
+            (SELECT count(*)::int FROM strategies)     AS strategies,
+            (SELECT count(*)::int FROM ai_strategies)  AS ai_strategies`);
   return r ? r.rows[0] : null;
 }
 
@@ -418,6 +484,7 @@ module.exports = {
   connect, status, saveGame, gamesByDate, dailySummary, exec, rows,
   savePrediction, closePrediction, setSetting, getSetting, normalizeDate,
   saveStrategy, loadStrategies, deleteStrategy, strategyStats, strategyPredictions, clearPredictions,
+  saveAiStrategy, loadAiStrategies, deleteAiStrategy,
   lastGames, gameByNumber, predictionsByDate, predictionSummary,
   overview, availableDates, readOnlyQuery,
   saveAppConfig, loadAppConfig, dump, allSettings, lastPredictions, strategyRows, tableCounts,

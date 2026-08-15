@@ -65,6 +65,9 @@ function saveProposal(proposal, origin = 'auto-local') {
   };
   state.aiStrategies = [item, ...(state.aiStrategies || [])].slice(0, 40);
   auto.createdCount += 1;
+  // Enregistrement durable en base : sans ça, la stratégie ne survivait qu'en
+  // mémoire/data.json et disparaissait au redémarrage du serveur (Render).
+  if (db.ready) db.saveAiStrategy(item).catch(() => {});
   return item;
 }
 
