@@ -431,7 +431,7 @@ const ombre = {
     "jeux 1 à 4, retour au jeu 8 → prédiction ❤️ sur le jeu 12.",
   defaults: {
     enabled: true,
-    format: 84,
+    format: 88,
     maxR: 2,
     b: 0,
     lead: 4,
@@ -439,6 +439,7 @@ const ombre = {
     scope: 'tous',        // 'tous' = joueur + banquier, 'joueur' = main du joueur
     silent: true,         // mode silencieux : envoi seulement après double perte
     lossWindow: 6,        // nombre de prédictions suivies après une perte (6 par défaut)
+    lossInterval: 5,      // écart max toléré entre la perte de référence et la perte de confirmation
     resetOnWin: true,
     template: null,
     channels: [],

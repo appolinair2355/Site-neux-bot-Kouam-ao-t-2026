@@ -470,6 +470,10 @@ async function tick() {
       if (panel.requireCombo && !pred.combo) continue;
       if (pred.messages.length && !pred.resend) continue;
       pred.resend = false;
+      // combo confirmé sur une prédiction DÉJÀ envoyée : on modifie le
+      // message existant, on n'en envoie jamais un second (ça créait un
+      // doublon visible dans le canal).
+      if (pred.messages.length) { await update(pred); continue; }
       await send(pred);
     }
     if (!panel.certified.length) {
