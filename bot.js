@@ -938,28 +938,32 @@ async function broadcast(pred) {
     state.sendErrors[pred.strategy] = 'Aucun token Telegram configuré';
     return;
   }
-  // ── Mode d'activation SILENCIEUX ────────────────────────────────────────
-  // Quand il est actif il pilote seul l'envoi de la stratégie : rien ne part
-  // tant que le déclencheur (pertes / rattrapages) n'a pas ouvert la fenêtre,
-  // puis les prédictions à partir du jeu « déclencheur + N » sont envoyées
-  // dans le canal silencieux configuré, jusqu'au nombre demandé.
-  const silCfg = state.strategies[pred.strategy] || {};
-  if (silCfg.silenceMode) {
-    const view = silenceView(pred.strategy);
-    pred.silent = true;
+  // ── Mode d'activation SILENCIEUX (mode 2) ───────────────────────────────
+  // Totalement INDÉPENDANT du mode silencieux 1 : il possède ses propres
+  // réglages (silence*) et son propre canal. Il alimente le canal du mode
+  // d'activation silencieux et n'empêche JAMAIS le mode 1 de publier.
+  const stratCfg = state.strategies[pred.strategy] || {};
+  if (stratCfg.silenceMode) {
     pred.silenceMode = true;
-    pred.gate = view.label;
-    if (!silenceShouldSend(pred)) return;
-    const silIds = strategyChannels(pred.strategy, 'silence');
-    if (!silIds.length) { state.sendErrors[pred.strategy] = 'Aucun canal silencieux configuré'; return; }
-    await sendPrediction(pred, sender, silIds);
-    if (pred.messages.length) noteSilenceSent(pred.strategy);
     pred.gate = silenceView(pred.strategy).label;
-    return;
+    if (silenceShouldSend(pred)) {
+      const silIds = strategyChannels(pred.strategy, 'silence');
+      if (!silIds.length) state.sendErrors[pred.strategy] = 'Aucun canal silencieux configuré';
+      else {
+        await sendPrediction(pred, sender, silIds);
+        if (pred.messages.length) noteSilenceSent(pred.strategy);
+      }
+    }
+    pred.gate = silenceView(pred.strategy).label;
   }
 
-  // Une prédiction en mode silencieux est envoyée uniquement au canal silencieux.
-  // Elle ne fuit jamais vers le canal public avant le déclenchement double perte.
+  // ── Mode silencieux 1 (filtre pertes → publication publique) ─────────────
+  // Phase 1 : on attend la 1ʳᵉ perte (référence).
+  // Phase 2 : on mesure l'écart jusqu'à la perte suivante ; écart >= intervalle
+  //           MAX → nouvelle référence ; écart < intervalle MAX → confirmé, N = écart.
+  // Phase 3 : décompte silencieux ; la N-ᵉ prédiction depuis la confirmation
+  //           part dans le canal PUBLIC (une perte pendant le décompte
+  //           interrompt et redevient la référence).
   if (!canSend(pred.strategy)) {
     pred.silent = true;
     pred.gate = gateView(pred.strategy).label;

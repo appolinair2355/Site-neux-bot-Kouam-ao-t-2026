@@ -181,18 +181,22 @@ function setStrategyConfig(key, patch = {}) {
   delete next.token;
   if (patch.bilan !== undefined) next.bilan = !!patch.bilan;
   state.strategies[key] = next;
-  // un changement de réglage du déclencheur automatique repart d'un état propre
-  if (patch.autoEnabled !== undefined || patch.autoTrigger !== undefined
-      || patch.autoRattrapage !== undefined || patch.autoSkip !== undefined
-      || patch.autoSend !== undefined) resetAutoGate(key);
-  // un changement de réglage du mode silencieux repart aussi d'un état propre
-  if (patch.silenceMode !== undefined || patch.silenceTrigger !== undefined
-      || patch.silenceLossCount !== undefined || patch.silenceRatLevel !== undefined
-      || patch.silenceRatCount !== undefined || patch.silenceOffset !== undefined
-      || patch.silenceCount !== undefined || patch.silenceInterval !== undefined) resetSilenceGate(key);
-  // l'intervalle max est partagé par les deux modes : on repart d'un état propre
-  if (patch.lossInterval !== undefined || patch.lossTrigger !== undefined
-      || patch.lossWindow !== undefined) { resetGate(key); resetSilenceGate(key); }
+  // ⚠️ Chaque mode possède ses PROPRES réglages : on ne remet à zéro l'état
+  // d'un mode que si l'une de SES valeurs a réellement changé. Un simple
+  // enregistrement du panneau ne détruit donc plus la progression en cours.
+  const changed = (f) => JSON.stringify(cur[f]) !== JSON.stringify(next[f]);
+  if (['autoEnabled', 'autoTrigger', 'autoRattrapage', 'autoSkip', 'autoSend'].some(changed)) {
+    resetAutoGate(key);
+  }
+  // mode d'activation silencieux (mode 2) — réglages `silence*` uniquement
+  if (['silenceMode', 'silenceTrigger', 'silenceLossCount', 'silenceRatLevel',
+       'silenceRatCount', 'silenceOffset', 'silenceCount', 'silenceInterval'].some(changed)) {
+    resetSilenceGate(key);
+  }
+  // mode silencieux 1 (filtre pertes) — réglages `loss*` uniquement
+  if (['silent', 'lossInterval', 'lossTrigger', 'lossWindow'].some(changed)) {
+    resetGate(key);
+  }
   if (key === 'costume') pullCostume();
   return next;
 }
@@ -526,10 +530,9 @@ function autoView(key) {
 //      silencieux configuré (pas de décompte) ;
 //   4) après `silenceCount` prédictions envoyées, la fenêtre repart à zéro.
 function silenceCfg(cfg) {
-  const inherited = Math.max(0, Math.min(20, parseInt(cfg && cfg.lossInterval, 10) || 0));
-  const own = cfg && cfg.silenceInterval !== undefined && cfg.silenceInterval !== null
-    ? Math.max(0, Math.min(20, parseInt(cfg.silenceInterval, 10) || 0))
-    : null;
+  // ⚠️ Réglages STRICTEMENT indépendants du mode silencieux 1 : aucun héritage
+  // de `lossInterval` / `lossTrigger` / `lossWindow`.
+  const own = Math.max(0, Math.min(20, parseInt(cfg && cfg.silenceInterval, 10) || 0));
   return {
     enabled: !!(cfg && cfg.silenceMode),
     trigger: cfg && cfg.silenceTrigger === 'rattrapage' ? 'rattrapage' : 'perte',
@@ -537,7 +540,7 @@ function silenceCfg(cfg) {
     ratLevel: Math.max(1, Math.min(9, parseInt(cfg && cfg.silenceRatLevel, 10) || 2)),
     ratCount: Math.max(1, Math.min(5, parseInt(cfg && cfg.silenceRatCount, 10) || 1)),
     offset: Math.max(0, Math.min(99, parseInt(cfg && cfg.silenceOffset, 10) || 0)),
-    interval: own === null ? inherited : own,
+    interval: own,
     count: Math.max(1, Math.min(50, parseInt(cfg && cfg.silenceCount, 10) || 1)),
   };
 }

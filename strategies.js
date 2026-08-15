@@ -497,7 +497,7 @@ function defaultsFor(key) {
     lossWindow: 3,
     lossTrigger: 2,     // nb de pertes avant d'ouvrir l'envoi (1 = dès la 1ʳᵉ perte)
     lossInterval: 4,    // intervalle MAX (écart) entre la perte de référence et la perte de confirmation
-    autoUnlockMin: 10,  // déblocage automatique après 10 minutes de blocage
+    autoUnlockMin: 0,   // 0 = pas de déblocage auto (le mode silencieux 1 suit strictement ses phases)
     resetOnWin: true,
     sendOnlyNext: false, // n'envoyer que la prédiction suivante après confirmation
     // --- Déclencheur automatique (commun à TOUTES les stratégies) -----------
