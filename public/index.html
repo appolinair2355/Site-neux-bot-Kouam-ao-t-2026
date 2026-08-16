@@ -150,9 +150,43 @@
       .hero, .two-col { grid-template-columns: 1fr; } .stat-grid { grid-template-columns: repeat(2,1fr); }
       .three-col { grid-template-columns: 1fr; } .shell { padding: 0 15px 52px; } .hero { padding-top: 40px; }
     }
+    /* ── Écran de démarrage (barre orange puis image), avant le tableau de bord ── */
+    #splash {
+      position: fixed; inset: 0; z-index: 999;
+      background: #05070d;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer;
+    }
+    #splash.leaving { animation: splashOut 700ms ease forwards; }
+    #loadStage { display: flex; flex-direction: column; align-items: center; gap: 16px; width: 240px; transition: opacity 350ms ease; }
+    #loadStage.hidden-stage { opacity: 0; pointer-events: none; position: absolute; }
+    .bar-track { width: 100%; height: 8px; border-radius: 999px; background: rgba(255,255,255,.12); overflow: hidden; }
+    .bar-fill { height: 100%; width: 0%; border-radius: 999px; background: linear-gradient(90deg, #ff7a00, #ffb347); box-shadow: 0 0 14px rgba(255,138,0,.6); }
+    .bar-fill.done { background: linear-gradient(90deg, #35e08a, #6bf0ac); box-shadow: 0 0 14px rgba(53,224,138,.55); }
+    #loadPct { font-size: 15px; color: #cfd4e2; letter-spacing: .03em; font-variant-numeric: tabular-nums; }
+    #loadLabel { font-size: 12px; color: #7c8398; letter-spacing: .05em; text-transform: uppercase; }
+    #imgStage { position: absolute; inset: 0; opacity: 0; transition: opacity 500ms ease; }
+    #imgStage.visible { opacity: 1; }
+    #imgStage img { width: 100%; height: 100%; object-fit: cover; animation: splashZoom 2600ms ease-out forwards; }
+    #imgStage .tap { position: absolute; bottom: 26px; left: 0; right: 0; text-align: center; color: #cfd4e2; font-size: 12px; letter-spacing: .04em; opacity: 0; animation: tapFade 900ms ease forwards; animation-delay: 500ms; }
+    @keyframes splashZoom { 0% { transform: scale(1.08); filter: brightness(.55) saturate(1.05); } 60% { transform: scale(1.02); filter: brightness(1) saturate(1.05); } 100% { transform: scale(1); filter: brightness(1) saturate(1.05); } }
+    @keyframes tapFade { from { opacity: 0; } to { opacity: .75; } }
+    @keyframes splashOut { to { opacity: 0; visibility: hidden; pointer-events: none; } }
+    body.no-scroll { overflow: hidden; }
   </style>
 </head>
-<body>
+<body class="no-scroll">
+  <div id="splash" onclick="closeSplash()">
+    <div id="loadStage">
+      <div class="bar-track"><div class="bar-fill" id="barFillEl"></div></div>
+      <div id="loadPct">0 %</div>
+      <div id="loadLabel">Téléchargement…</div>
+    </div>
+    <div id="imgStage">
+      <img src="/splash.jpg" alt="1XBET + Baccara + IA">
+      <div class="tap">Touchez pour continuer</div>
+    </div>
+  </div>
   <header>
     <div class="topbar">
       <a class="brand" href="#/" style="text-decoration:none">
@@ -174,6 +208,54 @@
   </header>
   <main id="app" class="shell"><div class="loading">Chargement du centre de contrôle...</div></main>
   <script>
+    // écran de démarrage : barre orange 0→100 %, puis image, puis fermeture
+    // (dès que l'animation ET le premier chargement des données sont finis).
+    let firstRouteDone = false;
+    function closeSplash() {
+      const s = document.getElementById('splash');
+      if (!s) return;
+      s.classList.add('leaving');
+      s.addEventListener('animationend', function done(e) {
+        if (e.animationName !== 'splashOut') return;
+        s.removeEventListener('animationend', done);
+        s.style.display = 'none';
+      });
+      document.body.classList.remove('no-scroll');
+    }
+    (function () {
+      const s = document.getElementById('splash');
+      if (!s) return;
+      const pctEl = document.getElementById('loadPct');
+      const labelEl = document.getElementById('loadLabel');
+      const barFillEl = document.getElementById('barFillEl');
+      const loadStage = document.getElementById('loadStage');
+      const imgStage = document.getElementById('imgStage');
+      const DURATION = 1600;
+      const start = performance.now();
+      function reveal() {
+        loadStage.classList.add('hidden-stage');
+        imgStage.classList.add('visible');
+        setTimeout(closeSplash, 2600);
+      }
+      function tick(now) {
+        const pct = Math.min(100, Math.round(((now - start) / DURATION) * 100));
+        pctEl.textContent = pct + ' %';
+        barFillEl.style.width = pct + '%';
+        if (pct < 100) {
+          requestAnimationFrame(tick);
+        } else {
+          barFillEl.classList.add('done');
+          labelEl.textContent = 'Terminé ✓';
+          // on attend que le premier chargement des données du tableau de bord
+          // soit fini avant de révéler l'image, pour ne rien montrer de cassé
+          if (firstRouteDone) setTimeout(reveal, 300);
+          else { const wait = setInterval(() => { if (firstRouteDone) { clearInterval(wait); reveal(); } }, 120); }
+        }
+      }
+      requestAnimationFrame(tick);
+      setTimeout(closeSplash, 8000); // filet de sécurité
+    })();
+
     let snapshot = null;
     const $ = (s, root = document) => root.querySelector(s);
     const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -618,6 +700,7 @@
         else home();
       } catch(e) { $('#app').innerHTML = `<div class="notice error">${esc(e.message)}</div>`; }
       injectBack();
+      firstRouteDone = true;
     }
     new MutationObserver(() => injectBack()).observe($('#app'), { childList: true });
     window.addEventListener('hashchange', route); route(); setInterval(() => { if (!location.hash || location.hash === '#/') route(); }, 8000);
