@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connexion — Baccara Bot</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: #0f1115; color: #e8e8ec; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: 24px;
+  }
+  .card {
+    width: 100%; max-width: 380px; background: #171a21; border: 1px solid #262b36;
+    border-radius: 14px; padding: 28px 24px; box-shadow: 0 10px 40px rgba(0,0,0,.35);
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.sub { color: #9098a8; font-size: 13px; margin: 0 0 22px; }
+  label { display: block; font-size: 13px; color: #b6bcc9; margin: 14px 0 6px; }
+  input {
+    width: 100%; padding: 11px 12px; border-radius: 9px; border: 1px solid #2c3140;
+    background: #10131a; color: #e8e8ec; font-size: 14px; outline: none;
+  }
+  input:focus { border-color: #5b7cff; }
+  button {
+    width: 100%; margin-top: 20px; padding: 12px; border: none; border-radius: 9px;
+    background: #5b7cff; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  button:hover { background: #4a6bee; }
+  button.ghost { background: transparent; color: #9098a8; margin-top: 10px; text-decoration: underline; font-weight: 400; }
+  .msg { margin-top: 14px; font-size: 13px; padding: 10px 12px; border-radius: 8px; display: none; }
+  .msg.err { display: block; background: #3a1a1f; color: #ff9aa6; }
+  .msg.ok { display: block; background: #17301f; color: #8ef0a8; }
+  .switch { text-align: center; margin-top: 16px; font-size: 13px; color: #9098a8; }
+  .switch a { color: #5b7cff; cursor: pointer; text-decoration: none; }
+  .hidden { display: none !important; }
+
+  /* ── Écran d'intro animé (avant connexion) : chargement puis image ──── */
+  #splash {
+    position: fixed; inset: 0; z-index: 999;
+    background: #05070d;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+  }
+  #splash.leaving { animation: splashOut 700ms ease forwards; }
+
+  /* étape 1 : rotation + pourcentage (simule un téléchargement) */
+  #loadStage {
+    display: flex; flex-direction: column; align-items: center; gap: 18px;
+    transition: opacity 350ms ease;
+  }
+  #loadStage.hidden-stage { opacity: 0; pointer-events: none; position: absolute; }
+  .spinner {
+    width: 62px; height: 62px; border-radius: 50%;
+    border: 4px solid rgba(255,255,255,.14); border-top-color: #5b7cff;
+    animation: spin 850ms linear infinite;
+  }
+  .spinner.done {
+    animation: none; border-color: #35e08a; border-top-color: #35e08a;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .spinner.done::after {
+    content: '✓'; color: #35e08a; font-size: 26px; font-weight: 700;
+  }
+  #loadPct { font-size: 15px; color: #cfd4e2; letter-spacing: .03em; font-variant-numeric: tabular-nums; }
+  #loadLabel { font-size: 12px; color: #7c8398; letter-spacing: .05em; text-transform: uppercase; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* étape 2 : l'image, révélée une fois le "téléchargement" terminé */
+  #imgStage { position: absolute; inset: 0; opacity: 0; transition: opacity 500ms ease; }
+  #imgStage.visible { opacity: 1; }
+  #imgStage img {
+    width: 100%; height: 100%; object-fit: cover;
+    animation: splashZoom 2600ms ease-out forwards;
+  }
+  #imgStage .tap {
+    position: absolute; bottom: 26px; left: 0; right: 0; text-align: center;
+    color: #cfd4e2; font-size: 12px; letter-spacing: .04em;
+    opacity: 0; animation: tapFade 900ms ease forwards; animation-delay: 500ms;
+  }
+  @keyframes splashZoom {
+    0%   { transform: scale(1.08); filter: brightness(.55) saturate(1.05); }
+    60%  { transform: scale(1.02); filter: brightness(1) saturate(1.05); }
+    100% { transform: scale(1);    filter: brightness(1) saturate(1.05); }
+  }
+  @keyframes tapFade { from { opacity: 0; } to { opacity: .75; } }
+  @keyframes splashOut {
+    to { opacity: 0; visibility: hidden; pointer-events: none; }
+  }
+  body.no-scroll { overflow: hidden; }
+</style>
+</head>
+<body class="no-scroll">
+  <div id="splash" onclick="closeSplash()">
+    <div id="loadStage">
+      <div class="spinner" id="spinnerEl"></div>
+      <div id="loadPct">0 %</div>
+      <div id="loadLabel">Téléchargement…</div>
+    </div>
+    <div id="imgStage">
+      <img src="/splash.jpg" alt="1XBET + Baccara + IA">
+      <div class="tap">Touchez pour continuer</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div id="loginView">
+      <h1>🔒 Connexion</h1>
+      <p class="sub">Accès au tableau de bord — identifiants requis.</p>
+      <label>Identifiant</label>
+      <input id="loginId" autocomplete="username" placeholder="sossoukouam">
+      <label>Mot de passe</label>
+      <input id="loginPwd" type="password" autocomplete="current-password" placeholder="••••••••">
+      <button onclick="doLogin()">Se connecter</button>
+      <div id="loginMsg" class="msg"></div>
+      <div class="switch">Pas de compte ? <a onclick="showView('signup')">Créer un compte</a></div>
+    </div>
+
+    <div id="signupView" class="hidden">
+      <h1>✉️ Créer un compte</h1>
+      <p class="sub">Adresse Gmail requise — un code de confirmation vous sera envoyé (expire en 15 min).</p>
+      <label>Email Gmail</label>
+      <input id="suEmail" type="email" autocomplete="email" placeholder="vous@gmail.com">
+      <label>Mot de passe</label>
+      <input id="suPwd" type="password" autocomplete="new-password" placeholder="6 caractères minimum">
+      <label>Confirmation du mot de passe</label>
+      <input id="suPwd2" type="password" autocomplete="new-password" placeholder="Répéter le mot de passe">
+      <button onclick="doSignup()">Créer le compte</button>
+      <div id="signupMsg" class="msg"></div>
+      <div class="switch">Déjà un compte ? <a onclick="showView('login')">Se connecter</a></div>
+    </div>
+
+    <div id="verifyView" class="hidden">
+      <h1>🔑 Code de confirmation</h1>
+      <p class="sub">Un code à 6 chiffres a été envoyé à <b id="verifyEmailLabel"></b>. Il expire dans 15 minutes.</p>
+      <label>Code reçu</label>
+      <input id="verifyCode" inputmode="numeric" maxlength="6" placeholder="123456">
+      <button onclick="doVerify()">Valider</button>
+      <button class="ghost" onclick="doResend()">Renvoyer un code</button>
+      <div id="verifyMsg" class="msg"></div>
+    </div>
+  </div>
+
+<script>
+let pendingEmail = '';
+
+// écran d'intro : rotation + pourcentage (« téléchargement »), puis image,
+// puis fermeture (au clic, ou automatiquement).
+function closeSplash() {
+  const s = document.getElementById('splash');
+  if (!s) return;
+  s.classList.add('leaving');
+  s.addEventListener('animationend', function done(e) {
+    if (e.animationName !== 'splashOut') return;
+    s.removeEventListener('animationend', done);
+    s.style.display = 'none';
+  });
+  document.body.classList.remove('no-scroll');
+}
+(function () {
+  const s = document.getElementById('splash');
+  if (!s) return;
+  const pctEl = document.getElementById('loadPct');
+  const labelEl = document.getElementById('loadLabel');
+  const spinnerEl = document.getElementById('spinnerEl');
+  const loadStage = document.getElementById('loadStage');
+  const imgStage = document.getElementById('imgStage');
+
+  const DURATION = 1600; // durée du "téléchargement" (ms)
+  const start = performance.now();
+
+  function tick(now) {
+    const pct = Math.min(100, Math.round(((now - start) / DURATION) * 100));
+    pctEl.textContent = pct + ' %';
+    if (pct < 100) {
+      requestAnimationFrame(tick);
+    } else {
+      // téléchargement terminé : coche verte, puis on révèle l'image
+      spinnerEl.classList.add('done');
+      labelEl.textContent = 'Terminé ✓';
+      setTimeout(() => {
+        loadStage.classList.add('hidden-stage');
+        imgStage.classList.add('visible');
+        setTimeout(closeSplash, 2600); // temps d'affichage de l'image avant fermeture
+      }, 450);
+    }
+  }
+  requestAnimationFrame(tick);
+
+  setTimeout(closeSplash, 6500); // filet de sécurité si l'animation ne se déclenche pas
+})();
+
+function showView(name) {
+  document.getElementById('loginView').classList.toggle('hidden', name !== 'login');
+  document.getElementById('signupView').classList.toggle('hidden', name !== 'signup');
+  document.getElementById('verifyView').classList.toggle('hidden', name !== 'verify');
+}
+
+function showMsg(id, text, ok) {
+  const el = document.getElementById(id);
+  el.textContent = text;
+  el.className = 'msg ' + (ok ? 'ok' : 'err');
+}
+
+async function post(url, body) {
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    credentials: 'same-origin',
+  });
+  let data = {};
+  try { data = await r.json(); } catch (_) {}
+  return { ok: r.ok, data };
+}
+
+async function doLogin() {
+  const identifier = document.getElementById('loginId').value.trim();
+  const password = document.getElementById('loginPwd').value;
+  if (!identifier || !password) return showMsg('loginMsg', 'Identifiant et mot de passe requis.', false);
+  const { ok, data } = await post('/api/auth/login', { identifier, password });
+  if (ok && data.ok) {
+    window.location.href = '/';
+    return;
+  }
+  if (data.needsVerification) {
+    pendingEmail = data.email;
+    document.getElementById('verifyEmailLabel').textContent = pendingEmail;
+    showView('verify');
+    return;
+  }
+  if (data.unknown) {
+    showMsg('loginMsg', "Identifiants inconnus — vous pouvez créer un compte ci-dessous.", false);
+    return;
+  }
+  showMsg('loginMsg', data.error || 'Identifiants incorrects.', false);
+}
+
+async function doSignup() {
+  const email = document.getElementById('suEmail').value.trim();
+  const password = document.getElementById('suPwd').value;
+  const confirmPassword = document.getElementById('suPwd2').value;
+  if (!email || !password || !confirmPassword) return showMsg('signupMsg', 'Tous les champs sont requis.', false);
+  const { data } = await post('/api/auth/signup', { email, password, confirmPassword });
+  if (data.ok) {
+    pendingEmail = data.email;
+    document.getElementById('verifyEmailLabel').textContent = pendingEmail;
+    showView('verify');
+    return;
+  }
+  showMsg('signupMsg', data.error || "Erreur lors de la création du compte.", false);
+}
+
+async function doVerify() {
+  const code = document.getElementById('verifyCode').value.trim();
+  if (!code) return showMsg('verifyMsg', 'Code requis.', false);
+  const { ok, data } = await post('/api/auth/verify', { email: pendingEmail, code });
+  if (ok && data.ok) {
+    window.location.href = '/';
+    return;
+  }
+  showMsg('verifyMsg', data.error || 'Code incorrect.', false);
+}
+
+async function doResend() {
+  const { data } = await post('/api/auth/resend', { email: pendingEmail });
+  showMsg('verifyMsg', data.ok ? 'Nouveau code envoyé.' : (data.error || "Échec de l'envoi."), !!data.ok);
+}
+</script>
+</body>
+</html>
