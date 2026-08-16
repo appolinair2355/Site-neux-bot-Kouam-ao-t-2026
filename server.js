@@ -809,12 +809,30 @@ app.get('/api/diagnostics/channels', async (req, res) => {
   res.json({ bot, strategies: out });
 });
 
-app.listen(config.PORT, '0.0.0.0', () => {
-  console.log('Tableau de bord sur le port ' + config.PORT);
-  startLoop().then(() => {
-    if (aiAuto.auto.enabled) aiAuto.start(persist);
-    console.log('🤖 Analyseur IA temps réel démarré (clé environnement : ' + (ai.keyLooksValid() ? 'oui' : 'non configurée') + ')');
-  }).catch((error) => {
-    console.error('Initialisation impossible :', error.message);
+// ---------------------------------------------------------------------------
+// Démarrage : on connecte la base et on sème le compte admin AVANT d'ouvrir
+// le port. Sans ça, une tentative de connexion arrivant pendant le réveil du
+// service (Render gratuit se met en veille) tombe sur "Base de données non
+// connectée", ou pire, sur "Identifiants inconnus" si la base vient tout
+// juste de répondre mais que le compte admin n'a pas encore été semé.
+// ---------------------------------------------------------------------------
+(async () => {
+  const s = await db.connect();
+  console.log(s.ready ? '🗄️ Base de données connectée' : `🗄️ Base non connectée : ${s.error}`);
+  if (s.ready) {
+    await auth.ensureAdminSeed();
+    console.log('🔐 Compte admin vérifié/créé (' + auth.ADMIN_IDENTIFIER + ')');
+  } else {
+    console.error('⚠️ Le compte admin ne peut pas être créé tant que la base n\'est pas connectée — vérifiez DATABASE_URL sur Render.');
+  }
+
+  app.listen(config.PORT, '0.0.0.0', () => {
+    console.log('Tableau de bord sur le port ' + config.PORT);
+    startLoop().then(() => {
+      if (aiAuto.auto.enabled) aiAuto.start(persist);
+      console.log('🤖 Analyseur IA temps réel démarré (clé environnement : ' + (ai.keyLooksValid() ? 'oui' : 'non configurée') + ')');
+    }).catch((error) => {
+      console.error('Initialisation impossible :', error.message);
+    });
   });
-});
+})();
