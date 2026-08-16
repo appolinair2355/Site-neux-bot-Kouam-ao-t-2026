@@ -36,6 +36,16 @@ if (Array.isArray(saved.aiAnalyses)) state.aiAnalyses = saved.aiAnalyses;
 if (Array.isArray(saved.aiStrategies)) state.aiStrategies = saved.aiStrategies;
 initStrategies();
 
+// CORRECTIF : quand `persist()` est appelée alors que la base n'est pas
+// joignable (coupure, veille Render Free…), l'écriture DB est silencieusement
+// SAUTÉE — sans ce drapeau, rien ne se souvenait qu'un changement (ex. nouvel
+// ID de canal) restait en attente. Résultat observé : à la reconnexion,
+// `ensureDb()` relisait la DB (ancienne valeur) VERS l'état local et écrasait
+// le changement qui n'avait jamais pu être enregistré — sur le moment ET
+// après un redémarrage, puisque la DB (jamais mise à jour) reste la source
+// de vérité au prochain démarrage.
+let dbDirty = false;
+
 function persist() {
   store.patch({
     botToken: state.botToken,
@@ -74,6 +84,12 @@ function persist() {
       const cfg = state.strategies[def.key];
       if (cfg) db.saveStrategy(def.key, def.name, cfg);
     }
+    dbDirty = false;
+  } else {
+    // la base n'est pas joignable MAINTENANT : le changement est bien dans
+    // data.json et en mémoire, mais pas encore en base. On le marque « en
+    // attente » pour le pousser dès que la connexion revient (voir ensureDb).
+    dbDirty = true;
   }
 }
 
@@ -536,7 +552,7 @@ function wire(b) {
       lines.push(`• Perte de référence : #N${g.since ?? '—'}`);
       lines.push(
         g.lossInterval
-          ? `• Écart mesuré depuis cette perte : ${g.used} (confirmation si écart < ${g.lossInterval})`
+          ? `• Écart mesuré depuis cette perte : ${g.used} (confirmation si écart ≤ ${g.lossInterval})`
           : `• Écart mesuré depuis cette perte : ${g.used}/${g.lossWindow} (fenêtre max)`
       );
       lines.push(`• Pertes confirmées : ${g.losses}/${g.lossTrigger} nécessaire(s)`);
@@ -1178,7 +1194,7 @@ async function broadcast(pred) {
   // stratégie « ombre » (voir strategies.js / predictor.js).
   // Phase 1 : on attend la 1ʳᵉ perte (référence).
   // Phase 2 : on mesure l'écart jusqu'à la perte suivante ; écart >= intervalle
-  //           MAX → nouvelle référence ; écart < intervalle MAX → confirmé, N = écart.
+  //           MAX → retour phase 1 ; écart ≤ intervalle MAX → confirmé, N = écart.
   // Phase 3 : décompte silencieux ; la N-ᵉ prédiction depuis la confirmation
   //           part dans le canal PUBLIC (une perte pendant le décompte
   //           interrompt et redevient la référence).
@@ -1215,26 +1231,15 @@ async function broadcast(pred) {
 // ---------------------------------------------------------------------------
 // Annonce publique de la CONFIRMATION du filtre « double perte » (stratégie
 // « ombre ») : dès que la 2ᵉ perte confirme la mesure (phase 2 → phase 3),
-// on annonce sur le canal public la POSITION qu'occupera la prochaine
-// prédiction publique — avant même le début du décompte silencieux.
+// CHANGEMENT : cette confirmation n'est PLUS envoyée dans le canal public.
+// L'entrée créée par pushAnnouncement() (voir predictor.js) sert UNIQUEMENT
+// de repère interne pour que la phase 3 se souvienne de la position à
+// atteindre, et pour l'affichage admin via /ombreannonces. Seule la vraie
+// prédiction, une fois la position atteinte, part réellement dans le canal
+// public (voir broadcast()/fulfillAnnouncement()). Cette fonction et son
+// branchement (setOnConfirm) sont donc désormais désactivés.
 function ordinalFr(n) {
   return n === 1 ? '1ʳᵉ' : `${n}ᵉ`;
-}
-
-async function announceConfirm(key, info) {
-  const sender = senderFor();
-  if (!sender) return;
-  const ids = strategyChannels(key); // canaux publics de la stratégie
-  if (!ids.length) return;
-  const cfg = state.strategies[key];
-  const maxR = cfg && cfg.maxR != null ? cfg.maxR : null;
-  const text =
-    `🔔 La prochaine après le jeu perdu #N${info.refNumber} ` +
-    `sera la ${ordinalFr(info.position)} à venir` +
-    `${maxR != null ? ` · Dogon +${maxR}` : ''}.`;
-  for (const id of [...new Set(ids)]) {
-    try { await sender.sendMessage(id, text); } catch (_) {}
-  }
 }
 
 async function sendPrediction(pred, sender, ids) {
@@ -1276,8 +1281,18 @@ async function ensureDb() {
   if (s.ready) {
     console.log('🗄️ Base de données reconnectée');
     await auth.ensureAdminSeed();
-    const r = await applyDbConfigs();
-    console.log('🧠 Configurations relues : ' + ((r.loaded || []).join(', ') || 'aucune'));
+    // CORRECTIF : si des changements locaux sont restés en attente pendant la
+    // coupure (dbDirty), on les POUSSE d'abord vers la base — sinon
+    // applyDbConfigs() relirait l'ancienne valeur encore en base et écraserait
+    // silencieusement le changement (ex. un ID de canal tout juste modifié).
+    if (dbDirty) {
+      await saveConfigsToDb();
+      dbDirty = false;
+      console.log('🧠 Changements en attente poussés vers la base (dbDirty)');
+    } else {
+      const r = await applyDbConfigs();
+      console.log('🧠 Configurations relues : ' + ((r.loaded || []).join(', ') || 'aucune'));
+    }
   }
 }
 
@@ -1309,8 +1324,15 @@ async function tick() {
     // en attente, OU déjà résolue en silence) et on l'envoie maintenant que
     // c'est autorisé — avec son résultat réel si elle est déjà terminée.
     if (canSend('ombre')) {
+      // CORRECTIF : exclure les prédictions « annulé » (tuées par un reset de
+      // sabot en cours de décompte, voir resetShoe()). Sans ce filtre, dès que
+      // la position N était enfin prête, le bot pouvait ressusciter une vieille
+      // prédiction annulée d'un sabot précédent (target obsolète) au lieu de
+      // laisser la vraie prédiction « ombre » du sabot courant partir — ce qui
+      // désynchronisait complètement la position réellement envoyée par
+      // rapport à celle annoncée dans /ombreannonces.
       const stuck = state.predictions
-        .filter((p) => p.strategy === 'ombre' && (!p.messages || !p.messages.length))
+        .filter((p) => p.strategy === 'ombre' && p.status !== 'annulé' && (!p.messages || !p.messages.length))
         .sort((a, b) => a.target - b.target)[0];
       if (stuck) await broadcast(stuck);
     }
@@ -1459,7 +1481,9 @@ async function startLoop() {
   setOnGateChange((key, g) => { if (db.ready) db.saveGate(key, g); });
   setOnAnnouncementSave((entry) => { if (db.ready) db.saveAnnouncement(entry); });
   setOnAnnouncementDelete((id) => { if (db.ready) db.deleteAnnouncement(id); });
-  setOnConfirm((key, info) => { announceConfirm(key, info).catch(() => {}); });
+  // setOnConfirm : volontairement NON branché — la confirmation de position
+  // ne doit plus jamais partir dans le canal public (voir commentaire au-dessus
+  // de ordinalFr()). L'entrée reste purement interne (pushAnnouncement).
   const s = await db.connect();
   console.log(s.ready ? '🗄️ Base de données connectée' : `🗄️ Base non connectée : ${s.error}`);
   if (s.ready) {

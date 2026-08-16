@@ -312,13 +312,11 @@ function restoreAnnouncements(list) {
 
 // ---------------------------------------------------------------------------
 // Historique des annonces de position (une entrée par confirmation) :
-//   'en_attente' → l'annonce a été publiée, on attend l'envoi de la prédiction
-//                  correspondante (position N) ;
+//   'en_attente' → l'annonce a été publiée, la phase 3 compte les prédictions
+//                  « ombre » (gagné ou perdu, sans distinction) jusqu'à la
+//                  position annoncée, sans jamais s'interrompre ;
 //   'envoyee'    → la prédiction de la position annoncée est réellement partie
 //                  dans le canal public (voir fulfillAnnouncement).
-// Si une perte interrompt le décompte avant l'envoi, l'entrée en attente est
-// simplement retirée de l'historique (voir cancelPendingAnnouncement) : le
-// bouton annonce ne montre que ce qui a réellement été publié ou est en cours.
 const ANNOUNCEMENTS_MAX = 200; // taille max conservée en mémoire
 let announcementSeq = 0;
 
@@ -438,8 +436,8 @@ function windowSize(cfg) {
 // intervalle MAXIMUM (écart, en nombre de prédictions terminées) autorisé entre
 // la perte de référence et la perte suivante pour que celle-ci CONFIRME.
 // Intervalle configuré 0-4 (max = 4) :
-//   • écart < 4  → perte confirmée (N = écart) ;
-//   • écart >= 4 → perte trop loin : elle devient la NOUVELLE référence.
+//   • écart ≤ 4  → perte confirmée (N = écart) ;
+//   • écart > 4  → perte trop loin : retour intégral en phase 1 (aucune référence).
 // 0 = aucune limite (toute perte suivante confirme).
 function lossIntervalMax(cfg) {
   return Math.max(0, Math.min(20, parseInt(cfg && cfg.lossInterval, 10) || 0));
@@ -471,82 +469,114 @@ function noteClosed(pred) {
 function noteClosedInner(pred) {
   const cfg = state.strategies[pred.strategy];
   if (!cfg) return;
+  // le déclencheur automatique « perte/rattrapage + N » est générique et
+  // s'applique à TOUTES les stratégies (indépendant du filtre ci-dessous).
   noteClosedAuto(pred);
+
+  // ── À PARTIR D'ICI : réservé EXCLUSIVEMENT à la stratégie « ombre » ──────
+  // Le filtre « double perte » (phases 1→2→3) et les annonces de position
+  // (« 🔔 La prochaine après... ») ne concernent QUE « ombre ». Avant ce
+  // garde-fou, la machinerie tournait pour toutes les stratégies : une autre
+  // stratégie accumulant 2 pertes dans sa fenêtre pouvait déclencher elle
+  // aussi une annonce publique et polluer son propre canal — un comportement
+  // jamais voulu, puisque `canSend()` n'utilise ce filtre que pour « ombre ».
+  if (pred.strategy !== 'ombre') return;
+
   const g = gate(pred.strategy);
   const win = pred.status === 'gagné';
-  const max = windowSize(cfg);
 
   // nombre de pertes nécessaires avant d'ouvrir l'envoi (1 = envoi dès la 1ʳᵉ perte)
   const need = Math.max(1, Math.min(5, parseInt(cfg.lossTrigger, 10) || 2));
   const maxGap = lossIntervalMax(cfg);
 
   // --- envoi déjà ouvert (prédiction publiée) -----------------------------
-  if (g.armed) {
-    if (win) { if (cfg.resetOnWin !== false) resetGate(pred.strategy); return; }
-    // perte : elle devient la nouvelle référence → retour phase 2
-    startWindow(pred.strategy, pred.target);
-    return;
-  }
+  if (g.armed) { phaseArmed(pred, g, cfg, win); return; }
 
-  // --- phase 3 : décompte silencieux vers la position N -------------------
-  if (g.counting) {
-    g.seen += 1;
-    if (!win) {
-      // interruption : la perte devient la nouvelle référence → phase 2 ;
-      // l'annonce en attente ne se réalisera jamais, on la retire de l'historique.
-      cancelPendingAnnouncement(pred.strategy);
-      startWindow(pred.strategy, pred.target);
-      return;
-    }
-    if (g.seen >= Math.max(1, g.need) - 1) {
-      g.counting = false;
-      g.armed = true;
-      g.blockedSince = null;
-    }
-    return;
-  }
+  // --- phase 3 : décompte silencieux vers la position N, ÉTANCHE aux ------
+  //     autres phases — elle ne fait qu'ATTENDRE, sans jamais s'interrompre
+  //     sur une perte. Elle compte toute prédiction « ombre » qui se termine
+  //     réellement (gagné OU perdu) ; une prédiction annulée (reset de sabot)
+  //     n'appelle jamais noteClosed() donc ne la fait pas dériver non plus.
+  if (g.counting) { phase3Counting(g); return; }
 
   // --- phase 1 : aucune référence, on attend la 1ʳᵉ perte ----------------
-  if (g.losses === 0) {
-    if (!win) {
-      startWindow(pred.strategy, pred.target);
-      // avec lossTrigger = 1 la première perte suffit : on ouvre l'envoi
-      if (need <= 1) {
-        g.armed = true; g.need = 1; g.blockedSince = null;
-        const entry = pushAnnouncement(pred.strategy, { position: 1, refNumber: pred.hitNumber ?? pred.target });
-        emitConfirm(pred.strategy, entry);
-      }
-    }
-    return;
-  }
+  if (g.losses === 0) { phase1Waiting(pred, g, win, need); return; }
 
-  // --- phase 2 : fenêtre ouverte, on mesure l'écart ----------------------
+  // --- phase 2 : fenêtre ouverte, on mesure l'écart jusqu'à confirmation --
+  phase2Measuring(pred, g, win, need, maxGap);
+}
+
+// phase « envoi actif » : une prédiction gagnée referme le filtre (si
+// resetOnWin), une prédiction perdue redevient directement la nouvelle
+// référence (retour en phase 2 sans repasser par la phase 1).
+function phaseArmed(pred, g, cfg, win) {
+  if (win) { if (cfg.resetOnWin !== false) resetGate(pred.strategy); return; }
+  startWindow(pred.strategy, pred.target);
+}
+
+// phase 3 : ÉTANCHE et INDÉPENDANTE des phases 1/2 — une fois l'annonce
+// publiée, elle ne fait qu'une chose : compter les prédictions « ombre » qui
+// se terminent (gagné OU perdu, peu importe) jusqu'à atteindre la position
+// annoncée (g.need), puis exécuter l'envoi public. Rien ne l'interrompt ni
+// ne l'annule pendant l'attente — une perte pendant le décompte est comptée
+// normalement comme n'importe quelle autre prédiction, elle ne relance pas
+// une nouvelle référence et ne retire pas l'annonce en cours.
+function phase3Counting(g) {
+  g.seen += 1;
+  if (g.seen >= Math.max(1, g.need) - 1) {
+    g.counting = false;
+    g.armed = true;
+    g.blockedSince = null;
+  }
+}
+
+// phase 1 : première perte rencontrée → elle devient la référence et ouvre
+// la fenêtre de mesure (phase 2). Avec lossTrigger=1, cette perte seule
+// suffit à confirmer : on passe directement en position 1 (phase 3 triviale).
+function phase1Waiting(pred, g, win, need) {
+  if (win) return;
+  startWindow(pred.strategy, pred.target);
+  if (need <= 1) {
+    g.armed = true; g.need = 1; g.blockedSince = null;
+    const entry = pushAnnouncement(pred.strategy, { position: 1, refNumber: pred.hitNumber ?? pred.target });
+    emitConfirm(pred.strategy, entry);
+  }
+}
+
+// phase 2 : mesure l'écart (en prédictions terminées) entre la perte de
+// référence et la perte suivante. Écart STRICTEMENT supérieur à l'intervalle
+// configuré (gain OU perte, peu importe) → retour COMPLET en phase 1 (aucune
+// référence, gate vidée) : on n'essaie plus de récupérer ce jeu comme
+// nouvelle référence, on attend une toute nouvelle 1ʳᵉ perte depuis zéro.
+// Un écart ÉGAL à l'intervalle reste valide (pas de retour en phase 1) : si
+// c'est une perte, elle peut confirmer normalement et faire basculer en
+// phase 3. Sinon, dès que `need` pertes sont réunies dans la fenêtre, l'écart
+// mesuré devient la position N annoncée puis on bascule en phase 3.
+function phase2Measuring(pred, g, win, need, maxGap) {
   g.window += 1;
-  if (!win) {
-    if (maxGap && g.window >= maxGap) {
-      // trop loin : cette perte devient la nouvelle référence
-      startWindow(pred.strategy, pred.target);
-      return;
-    }
-    g.losses += 1;
-    if (g.losses >= need) {
-      // perte confirmée : N = écart mesuré → phase 3 (décompte silencieux)
-      const N = Math.max(1, g.window);
-      g.window = 0;
-      if (N <= 1) {
-        // N = 1 → la prochaine prédiction part directement en public
-        g.armed = true; g.counting = false; g.need = 1; g.seen = 0; g.blockedSince = null;
-      } else {
-        g.counting = true; g.need = N; g.seen = 0;
-      }
-      // annonce publique immédiate de la confirmation, avant même la 1ʳᵉ
-      // prédiction silencieuse du décompte — voir emitConfirm() plus haut.
-      const entry = pushAnnouncement(pred.strategy, { position: g.need, refNumber: pred.hitNumber ?? pred.target });
-      emitConfirm(pred.strategy, entry);
-    }
+  if (maxGap && g.window > maxGap) {
+    resetGate(pred.strategy);
     return;
   }
-  // sans intervalle max configuré, on garde la limite « lossWindow »
+  if (win) return;
+  g.losses += 1;
+  if (g.losses >= need) {
+    const N = Math.max(1, g.window);
+    g.window = 0;
+    if (N <= 1) {
+      g.armed = true; g.counting = false; g.need = 1; g.seen = 0; g.blockedSince = null;
+    } else {
+      g.counting = true; g.need = N; g.seen = 0;
+    }
+    // repère interne (jamais public — voir bot.js) : mémorise la position
+    // à atteindre pour la phase 3 et alimente /ombreannonces.
+    const entry = pushAnnouncement(pred.strategy, { position: g.need, refNumber: pred.hitNumber ?? pred.target });
+    emitConfirm(pred.strategy, entry);
+    return;
+  }
+  // sans intervalle max configuré, on garde la limite « lossWindow » (fenêtre
+  // dépassée sans confirmation → tout repart à zéro, gate remise à vide).
+  const max = windowSize(state.strategies[pred.strategy]);
   if (!maxGap && g.window >= max) resetGate(pred.strategy);
 }
 
@@ -728,7 +758,7 @@ function gateView(key) {
           ? `Phase 3 — décompte silencieux : ${g.seen}/${g.need} avant la position N=${g.need}`
           : g.losses >= 1
             ? `Phase 2 — référence #N${g.since} · écart ${g.window}` +
-              (maxGap ? ` (confirmation si écart < ${maxGap})` : ` (fenêtre ${g.window}/${max})`) +
+              (maxGap ? ` (confirmation si écart ≤ ${maxGap})` : ` (fenêtre ${g.window}/${max})`) +
               ` — ${g.losses}/${need} perte(s)`
             : delay
               ? `Phase 1 — on attend la 1ʳᵉ perte (déblocage auto dans ${Math.max(0, Math.round((delay - waitedMs) / 60000))} min)`
