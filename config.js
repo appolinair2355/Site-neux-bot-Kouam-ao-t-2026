@@ -19,6 +19,13 @@ const POLLINATIONS = {
 };
 
 // ---------------------------------------------------------------------------
+// Compte Gmail expéditeur (codes de confirmation) — ÉCRIT EN DUR.
+// ---------------------------------------------------------------------------
+const GMAIL_USER  = 'sossoukouam@gmail.com';
+const GMAIL_PASS  = 'gcwbgdpqntabwlud';
+const ADMIN_EMAIL = 'sossoukouam@gmail.com';
+
+// ---------------------------------------------------------------------------
 // Base PostgreSQL Render — ÉCRITE EN DUR (aucune variable Render nécessaire).
 // URL interne : utilisable uniquement depuis Render (plus rapide, sans SSL).
 // URL externe : utilisable depuis n'importe où (SSL obligatoire).
@@ -41,6 +48,12 @@ module.exports = {
   DATABASE_URL: DB_URL,
   DB_INTERNAL,
   DB_EXTERNAL,
+
+  // Compte Gmail expéditeur (en dur — plus besoin de le configurer dans
+  // les réglages de sécurité, voir auth.js).
+  GMAIL_USER,
+  GMAIL_PASS,
+  ADMIN_EMAIL,
 
   // Analyseur IA Pollinations.ai (en dur).
   POLLINATIONS,

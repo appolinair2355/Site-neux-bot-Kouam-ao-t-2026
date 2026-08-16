@@ -117,6 +117,28 @@ CREATE TABLE IF NOT EXISTS ai_analyses (
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS ai_analyses_generated_idx ON ai_analyses (generated_at DESC);
+
+-- comptes du tableau de bord web : le compte admin fixe (identifier=nom
+-- d'utilisateur) et les comptes créés par email @gmail.com (identifier=email).
+CREATE TABLE IF NOT EXISTS users (
+  id            BIGSERIAL PRIMARY KEY,
+  identifier    TEXT UNIQUE NOT NULL,
+  email         TEXT,
+  password_hash TEXT NOT NULL,
+  role          TEXT NOT NULL DEFAULT 'user',
+  verified      BOOLEAN NOT NULL DEFAULT false,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- codes de confirmation par email (inscription) : un seul code actif par
+-- email, remplacé à chaque nouvel envoi, expire après 15 minutes.
+CREATE TABLE IF NOT EXISTS email_codes (
+  email       TEXT PRIMARY KEY,
+  code_hash   TEXT NOT NULL,
+  attempts    INT NOT NULL DEFAULT 0,
+  expires_at  TIMESTAMPTZ NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 `;
 
 function status() {

@@ -1,9 +1,13 @@
-// server.js — tableau de bord web (Render) + API JSON. AUCUN mot de passe requis.
+// server.js — tableau de bord web (Render) + API JSON. Protégé par identifiant/mot de passe.
 const path = require('path');
 const express = require('express');
+const session = require('express-session');
+const { Pool } = require('pg');
+const pgSessionStore = require('connect-pg-simple')(session);
 const config = require('./config');
 const api = require('./api');
 const db = require('./db');
+const auth = require('./auth');
 const fmt = require('./formats');
 const strategies = require('./strategies');
 const ai = require('./ai-analyzer');
@@ -22,12 +26,116 @@ const {
 const { startLoop, startBot, botStatus, activate, deactivate, persist, sendBilan, flushBilans, dropSender, announceConfig, announceMainBot, resolveChat, testSend, saveConfigsToDb, applyDbConfigs, setMainChannel } = require('./bot');
 
 const app = express();
+app.set('trust proxy', 1); // Render est derrière un proxy HTTPS : nécessaire pour les cookies "secure"
 app.use(express.json());
+
+// ---------------------------------------------------------------------------
+// Sessions stockées en base Postgres (table "user_sessions", créée toute
+// seule au démarrage) — sans ça (store par défaut = mémoire du process),
+// tout le monde est déconnecté à chaque redémarrage/redéploiement Render.
+// ---------------------------------------------------------------------------
+const sessionPool = new Pool({
+  connectionString: config.DATABASE_URL,
+  ssl: /localhost|127\.0\.0\.1/.test(config.DATABASE_URL) ? false : { rejectUnauthorized: false },
+  max: 4,
+});
+sessionPool.on('error', (e) => console.error('Pool de sessions (pg) :', e.message));
+
+app.use(session({
+  store: new pgSessionStore({
+    pool: sessionPool,
+    tableName: 'user_sessions',
+    createTableIfMissing: true,
+    pruneSessionInterval: 60 * 60, // purge des sessions expirées toutes les heures
+  }),
+  name: 'baccara.sid',
+  secret: process.env.SESSION_SECRET || 'baccara-bot-changeme-secret',
+  resave: false,
+  saveUninitialized: false,
+  rolling: true, // chaque requête prolonge la session de 12h glissantes
+  cookie: {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: !!(process.env.RENDER || process.env.NODE_ENV === 'production'),
+    maxAge: 12 * 60 * 60 * 1000, // 12h
+  },
+}));
+
+// ---------------------------------------------------------------------------
+// Authentification — identifiant admin fixe (« sossoukouam »), ou compte créé
+// par email @gmail.com + code de confirmation (15 min, voir auth.js).
+// ---------------------------------------------------------------------------
+app.post('/api/auth/login', async (req, res) => {
+  const r = await auth.login(req.body.identifier, req.body.password);
+  if (!r.ok) return res.status(401).json(r);
+  req.session.userId = r.userId;
+  req.session.identifier = r.identifier;
+  req.session.role = r.role;
+  res.json({ ok: true, identifier: r.identifier });
+});
+
+app.post('/api/auth/signup', async (req, res) => {
+  const r = await auth.signup(req.body.email, req.body.password, req.body.confirmPassword);
+  res.status(r.ok ? 200 : 400).json(r);
+});
+
+app.post('/api/auth/verify', async (req, res) => {
+  const r = await auth.verify(req.body.email, req.body.code);
+  if (!r.ok) return res.status(400).json(r);
+  req.session.userId = r.userId;
+  req.session.identifier = r.identifier;
+  req.session.role = r.role;
+  res.json({ ok: true, identifier: r.identifier });
+});
+
+app.post('/api/auth/resend', async (req, res) => {
+  const r = await auth.resend(req.body.email);
+  res.status(r.ok ? 200 : 400).json(r);
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  if (!req.session) return res.json({ ok: true });
+  req.session.destroy(() => res.json({ ok: true }));
+});
+
+app.get('/api/auth/status', (req, res) => {
+  res.json({
+    loggedIn: !!(req.session && req.session.userId),
+    identifier: req.session ? req.session.identifier || null : null,
+  });
+});
+
+// configuration (une seule fois) du compte Gmail utilisé pour ENVOYER les
+// codes de confirmation — réservée à l'administrateur.
+app.get('/api/auth/mail-config', async (req, res) => {
+  if (!req.session || req.session.role !== 'admin') return res.status(403).json({ error: "Réservé à l'administrateur." });
+  res.json(await auth.mailerStatus());
+});
+app.post('/api/auth/mail-config', async (req, res) => {
+  if (!req.session || req.session.role !== 'admin') return res.status(403).json({ error: "Réservé à l'administrateur." });
+  const r = await auth.configureMailSender(req.body.user, req.body.pass);
+  res.status(r.ok ? 200 : 400).json(r);
+});
+
+// --- verrou d'accès : tout le reste du site exige une session valide ------
+const PUBLIC_EXACT = new Set(['/health', '/login.html', '/favicon.ico']);
+function isPublicPath(p) {
+  if (PUBLIC_EXACT.has(p)) return true;
+  if (p.startsWith('/api/auth/')) return true;
+  return false;
+}
+app.use((req, res, next) => {
+  if (isPublicPath(req.path)) return next();
+  if (req.session && req.session.userId) return next();
+  if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'Authentification requise.' });
+  return res.redirect('/login.html');
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/health', (req, res) => res.send('ok'));
 
-app.get('/api/state', (req, res) => {
+app.get('/api/state', async (req, res) => {
   res.json({
     b: state.B,
     maxR: state.maxR,
@@ -70,6 +178,7 @@ app.get('/api/state', (req, res) => {
     panel: predictionsPanel(40),
     stats: stats(),
     uptime: Date.now() - state.startedAt,
+    mail: await auth.mailerStatus(),
   });
 });
 

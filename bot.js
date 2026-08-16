@@ -5,14 +5,16 @@ const api = require('./api');
 const store = require('./store');
 const db = require('./db');
 const predit = require('./predit');
+const auth = require('./auth');
 const aiAuto = require('./ai-auto');
 const fmt = require('./formats');
 const strategies = require('./strategies');
 const {
-  state, evaluate, verify, registerGames, setOnFinished, setOnGateChange,
+  state, evaluate, verify, registerGames, setOnFinished, setOnGateChange, setOnConfirm,
   predictionText, predictionMessage, liveText, stats, SUITS,
   initStrategies, setStrategyConfig, resetStrategy, strategyChannels, parityRuntime,
   bilanText, canSend, noteGateSent, gateView, autoView, noteSent, shadowRuntime, sweepAutoUnlock, unlockGate,
+  fulfillAnnouncement, announcementsFor,
 } = require('./predictor');
 
 let bot = null;
@@ -126,6 +128,7 @@ const HELP =
   '/ombre — état de la stratégie « Prédiction dans l\'ombre »\n' +
   '/ombrecompte — comptage en temps réel du mode silencieux (phase actuelle, référence, écart, décompte, canal utilisé)\n' +
   '/ombrehistorique — historique des prédictions depuis la perte de référence, avec alerte si ça dépasse la limite configurée\n' +
+  '/ombreannonces [n] — liste des annonces de position publiées (numéro de la perte confirmante + position, en attente ou envoyée), n dernières (20 par défaut)\n' +
   '/silence <clé> <on|off> [fenêtre] — mode silencieux 1 (réservé à la stratégie « ombre »)\n' +
   '/debloquer <clé|tout> — débloque immédiatement l\'envoi (déblocage auto après 10 min)\n' +
   '/filtres — état du filtre « double perte » de chaque stratégie\n' +
@@ -655,6 +658,38 @@ function wire(b) {
     b.sendMessage(msg.chat.id, lines.join('\n'), { parse_mode: 'Markdown' });
   });
 
+  // liste des annonces de position publiées (« la prochaine sera la Nᵉ à venir »),
+  // identifiées par le numéro de la perte confirmante + la position annoncée.
+  // Statuts : en attente (décompte en cours) / envoyée (avec le n° du jeu
+  // réellement envoyé au canal public). Une annonce interrompue par une
+  // nouvelle perte ne se réalise jamais et disparaît de cette liste.
+  b.onText(/^\/ombreannonces(?:\s+(\d+))?/, (msg, m) => {
+    const limit = m[1] ? Math.max(1, Math.min(100, parseInt(m[1], 10))) : 20;
+    const list = announcementsFor('ombre', limit);
+
+    if (!list.length) {
+      return b.sendMessage(
+        msg.chat.id,
+        `📋 *Annonces de position — Prédiction dans l'ombre*\n\nAucune annonce pour l'instant.`,
+        { parse_mode: 'Markdown' }
+      );
+    }
+
+    const lines = [`📋 *Annonces de position — Prédiction dans l'ombre*`, ''];
+    for (const a of list) {
+      const icon = a.status === 'envoyee' ? '✅' : '⌛';
+      let line = `${icon} Jeu perdu #N${a.refNumber} → position ${ordinalFr(a.position)}`;
+      line += a.status === 'envoyee' ? ` — envoyée sur #N${a.sentNumber}` : ' — en attente';
+      lines.push(line);
+    }
+
+    const pending = list.filter((a) => a.status === 'en_attente').length;
+    lines.push('');
+    lines.push(`📊 ${list.length} affichée(s) · ${pending} en attente`);
+
+    b.sendMessage(msg.chat.id, lines.join('\n'), { parse_mode: 'Markdown' });
+  });
+
   b.onText(/^\/silence(?:\s+(\w+))?(?:\s+(\d+))?(?:\s+(\d+))?(?:\s+(\w+))?/, (msg, m) => {
     if (!isAdmin(msg)) return deny(msg.chat.id);
     const key = (m[1] || '').toLowerCase();
@@ -1169,7 +1204,36 @@ async function broadcast(pred) {
   // le filtre « double perte » consomme aussi l'autorisation si l'envoi est
   // limité à une seule prédiction (sendOnlyNext)
   if (pred.messages.length) noteGateSent(pred.strategy);
+  // « ombre » : la prédiction de la position annoncée vient réellement de
+  // partir dans le canal public → on referme l'entrée de l'historique des
+  // annonces (voir /ombreannonces).
+  if (pred.strategy === 'ombre' && pred.messages.length) fulfillAnnouncement('ombre', pred.target);
   pred.gate = gateView(pred.strategy).label;
+}
+
+// ---------------------------------------------------------------------------
+// Annonce publique de la CONFIRMATION du filtre « double perte » (stratégie
+// « ombre ») : dès que la 2ᵉ perte confirme la mesure (phase 2 → phase 3),
+// on annonce sur le canal public la POSITION qu'occupera la prochaine
+// prédiction publique — avant même le début du décompte silencieux.
+function ordinalFr(n) {
+  return n === 1 ? '1ʳᵉ' : `${n}ᵉ`;
+}
+
+async function announceConfirm(key, info) {
+  const sender = senderFor();
+  if (!sender) return;
+  const ids = strategyChannels(key); // canaux publics de la stratégie
+  if (!ids.length) return;
+  const cfg = state.strategies[key];
+  const maxR = cfg && cfg.maxR != null ? cfg.maxR : null;
+  const text =
+    `🔔 La prochaine après le jeu perdu #N${info.refNumber} ` +
+    `sera la ${ordinalFr(info.position)} à venir` +
+    `${maxR != null ? ` · Dogon +${maxR}` : ''}.`;
+  for (const id of [...new Set(ids)]) {
+    try { await sender.sendMessage(id, text); } catch (_) {}
+  }
 }
 
 async function sendPrediction(pred, sender, ids) {
@@ -1210,6 +1274,7 @@ async function ensureDb() {
   const s = await db.connect();
   if (s.ready) {
     console.log('🗄️ Base de données reconnectée');
+    await auth.ensureAdminSeed();
     const r = await applyDbConfigs();
     console.log('🧠 Configurations relues : ' + ((r.loaded || []).join(', ') || 'aucune'));
   }
@@ -1230,6 +1295,23 @@ async function tick() {
     for (const p of closed) {
       await updateResult(p);
       bilanPending.add(p.strategy);           // bilan dès que le jeu reprend
+    }
+
+    // « ombre » : une prédiction est créée (et envoyée, ou pas) au moment où
+    // evaluate() la détecte — mais le filtre « double perte » peut s'ouvrir
+    // PLUS TARD, après coup, suite à une perte confirmée ci-dessus (verify()
+    // vient d'appeler noteClosed()). CORRECTIF : sans ceci, une prédiction
+    // déjà calculée en silence (canal jamais configuré au moment de sa
+    // création) restait bloquée pour toujours, même une fois le filtre
+    // ouvert — rien ne revenait jamais la chercher pour l'envoyer. On
+    // reprend ici la plus ancienne prédiction ombre jamais envoyée (encore
+    // en attente, OU déjà résolue en silence) et on l'envoie maintenant que
+    // c'est autorisé — avec son résultat réel si elle est déjà terminée.
+    if (canSend('ombre')) {
+      const stuck = state.predictions
+        .filter((p) => p.strategy === 'ombre' && (!p.messages || !p.messages.length))
+        .sort((a, b) => a.target - b.target)[0];
+      if (stuck) await broadcast(stuck);
     }
 
     // Le bilan est publié quand le jeu repart au n°1 (nouveau sabot).
@@ -1295,16 +1377,23 @@ async function applyDbConfigs() {
   if (maxR != null) state.maxR = parseInt(maxR, 10);
   if (fmtId) state.format = parseInt(fmtId, 10) || state.format;
   if (tpl !== null) state.template = tpl ? tpl : null;
-  // token API, ID administrateur et canaux enregistrés : restaurés au démarrage
+  // token API, ID administrateur et canaux enregistrés : restaurés au démarrage.
+  // CORRECTIF : la base de données est la seule source durable (le fichier
+  // data.json local est effacé à chaque redéploiement Render, sans disque
+  // persistant). Avant, la DB ne servait qu'à COMPLÉTER un état déjà vide —
+  // si data.json contenait encore d'anciennes valeurs (canal supprimé,
+  // redéployé sur un autre disque, etc.), elles gagnaient silencieusement et
+  // la DB n'était jamais vraiment consultée. Désormais, dès que la DB est
+  // connectée, ses valeurs priment toujours sur l'état local.
   const app = await db.loadAppConfig();
   const restored = [];
   if (app) {
-    if (app.botToken && !state.botToken) { state.botToken = app.botToken; restored.push('token'); }
-    if (app.adminId && !state.adminId) { state.adminId = app.adminId; restored.push('admin'); }
-    if (Array.isArray(app.channels) && app.channels.length && !state.channels.length) {
+    if (app.botToken) { state.botToken = app.botToken; restored.push('token'); }
+    if (app.adminId) { state.adminId = app.adminId; restored.push('admin'); }
+    if (Array.isArray(app.channels) && app.channels.length) {
       state.channels = app.channels; restored.push('canaux');
     }
-    if (Array.isArray(app.activeChannels) && app.activeChannels.length && !state.activeChannels.length) {
+    if (Array.isArray(app.activeChannels) && app.activeChannels.length) {
       state.activeChannels = app.activeChannels; restored.push('canaux actifs');
     }
   }
@@ -1361,9 +1450,11 @@ async function startLoop() {
   // base de données : chaque jeu terminé est archivé par date
   setOnFinished((round) => { if (db.ready) db.saveGame(round); });
   setOnGateChange((key, g) => { if (db.ready) db.saveGate(key, g); });
+  setOnConfirm((key, info) => { announceConfirm(key, info).catch(() => {}); });
   const s = await db.connect();
   console.log(s.ready ? '🗄️ Base de données connectée' : `🗄️ Base non connectée : ${s.error}`);
   if (s.ready) {
+    await auth.ensureAdminSeed();
     const r = await applyDbConfigs();
     if ((r.restored || []).length) console.log('🔐 Restauré depuis la base : ' + r.restored.join(', '));
     console.log('🧠 Configurations lues en base : ' + ((r.loaded || []).join(', ') || 'aucune') +

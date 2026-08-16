@@ -41,6 +41,7 @@ const state = {
   autoGates: {},           // clé de stratégie -> déclencheur automatique (perte/rattrapage + N)
   freshFinished: [],       // tours terminés depuis la dernière évaluation
   startedAt: Date.now(),
+  announcements: [],       // historique des annonces de position (filtre « double perte »)
 };
 
 // ---------------------------------------------------------------------------
@@ -268,6 +269,80 @@ function emitGateChange(key) {
   if (onGateChangeHook) { try { onGateChangeHook(key, state.gates[key]); } catch (_) {} }
 }
 
+// ---------------------------------------------------------------------------
+// Annonce publique de la CONFIRMATION (phase 2 → phase 3) : dès qu'une 2ᵉ perte
+// confirme la mesure, on notifie immédiatement le canal public de la position
+// (1ʳᵉ/2ᵉ/3ᵉ/4ᵉ…) qu'occupera la prochaine prédiction publique — AVANT même que
+// le décompte silencieux ne commence. Ce hook est distinct de `onGateChange`
+// (qui se déclenche à CHAQUE mutation du filtre) pour ne notifier bot.js que
+// sur cet événement précis.
+let onConfirmHook = null;
+function setOnConfirm(fn) { onConfirmHook = fn; }
+function emitConfirm(key, entry) {
+  if (onConfirmHook) { try { onConfirmHook(key, entry); } catch (_) {} }
+}
+
+// ---------------------------------------------------------------------------
+// Historique des annonces de position (une entrée par confirmation) :
+//   'en_attente' → l'annonce a été publiée, on attend l'envoi de la prédiction
+//                  correspondante (position N) ;
+//   'envoyee'    → la prédiction de la position annoncée est réellement partie
+//                  dans le canal public (voir fulfillAnnouncement).
+// Si une perte interrompt le décompte avant l'envoi, l'entrée en attente est
+// simplement retirée de l'historique (voir cancelPendingAnnouncement) : le
+// bouton annonce ne montre que ce qui a réellement été publié ou est en cours.
+const ANNOUNCEMENTS_MAX = 200; // taille max conservée en mémoire
+let announcementSeq = 0;
+
+function pushAnnouncement(key, info) {
+  const entry = {
+    id: ++announcementSeq,
+    strategy: key,
+    refNumber: info.refNumber,
+    position: info.position,
+    createdAt: Date.now(),
+    status: 'en_attente',
+    sentNumber: null,
+    sentAt: null,
+  };
+  state.announcements.push(entry);
+  if (state.announcements.length > ANNOUNCEMENTS_MAX) {
+    state.announcements.splice(0, state.announcements.length - ANNOUNCEMENTS_MAX);
+  }
+  return entry;
+}
+
+// la prédiction annoncée finit par partir réellement dans le canal public
+function fulfillAnnouncement(key, gameNumber) {
+  const entry = [...state.announcements].reverse()
+    .find((a) => a.strategy === key && a.status === 'en_attente');
+  if (!entry) return null;
+  entry.status = 'envoyee';
+  entry.sentNumber = gameNumber;
+  entry.sentAt = Date.now();
+  return entry;
+}
+
+// une perte interrompt le décompte avant l'envoi : l'annonce en attente ne se
+// réalisera jamais → elle est retirée de l'historique (rien à afficher pour elle).
+function cancelPendingAnnouncement(key) {
+  const idx = [...state.announcements]
+    .map((a, i) => [a, i])
+    .reverse()
+    .find(([a]) => a.strategy === key && a.status === 'en_attente');
+  if (!idx) return null;
+  const [entry, i] = idx;
+  state.announcements.splice(i, 1);
+  return entry;
+}
+
+function announcementsFor(key, limit = 20) {
+  return state.announcements
+    .filter((a) => a.strategy === key)
+    .slice(-Math.max(1, Math.min(100, limit)))
+    .reverse(); // plus récentes en premier
+}
+
 function gate(key) {
   if (!state.gates[key]) state.gates[key] = emptyGate();
   const g = state.gates[key];
@@ -385,7 +460,9 @@ function noteClosedInner(pred) {
   if (g.counting) {
     g.seen += 1;
     if (!win) {
-      // interruption : la perte devient la nouvelle référence → phase 2
+      // interruption : la perte devient la nouvelle référence → phase 2 ;
+      // l'annonce en attente ne se réalisera jamais, on la retire de l'historique.
+      cancelPendingAnnouncement(pred.strategy);
       startWindow(pred.strategy, pred.target);
       return;
     }
@@ -402,7 +479,11 @@ function noteClosedInner(pred) {
     if (!win) {
       startWindow(pred.strategy, pred.target);
       // avec lossTrigger = 1 la première perte suffit : on ouvre l'envoi
-      if (need <= 1) { g.armed = true; g.blockedSince = null; }
+      if (need <= 1) {
+        g.armed = true; g.need = 1; g.blockedSince = null;
+        const entry = pushAnnouncement(pred.strategy, { position: 1, refNumber: pred.hitNumber ?? pred.target });
+        emitConfirm(pred.strategy, entry);
+      }
     }
     return;
   }
@@ -426,6 +507,10 @@ function noteClosedInner(pred) {
       } else {
         g.counting = true; g.need = N; g.seen = 0;
       }
+      // annonce publique immédiate de la confirmation, avant même la 1ʳᵉ
+      // prédiction silencieuse du décompte — voir emitConfirm() plus haut.
+      const entry = pushAnnouncement(pred.strategy, { position: g.need, refNumber: pred.hitNumber ?? pred.target });
+      emitConfirm(pred.strategy, entry);
     }
     return;
   }
@@ -1211,6 +1296,9 @@ module.exports = {
   registerGames,
   setOnFinished,
   setOnGateChange,
+  setOnConfirm,
+  fulfillAnnouncement,
+  announcementsFor,
   suitForNumber,
   nextTarget,
   handSuits,
