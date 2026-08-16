@@ -176,30 +176,48 @@ async function verify(emailRaw, codeRaw) {
 }
 
 // ---------------------------------------------------------------------------
-// Compte Resend expéditeur — configuré UNE FOIS par l'admin (stocké en base,
-// réutilisé pour tous les envois de code suivants). Resend envoie par API
-// HTTP (port 443, jamais bloqué) au lieu du SMTP classique — voir
-// https://resend.com/docs/api-reference/emails/send-email.
+// Compte Brevo expéditeur — configuré UNE FOIS par l'admin (stocké en base,
+// réutilisé pour tous les envois de code suivants). Brevo envoie par API
+// HTTP (port 443, jamais bloqué par Render, contrairement au SMTP classique
+// bloqué sur le plan gratuit) — voir https://developers.brevo.com.
+// Contrairement à Resend, aucun domaine à vérifier : seule l'adresse
+// expéditrice doit être validée une fois dans Brevo (Settings > Senders).
 // ---------------------------------------------------------------------------
+function parseFromAddress(fromRaw) {
+  const from = String(fromRaw || '').trim();
+  const m = from.match(/^(.*?)<\s*([^<>\s]+@[^<>\s]+)\s*>$/) || from.match(/^([^<>\s]+@[^<>\s]+)$/);
+  if (!m) return null;
+  const email = (m[2] || m[1]).trim();
+  const name = m[2] ? m[1].replace(/["']/g, '').trim() : 'Baccara Bot';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return null;
+  return { name: name || 'Baccara Bot', email };
+}
+
 async function configureMailSender(apiKeyRaw, fromRaw) {
   if (!db.ready) return { ok: false, error: 'Base de données non connectée.' };
   const apiKey = String(apiKeyRaw || '').trim();
-  if (!apiKey) return { ok: false, error: "Clé API Resend requise (créez un compte sur resend.com)." };
+  if (!apiKey) return { ok: false, error: "Clé API Brevo requise (créez un compte sur app.brevo.com)." };
   const from = String(fromRaw || '').trim();
-  await db.setSetting('resend_api_key', apiKey);
-  if (from) await db.setSetting('resend_from', from);
+  if (from && !parseFromAddress(from)) {
+    return {
+      ok: false,
+      error: "Adresse expéditrice invalide — format attendu : Nom <adresse@exemple.com>.",
+    };
+  }
+  await db.setSetting('brevo_api_key', apiKey);
+  if (from) await db.setSetting('brevo_from', from);
   return { ok: true, from: from || null };
 }
 
 async function mailerStatus() {
   let apiKey = null, from = null;
   if (db.ready) {
-    apiKey = await db.getSetting('resend_api_key');
-    from = await db.getSetting('resend_from');
+    apiKey = await db.getSetting('brevo_api_key');
+    from = await db.getSetting('brevo_from');
   }
-  apiKey = apiKey || config.RESEND_API_KEY;
-  from = from || config.RESEND_FROM;
-  return { configured: !!(apiKey && apiKey !== 'RESEND_API_KEY_A_REMPLACER'), from: from || null };
+  apiKey = apiKey || config.BREVO_API_KEY;
+  from = from || config.BREVO_FROM;
+  return { configured: !!(apiKey && apiKey !== 'BREVO_API_KEY_A_REMPLACER'), from: from || null };
 }
 
 // ---------------------------------------------------------------------------
@@ -230,15 +248,21 @@ async function debugInfo() {
 async function sendMail(to, code) {
   let apiKey = null, from = null;
   if (db.ready) {
-    apiKey = await db.getSetting('resend_api_key');
-    from = await db.getSetting('resend_from');
+    apiKey = await db.getSetting('brevo_api_key');
+    from = await db.getSetting('brevo_from');
   }
-  // Repli sur la clé Resend écrite en dur dans config.js.
-  apiKey = apiKey || config.RESEND_API_KEY;
-  from = from || config.RESEND_FROM;
-  if (!apiKey || apiKey === 'RESEND_API_KEY_A_REMPLACER') {
+  // Repli sur la clé Brevo écrite en dur dans config.js.
+  apiKey = apiKey || config.BREVO_API_KEY;
+  from = from || config.BREVO_FROM;
+  if (!apiKey || apiKey === 'BREVO_API_KEY_A_REMPLACER') {
     throw new Error(
-      "Clé API Resend non configurée — l'administrateur doit la renseigner une fois dans les réglages de sécurité."
+      "Clé API Brevo non configurée — l'administrateur doit la renseigner une fois dans les réglages de sécurité."
+    );
+  }
+  const sender = parseFromAddress(from);
+  if (!sender) {
+    throw new Error(
+      "Adresse expéditrice Brevo invalide — l'administrateur doit la reconfigurer (format : Nom <adresse@exemple.com>)."
     );
   }
 
@@ -246,25 +270,26 @@ async function sendMail(to, code) {
   const timer = setTimeout(() => controller.abort(), 8000); // 8s au lieu de rester planté
   let res;
   try {
-    res = await fetch('https://api.resend.com/emails', {
+    res = await fetch('https://api.brevo.com/v3/smtp/email', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        'api-key': apiKey,
         'Content-Type': 'application/json',
+        accept: 'application/json',
       },
       body: JSON.stringify({
-        from,
-        to: [to],
+        sender,
+        to: [{ email: to }],
         subject: 'Code de confirmation — Baccara Bot',
-        text:
+        textContent:
           `Votre code de confirmation est : ${code}\n\n` +
           `Il expire dans 15 minutes. Si vous n'êtes pas à l'origine de cette demande, ignorez ce message.`,
       }),
       signal: controller.signal,
     });
   } catch (e) {
-    if (e.name === 'AbortError') throw new Error('Délai dépassé en contactant Resend (8s).');
-    throw new Error(`Connexion à Resend impossible : ${e.message}`);
+    if (e.name === 'AbortError') throw new Error('Délai dépassé en contactant Brevo (8s).');
+    throw new Error(`Connexion à Brevo impossible : ${e.message}`);
   } finally {
     clearTimeout(timer);
   }
@@ -272,7 +297,7 @@ async function sendMail(to, code) {
   if (!res.ok) {
     let detail = '';
     try { const body = await res.json(); detail = body && (body.message || JSON.stringify(body)); } catch (_) {}
-    throw new Error(`Resend a refusé l'envoi (${res.status})${detail ? ' : ' + detail : ''}`);
+    throw new Error(`Brevo a refusé l'envoi (${res.status})${detail ? ' : ' + detail : ''}`);
   }
 }
 

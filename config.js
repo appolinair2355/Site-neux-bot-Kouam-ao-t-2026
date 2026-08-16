@@ -19,15 +19,18 @@ const POLLINATIONS = {
 };
 
 // ---------------------------------------------------------------------------
-// Compte Resend expéditeur (codes de confirmation) — clé API en dur.
-// Créer un compte gratuit sur https://resend.com puis générer une clé API.
-// Sans domaine vérifié, l'adresse d'envoi par défaut « onboarding@resend.dev »
-// ne peut envoyer qu'à l'adresse email du compte Resend lui-même — pour
-// envoyer à n'importe quelle adresse Gmail, il faut vérifier un domaine dans
-// Resend et utiliser une adresse @votredomaine.com comme expéditeur.
+// Compte Brevo expéditeur (codes de confirmation) — clé API en dur.
+// Créer un compte gratuit sur https://app.brevo.com (300 emails/jour gratuits)
+// puis générer une clé API dans Settings > SMTP & API > API Keys.
+// Contrairement à Resend, Brevo ne demande PAS de vérifier un domaine : il
+// suffit de vérifier l'adresse expéditrice elle-même (« Single Sender »,
+// Settings > Senders) — un simple compte Gmail existant convient. Une fois
+// cette adresse vérifiée sur Brevo, elle peut envoyer vers N'IMPORTE QUELLE
+// adresse Gmail destinataire, sans restriction de type sandbox.
+// L'adresse expéditrice doit être au format « Nom <email@exemple.com> ».
 // ---------------------------------------------------------------------------
-const RESEND_API_KEY = process.env.RESEND_API_KEY || 'RESEND_API_KEY_A_REMPLACER';
-const RESEND_FROM = process.env.RESEND_FROM || 'Baccara Bot <onboarding@resend.dev>';
+const BREVO_API_KEY = process.env.BREVO_API_KEY || 'BREVO_API_KEY_A_REMPLACER';
+const BREVO_FROM = process.env.BREVO_FROM || 'Baccara Bot <BREVO_FROM_A_REMPLACER@gmail.com>';
 const ADMIN_EMAIL = 'sossoukouam@gmail.com';
 
 // ---------------------------------------------------------------------------
@@ -54,10 +57,10 @@ module.exports = {
   DB_INTERNAL,
   DB_EXTERNAL,
 
-  // Compte Resend expéditeur (en dur — plus besoin de le configurer dans
+  // Compte Brevo expéditeur (en dur — plus besoin de le configurer dans
   // les réglages de sécurité, voir auth.js).
-  RESEND_API_KEY,
-  RESEND_FROM,
+  BREVO_API_KEY,
+  BREVO_FROM,
   ADMIN_EMAIL,
 
   // Analyseur IA Pollinations.ai (en dur).
