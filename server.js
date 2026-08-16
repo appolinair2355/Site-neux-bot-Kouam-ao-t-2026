@@ -105,6 +105,17 @@ app.get('/api/auth/status', (req, res) => {
   });
 });
 
+// Diagnostic public (aucune donnée sensible) : URL/statut de la base masqués,
+// nombre de comptes, et si le compte admin existe réellement — pour
+// comprendre une connexion qui échoue sans devoir être déjà connecté.
+app.get('/api/auth/debug', async (req, res) => {
+  try {
+    res.json(await auth.debugInfo());
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // configuration (une seule fois) du compte Gmail utilisé pour ENVOYER les
 // codes de confirmation — réservée à l'administrateur.
 app.get('/api/auth/mail-config', async (req, res) => {

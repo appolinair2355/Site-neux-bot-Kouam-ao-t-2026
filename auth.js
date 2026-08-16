@@ -198,6 +198,31 @@ async function mailerStatus() {
   return { configured: !!user, user: user || null };
 }
 
+// ---------------------------------------------------------------------------
+// Diagnostic public (aucune donnée sensible renvoyée) — pour comprendre,
+// sans être connecté, pourquoi la connexion admin échoue en production :
+// la base utilisée est-elle bien joignable ? le compte existe-t-il vraiment ?
+// ---------------------------------------------------------------------------
+async function debugInfo() {
+  const dbStatus = db.status();
+  if (!dbStatus.ready) {
+    return { db: dbStatus, usersTableReachable: false };
+  }
+  let userCount = null;
+  let adminExists = false;
+  let adminVerified = null;
+  try {
+    const countRows = await db.rows(`SELECT count(*)::int AS n FROM users`);
+    userCount = countRows[0] ? countRows[0].n : null;
+    const admin = await findUser(ADMIN_IDENTIFIER);
+    adminExists = !!admin;
+    adminVerified = admin ? !!admin.verified : null;
+  } catch (e) {
+    return { db: dbStatus, usersTableReachable: false, error: e.message };
+  }
+  return { db: dbStatus, usersTableReachable: true, userCount, adminExists, adminVerified };
+}
+
 async function sendMail(to, code) {
   let user = null, pass = null;
   if (db.ready) {
@@ -235,4 +260,5 @@ module.exports = {
   resend,
   configureMailSender,
   mailerStatus,
+  debugInfo,
 };
