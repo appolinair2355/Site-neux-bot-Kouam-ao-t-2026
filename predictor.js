@@ -283,6 +283,34 @@ function emitConfirm(key, entry) {
 }
 
 // ---------------------------------------------------------------------------
+// Persistance des annonces (state.announcements) : mêmes symptômes que pour
+// les gates avant leur correctif — sans ceci, la liste ne vivait qu'en RAM et
+// repartait de zéro à chaque redémarrage du process (veille/redéploiement
+// Render Free), même si le filtre (persisté, lui) restait en phase 2/3.
+// Résultat observé : /ombreannonces affichait « Aucune annonce pour l'instant »
+// alors que /ombrecompte montrait une confirmation déjà en cours. Deux hooks,
+// sur le même principe que onGateChange : un pour sauvegarder (créée/mise à
+// jour), un pour supprimer (annonce annulée avant son envoi).
+let onAnnouncementSaveHook = null;
+let onAnnouncementDeleteHook = null;
+function setOnAnnouncementSave(fn) { onAnnouncementSaveHook = fn; }
+function setOnAnnouncementDelete(fn) { onAnnouncementDeleteHook = fn; }
+function emitAnnouncementSave(entry) {
+  if (onAnnouncementSaveHook) { try { onAnnouncementSaveHook(entry); } catch (_) {} }
+}
+function emitAnnouncementDelete(id) {
+  if (onAnnouncementDeleteHook) { try { onAnnouncementDeleteHook(id); } catch (_) {} }
+}
+
+// restauration au démarrage (voir applyDbConfigs dans bot.js) : recharge la
+// liste et repositionne le compteur d'id après le plus grand id connu, pour
+// ne jamais réutiliser un id déjà attribué avant le redémarrage.
+function restoreAnnouncements(list) {
+  state.announcements = Array.isArray(list) ? list.slice() : [];
+  announcementSeq = state.announcements.reduce((max, a) => Math.max(max, a.id || 0), 0);
+}
+
+// ---------------------------------------------------------------------------
 // Historique des annonces de position (une entrée par confirmation) :
 //   'en_attente' → l'annonce a été publiée, on attend l'envoi de la prédiction
 //                  correspondante (position N) ;
@@ -307,8 +335,10 @@ function pushAnnouncement(key, info) {
   };
   state.announcements.push(entry);
   if (state.announcements.length > ANNOUNCEMENTS_MAX) {
-    state.announcements.splice(0, state.announcements.length - ANNOUNCEMENTS_MAX);
+    const removed = state.announcements.splice(0, state.announcements.length - ANNOUNCEMENTS_MAX);
+    for (const r of removed) emitAnnouncementDelete(r.id);
   }
+  emitAnnouncementSave(entry);
   return entry;
 }
 
@@ -320,6 +350,7 @@ function fulfillAnnouncement(key, gameNumber) {
   entry.status = 'envoyee';
   entry.sentNumber = gameNumber;
   entry.sentAt = Date.now();
+  emitAnnouncementSave(entry);
   return entry;
 }
 
@@ -333,6 +364,7 @@ function cancelPendingAnnouncement(key) {
   if (!idx) return null;
   const [entry, i] = idx;
   state.announcements.splice(i, 1);
+  emitAnnouncementDelete(entry.id);
   return entry;
 }
 
@@ -1299,6 +1331,9 @@ module.exports = {
   setOnConfirm,
   fulfillAnnouncement,
   announcementsFor,
+  setOnAnnouncementSave,
+  setOnAnnouncementDelete,
+  restoreAnnouncements,
   suitForNumber,
   nextTarget,
   handSuits,

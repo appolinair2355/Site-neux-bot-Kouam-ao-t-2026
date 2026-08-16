@@ -72,6 +72,25 @@ CREATE TABLE IF NOT EXISTS gates (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- annonces de position de la stratégie « ombre » (bouton /ombreannonces) :
+-- sans cette table, la liste ne vivait qu'en RAM (state.announcements) et
+-- repartait de zéro à chaque redémarrage du process (veille/redéploiement
+-- Render Free) — même quand le filtre « gates » ci-dessus, lui, survivait
+-- correctement. Résultat : le panneau affichait « Aucune annonce pour
+-- l'instant » alors que la phase 2/3 était bien confirmée. Même logique de
+-- persistance que pour « gates », appliquée cette fois à chaque entrée.
+CREATE TABLE IF NOT EXISTS announcements (
+  id          BIGINT PRIMARY KEY,
+  strategy    TEXT NOT NULL,
+  ref_number  BIGINT,
+  position    INT,
+  status      TEXT NOT NULL DEFAULT 'en_attente',
+  sent_number BIGINT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  sent_at     TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS announcements_strategy_idx ON announcements (strategy, id DESC);
+
 ALTER TABLE predictions ADD COLUMN IF NOT EXISTS strategy TEXT DEFAULT 'costume';
 ALTER TABLE predictions ADD COLUMN IF NOT EXISTS label    TEXT;
 ALTER TABLE predictions DROP CONSTRAINT IF EXISTS predictions_target_suit_hand_key;
@@ -307,6 +326,43 @@ async function loadGates() {
     out[row.key] = typeof row.payload === 'string' ? JSON.parse(row.payload || '{}') : row.payload || {};
   }
   return out;
+}
+
+// ---- annonces de position (stratégie « ombre », filtre « double perte ») --
+async function saveAnnouncement(entry) {
+  return q(
+    `INSERT INTO announcements (id, strategy, ref_number, position, status, sent_number, created_at, sent_at)
+     VALUES ($1,$2,$3,$4,$5,$6,to_timestamp($7/1000.0),$8)
+     ON CONFLICT (id) DO UPDATE SET
+       status=EXCLUDED.status, sent_number=EXCLUDED.sent_number, sent_at=EXCLUDED.sent_at`,
+    [
+      entry.id, entry.strategy, entry.refNumber, entry.position, entry.status,
+      entry.sentNumber, entry.createdAt, entry.sentAt ? new Date(entry.sentAt) : null,
+    ]
+  );
+}
+
+async function deleteAnnouncement(id) {
+  return q(`DELETE FROM announcements WHERE id = $1`, [id]);
+}
+
+async function loadAnnouncements(limit = 200) {
+  const r = await q(
+    `SELECT id, strategy, ref_number, position, status, sent_number, created_at, sent_at
+       FROM announcements ORDER BY id DESC LIMIT $1`,
+    [limit]
+  );
+  if (!r) return [];
+  return r.rows.map((row) => ({
+    id: Number(row.id),
+    strategy: row.strategy,
+    refNumber: row.ref_number == null ? null : Number(row.ref_number),
+    position: row.position,
+    status: row.status,
+    sentNumber: row.sent_number == null ? null : Number(row.sent_number),
+    createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
+    sentAt: row.sent_at ? new Date(row.sent_at).getTime() : null,
+  })).reverse(); // ré-ordonné du plus ancien au plus récent, comme state.announcements
 }
 
 // bilan des prédictions par stratégie
@@ -618,6 +674,7 @@ module.exports = {
   savePrediction, closePrediction, setSetting, getSetting, normalizeDate,
   saveStrategy, loadStrategies, deleteStrategy, strategyStats, strategyPredictions, clearPredictions,
   saveGate, loadGates,
+  saveAnnouncement, deleteAnnouncement, loadAnnouncements,
   saveAiStrategy, loadAiStrategies, deleteAiStrategy,
   saveAiAnalysis, loadAiAnalyses,
   lastGames, gameByNumber, predictionsByDate, predictionSummary,

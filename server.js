@@ -22,6 +22,7 @@ const {
   setStrategyConfig, resetStrategy, initStrategies, parityRuntime,
   strategyGames, bilanText, gameCategories, gateView, shadowRuntime,
   predictionsPanel, strategyChannels, unlockGate, sweepAutoUnlock,
+  announcementsFor,
 } = require('./predictor');
 const { startLoop, startBot, botStatus, activate, deactivate, persist, sendBilan, flushBilans, dropSender, announceConfig, announceMainBot, resolveChat, testSend, saveConfigsToDb, applyDbConfigs, setMainChannel } = require('./bot');
 
@@ -116,15 +117,15 @@ app.get('/api/auth/debug', async (req, res) => {
   }
 });
 
-// configuration (une seule fois) du compte Gmail utilisé pour ENVOYER les
-// codes de confirmation — réservée à l'administrateur.
+// configuration (une seule fois) de la clé API Resend utilisée pour ENVOYER
+// les codes de confirmation — réservée à l'administrateur.
 app.get('/api/auth/mail-config', async (req, res) => {
   if (!req.session || req.session.role !== 'admin') return res.status(403).json({ error: "Réservé à l'administrateur." });
   res.json(await auth.mailerStatus());
 });
 app.post('/api/auth/mail-config', async (req, res) => {
   if (!req.session || req.session.role !== 'admin') return res.status(403).json({ error: "Réservé à l'administrateur." });
-  const r = await auth.configureMailSender(req.body.user, req.body.pass);
+  const r = await auth.configureMailSender(req.body.apiKey, req.body.from);
   res.status(r.ok ? 200 : 400).json(r);
 });
 
@@ -418,6 +419,13 @@ app.get('/api/predictions', (req, res) => {
 
 // état de la stratégie « Prédiction dans l'ombre »
 app.get('/api/ombre', (req, res) => res.json(shadowRuntime()));
+
+// Historique des annonces de position (« /ombreannonces » côté Telegram),
+// exposé au tableau de bord web pour le bouton « Annonces » de l'accueil.
+app.get('/api/ombre/announcements', (req, res) => {
+  const limit = Math.max(1, Math.min(100, parseInt(req.query.limit, 10) || 20));
+  res.json({ items: announcementsFor('ombre', limit), gate: gateView('ombre') });
+});
 
 // ---- configurations enregistrées en base ----------------------------------
 app.get('/api/configs', async (req, res) => {

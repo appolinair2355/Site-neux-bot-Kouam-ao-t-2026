@@ -13,7 +13,6 @@
 
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
-const nodemailer = require('nodemailer');
 const db = require('./db');
 const config = require('./config');
 
@@ -177,25 +176,30 @@ async function verify(emailRaw, codeRaw) {
 }
 
 // ---------------------------------------------------------------------------
-// Compte Gmail expéditeur — configuré UNE FOIS par l'admin (stocké en base,
-// réutilisé pour tous les envois de code suivants).
+// Compte Resend expéditeur — configuré UNE FOIS par l'admin (stocké en base,
+// réutilisé pour tous les envois de code suivants). Resend envoie par API
+// HTTP (port 443, jamais bloqué) au lieu du SMTP classique — voir
+// https://resend.com/docs/api-reference/emails/send-email.
 // ---------------------------------------------------------------------------
-async function configureMailSender(userRaw, appPassword) {
+async function configureMailSender(apiKeyRaw, fromRaw) {
   if (!db.ready) return { ok: false, error: 'Base de données non connectée.' };
-  const user = normalize(userRaw);
-  if (!isGmail(user)) return { ok: false, error: "L'adresse expéditrice doit être une adresse @gmail.com." };
-  const pass = String(appPassword || '').trim();
-  if (!pass) return { ok: false, error: "Mot de passe d'application Gmail requis." };
-  await db.setSetting('gmail_user', user);
-  await db.setSetting('gmail_app_password', pass);
-  return { ok: true, user };
+  const apiKey = String(apiKeyRaw || '').trim();
+  if (!apiKey) return { ok: false, error: "Clé API Resend requise (créez un compte sur resend.com)." };
+  const from = String(fromRaw || '').trim();
+  await db.setSetting('resend_api_key', apiKey);
+  if (from) await db.setSetting('resend_from', from);
+  return { ok: true, from: from || null };
 }
 
 async function mailerStatus() {
-  let user = null;
-  if (db.ready) user = await db.getSetting('gmail_user');
-  user = user || config.GMAIL_USER;
-  return { configured: !!user, user: user || null };
+  let apiKey = null, from = null;
+  if (db.ready) {
+    apiKey = await db.getSetting('resend_api_key');
+    from = await db.getSetting('resend_from');
+  }
+  apiKey = apiKey || config.RESEND_API_KEY;
+  from = from || config.RESEND_FROM;
+  return { configured: !!(apiKey && apiKey !== 'RESEND_API_KEY_A_REMPLACER'), from: from || null };
 }
 
 // ---------------------------------------------------------------------------
@@ -224,31 +228,52 @@ async function debugInfo() {
 }
 
 async function sendMail(to, code) {
-  let user = null, pass = null;
+  let apiKey = null, from = null;
   if (db.ready) {
-    user = await db.getSetting('gmail_user');
-    pass = await db.getSetting('gmail_app_password');
+    apiKey = await db.getSetting('resend_api_key');
+    from = await db.getSetting('resend_from');
   }
-  // Repli sur les identifiants Gmail écrits en dur dans config.js.
-  user = user || config.GMAIL_USER;
-  pass = pass || config.GMAIL_PASS;
-  if (!user || !pass) {
+  // Repli sur la clé Resend écrite en dur dans config.js.
+  apiKey = apiKey || config.RESEND_API_KEY;
+  from = from || config.RESEND_FROM;
+  if (!apiKey || apiKey === 'RESEND_API_KEY_A_REMPLACER') {
     throw new Error(
-      "Compte Gmail d'envoi non configuré — l'administrateur doit le configurer une fois dans les réglages de sécurité."
+      "Clé API Resend non configurée — l'administrateur doit la renseigner une fois dans les réglages de sécurité."
     );
   }
-  const transport = nodemailer.createTransport({
-    service: 'gmail',
-    auth: { user, pass },
-  });
-  await transport.sendMail({
-    from: `Baccara Bot <${user}>`,
-    to,
-    subject: 'Code de confirmation — Baccara Bot',
-    text:
-      `Votre code de confirmation est : ${code}\n\n` +
-      `Il expire dans 15 minutes. Si vous n'êtes pas à l'origine de cette demande, ignorez ce message.`,
-  });
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000); // 8s au lieu de rester planté
+  let res;
+  try {
+    res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from,
+        to: [to],
+        subject: 'Code de confirmation — Baccara Bot',
+        text:
+          `Votre code de confirmation est : ${code}\n\n` +
+          `Il expire dans 15 minutes. Si vous n'êtes pas à l'origine de cette demande, ignorez ce message.`,
+      }),
+      signal: controller.signal,
+    });
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error('Délai dépassé en contactant Resend (8s).');
+    throw new Error(`Connexion à Resend impossible : ${e.message}`);
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (!res.ok) {
+    let detail = '';
+    try { const body = await res.json(); detail = body && (body.message || JSON.stringify(body)); } catch (_) {}
+    throw new Error(`Resend a refusé l'envoi (${res.status})${detail ? ' : ' + detail : ''}`);
+  }
 }
 
 module.exports = {

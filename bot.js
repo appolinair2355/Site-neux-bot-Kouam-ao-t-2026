@@ -15,6 +15,7 @@ const {
   initStrategies, setStrategyConfig, resetStrategy, strategyChannels, parityRuntime,
   bilanText, canSend, noteGateSent, gateView, autoView, noteSent, shadowRuntime, sweepAutoUnlock, unlockGate,
   fulfillAnnouncement, announcementsFor,
+  setOnAnnouncementSave, setOnAnnouncementDelete, restoreAnnouncements,
 } = require('./predictor');
 
 let bot = null;
@@ -1417,6 +1418,12 @@ async function applyDbConfigs() {
     if (g && typeof g === 'object') state.gates[key] = g;
   }
 
+  // annonces de position (/ombreannonces) : même raisonnement que les gates
+  // ci-dessus — sans cette restauration, une confirmation déjà en cours avant
+  // le redémarrage n'apparaissait plus jamais dans la liste.
+  const announcementRows = await db.loadAnnouncements();
+  restoreAnnouncements(announcementRows);
+
   // Stratégies IA : la base est la source de vérité (data.json est perdu à
   // chaque redéploiement/redémarrage sur les plateformes sans disque persistant).
   const aiRows = await db.loadAiStrategies();
@@ -1450,6 +1457,8 @@ async function startLoop() {
   // base de données : chaque jeu terminé est archivé par date
   setOnFinished((round) => { if (db.ready) db.saveGame(round); });
   setOnGateChange((key, g) => { if (db.ready) db.saveGate(key, g); });
+  setOnAnnouncementSave((entry) => { if (db.ready) db.saveAnnouncement(entry); });
+  setOnAnnouncementDelete((id) => { if (db.ready) db.deleteAnnouncement(id); });
   setOnConfirm((key, info) => { announceConfirm(key, info).catch(() => {}); });
   const s = await db.connect();
   console.log(s.ready ? '🗄️ Base de données connectée' : `🗄️ Base non connectée : ${s.error}`);

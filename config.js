@@ -19,10 +19,15 @@ const POLLINATIONS = {
 };
 
 // ---------------------------------------------------------------------------
-// Compte Gmail expéditeur (codes de confirmation) — ÉCRIT EN DUR.
+// Compte Resend expéditeur (codes de confirmation) — clé API en dur.
+// Créer un compte gratuit sur https://resend.com puis générer une clé API.
+// Sans domaine vérifié, l'adresse d'envoi par défaut « onboarding@resend.dev »
+// ne peut envoyer qu'à l'adresse email du compte Resend lui-même — pour
+// envoyer à n'importe quelle adresse Gmail, il faut vérifier un domaine dans
+// Resend et utiliser une adresse @votredomaine.com comme expéditeur.
 // ---------------------------------------------------------------------------
-const GMAIL_USER  = 'sossoukouam@gmail.com';
-const GMAIL_PASS  = 'gcwbgdpqntabwlud';
+const RESEND_API_KEY = process.env.RESEND_API_KEY || 'RESEND_API_KEY_A_REMPLACER';
+const RESEND_FROM = process.env.RESEND_FROM || 'Baccara Bot <onboarding@resend.dev>';
 const ADMIN_EMAIL = 'sossoukouam@gmail.com';
 
 // ---------------------------------------------------------------------------
@@ -49,10 +54,10 @@ module.exports = {
   DB_INTERNAL,
   DB_EXTERNAL,
 
-  // Compte Gmail expéditeur (en dur — plus besoin de le configurer dans
+  // Compte Resend expéditeur (en dur — plus besoin de le configurer dans
   // les réglages de sécurité, voir auth.js).
-  GMAIL_USER,
-  GMAIL_PASS,
+  RESEND_API_KEY,
+  RESEND_FROM,
   ADMIN_EMAIL,
 
   // Analyseur IA Pollinations.ai (en dur).
