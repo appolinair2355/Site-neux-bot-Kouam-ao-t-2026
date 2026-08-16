@@ -28,6 +28,7 @@
     background: #5b7cff; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer;
   }
   button:hover { background: #4a6bee; }
+  button:disabled { opacity: .6; cursor: wait; }
   button.ghost { background: transparent; color: #9098a8; margin-top: 10px; text-decoration: underline; font-weight: 400; }
   .msg { margin-top: 14px; font-size: 13px; padding: 10px 12px; border-radius: 8px; display: none; }
   .msg.err { display: block; background: #3a1a1f; color: #ff9aa6; }
@@ -35,6 +36,28 @@
   .switch { text-align: center; margin-top: 16px; font-size: 13px; color: #9098a8; }
   .switch a { color: #5b7cff; cursor: pointer; text-decoration: none; }
   .hidden { display: none !important; }
+
+  /* petite roue de chargement dans les boutons, pendant l'envoi */
+  .spin-ico {
+    display: inline-block; width: 14px; height: 14px; margin-right: 8px; vertical-align: -2px;
+    border: 2px solid rgba(255,255,255,.35); border-top-color: #fff; border-radius: 50%;
+    animation: spinIco 700ms linear infinite;
+  }
+  @keyframes spinIco { to { transform: rotate(360deg); } }
+
+  /* ── Fenêtre modale : saisie du code de confirmation ──────────────── */
+  #verifyModalBackdrop {
+    position: fixed; inset: 0; z-index: 1000; background: rgba(5,7,13,.72);
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+    opacity: 0; pointer-events: none; transition: opacity 220ms ease;
+  }
+  #verifyModalBackdrop.open { opacity: 1; pointer-events: auto; }
+  #verifyModal {
+    width: 100%; max-width: 360px; background: #171a21; border: 1px solid #2c3140;
+    border-radius: 16px; padding: 26px 22px; box-shadow: 0 20px 60px rgba(0,0,0,.5);
+    transform: translateY(14px) scale(.97); transition: transform 220ms ease;
+  }
+  #verifyModalBackdrop.open #verifyModal { transform: translateY(0) scale(1); }
 
   /* ── Écran d'intro animé (avant connexion) : chargement puis image ──── */
   #splash {
@@ -109,7 +132,7 @@
       <input id="loginId" autocomplete="username" placeholder="sossoukouam">
       <label>Mot de passe</label>
       <input id="loginPwd" type="password" autocomplete="current-password" placeholder="••••••••">
-      <button onclick="doLogin()">Se connecter</button>
+      <button id="loginBtn" onclick="doLogin()">Se connecter</button>
       <div id="loginMsg" class="msg"></div>
       <div class="switch">Pas de compte ? <a onclick="showView('signup')">Créer un compte</a></div>
     </div>
@@ -123,18 +146,21 @@
       <input id="suPwd" type="password" autocomplete="new-password" placeholder="6 caractères minimum">
       <label>Confirmation du mot de passe</label>
       <input id="suPwd2" type="password" autocomplete="new-password" placeholder="Répéter le mot de passe">
-      <button onclick="doSignup()">Créer le compte</button>
+      <button id="signupBtn" onclick="doSignup()">Créer le compte</button>
       <div id="signupMsg" class="msg"></div>
       <div class="switch">Déjà un compte ? <a onclick="showView('login')">Se connecter</a></div>
     </div>
+  </div>
 
-    <div id="verifyView" class="hidden">
+  <!-- ── Fenêtre modale : code de confirmation ─────────────────────────── -->
+  <div id="verifyModalBackdrop">
+    <div id="verifyModal">
       <h1>🔑 Code de confirmation</h1>
       <p class="sub">Un code à 6 chiffres a été envoyé à <b id="verifyEmailLabel"></b>. Il expire dans 15 minutes.</p>
       <label>Code reçu</label>
       <input id="verifyCode" inputmode="numeric" maxlength="6" placeholder="123456">
-      <button onclick="doVerify()">Valider</button>
-      <button class="ghost" onclick="doResend()">Renvoyer un code</button>
+      <button id="verifyBtn" onclick="doVerify()">Valider</button>
+      <button class="ghost" id="resendBtn" onclick="doResend()">Renvoyer un code</button>
       <div id="verifyMsg" class="msg"></div>
     </div>
   </div>
@@ -192,7 +218,25 @@ function closeSplash() {
 function showView(name) {
   document.getElementById('loginView').classList.toggle('hidden', name !== 'login');
   document.getElementById('signupView').classList.toggle('hidden', name !== 'signup');
-  document.getElementById('verifyView').classList.toggle('hidden', name !== 'verify');
+}
+
+function openVerifyModal(email) {
+  pendingEmail = email;
+  document.getElementById('verifyEmailLabel').textContent = email;
+  document.getElementById('verifyCode').value = '';
+  document.getElementById('verifyMsg').className = 'msg';
+  document.getElementById('verifyModalBackdrop').classList.add('open');
+  document.getElementById('verifyCode').focus();
+}
+function closeVerifyModal() {
+  document.getElementById('verifyModalBackdrop').classList.remove('open');
+}
+
+function setBusy(btnId, busy, busyText, idleText) {
+  const btn = document.getElementById(btnId);
+  if (!btn) return;
+  btn.disabled = busy;
+  btn.innerHTML = busy ? `<span class="spin-ico"></span>${busyText}` : idleText;
 }
 
 function showMsg(id, text, ok) {
@@ -217,15 +261,15 @@ async function doLogin() {
   const identifier = document.getElementById('loginId').value.trim();
   const password = document.getElementById('loginPwd').value;
   if (!identifier || !password) return showMsg('loginMsg', 'Identifiant et mot de passe requis.', false);
+  setBusy('loginBtn', true, 'Connexion…', 'Se connecter');
   const { ok, data } = await post('/api/auth/login', { identifier, password });
+  setBusy('loginBtn', false, '', 'Se connecter');
   if (ok && data.ok) {
     window.location.href = '/';
     return;
   }
   if (data.needsVerification) {
-    pendingEmail = data.email;
-    document.getElementById('verifyEmailLabel').textContent = pendingEmail;
-    showView('verify');
+    openVerifyModal(data.email);
     return;
   }
   if (data.unknown) {
@@ -240,11 +284,12 @@ async function doSignup() {
   const password = document.getElementById('suPwd').value;
   const confirmPassword = document.getElementById('suPwd2').value;
   if (!email || !password || !confirmPassword) return showMsg('signupMsg', 'Tous les champs sont requis.', false);
+  document.getElementById('signupMsg').className = 'msg';
+  setBusy('signupBtn', true, 'Envoi du code en cours…', 'Créer le compte');
   const { data } = await post('/api/auth/signup', { email, password, confirmPassword });
+  setBusy('signupBtn', false, '', 'Créer le compte');
   if (data.ok) {
-    pendingEmail = data.email;
-    document.getElementById('verifyEmailLabel').textContent = pendingEmail;
-    showView('verify');
+    openVerifyModal(data.email);
     return;
   }
   showMsg('signupMsg', data.error || "Erreur lors de la création du compte.", false);
@@ -253,16 +298,21 @@ async function doSignup() {
 async function doVerify() {
   const code = document.getElementById('verifyCode').value.trim();
   if (!code) return showMsg('verifyMsg', 'Code requis.', false);
+  setBusy('verifyBtn', true, 'Vérification…', 'Valider');
   const { ok, data } = await post('/api/auth/verify', { email: pendingEmail, code });
+  setBusy('verifyBtn', false, '', 'Valider');
   if (ok && data.ok) {
-    window.location.href = '/';
+    showMsg('verifyMsg', 'Compte vérifié — ouverture du site…', true);
+    setTimeout(() => { window.location.href = '/'; }, 500);
     return;
   }
   showMsg('verifyMsg', data.error || 'Code incorrect.', false);
 }
 
 async function doResend() {
+  setBusy('resendBtn', true, 'Envoi…', 'Renvoyer un code');
   const { data } = await post('/api/auth/resend', { email: pendingEmail });
+  setBusy('resendBtn', false, '', 'Renvoyer un code');
   showMsg('verifyMsg', data.ok ? 'Nouveau code envoyé.' : (data.error || "Échec de l'envoi."), !!data.ok);
 }
 </script>
