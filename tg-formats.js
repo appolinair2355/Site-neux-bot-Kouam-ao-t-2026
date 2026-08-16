@@ -8,6 +8,8 @@ const SUIT_EMOJI_MAP = { '♠': '♠️', '♥': '❤️', '♦': '♦️', '♣
 const SUIT_NAME_FR   = { '♠': 'Pique', '♥': 'Cœur', '♦': 'Carreau', '♣': 'Trèfle', 'distrib': 'Distribution', 'deux': '2 Cartes', 'trois': '3 Cartes', 'WIN_B': 'Victoire Banquier', 'WIN_P': 'Victoire Joueur', 'TIE': 'Match Nul', 'TWO_THREE': '2+3 Cartes', 'DEUX_TROIS': 'J:2 B:3', 'TROIS_DEUX': 'J:3 B:2', 'TROIS_TROIS': 'J:3 B:3', 'pair': 'Pair', 'impair': 'Impair' };
 const SUPERSCRIPT    = ['⁰','¹','²','³','⁴','⁵','⁶','⁷','⁸','⁹','¹⁰','¹¹','¹²','¹³','¹⁴','¹⁵','¹⁶','¹⁷','¹⁸','¹⁹','²⁰'];
 const RATR_EMOJI     = ['0️⃣','1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','10','11','12','13','14','15','16','17','18','19','20'];
+const BOLD_DIGITS     = ['𝟎','𝟏','𝟐','𝟑','𝟒','𝟓','𝟔','𝟕','𝟖','𝟗'];
+function boldNum(n) { return String(n).split('').map((c) => BOLD_DIGITS[c] ?? c).join(''); }
 
 // Compat exports
 const SUIT_EMOJI = SUIT_EMOJI_MAP;
@@ -1054,6 +1056,24 @@ function buildTgMessage(formatId, {
         text:
           `🌹 𝐋𝐔𝐗𝐄 𝐁𝐀𝐂𝐂𝐀𝐑𝐀 🌹\n` +
           `🎱 Jeu #N${gameNumber}  ·  ${cible88}  ·  Dogon +${maxR}${sl88}`,
+        parse_mode: null,
+      };
+    }
+
+    // ── Format 89 : ROYAL CLUB (format demandé) ─────────────────────────────
+    case 89: {
+      const cible89 = suit === 'pair' || suit === 'impair'
+        ? (suit === 'pair' ? 'PAIR' : 'IMPAIR')
+        : cardsLabel ? cardsLabel : emoji;
+      let sl89;
+      if (status === null)         sl89 = '⏳ 𝐄𝐍 𝐂𝐎𝐔𝐑𝐒';
+      else if (status === 'gagne') sl89 = `✅ 𝐆𝐀𝐆𝐍É ${RATR_EMOJI[rattrapage] ?? rattrapage}`;
+      else                         sl89 = '❌ 𝐏𝐄𝐑𝐃𝐔';
+      return {
+        text:
+          `⭐️ 𝐑𝐎𝐘𝐀𝐋 𝐂𝐋𝐔𝐁 💎\\n` +
+          `🎱 𝐉𝐄𝐔 #𝐍${gameNumber} · ${cible89} · 𝐃𝐎𝐆𝐎𝐍 +${boldNum(maxR)}\\n` +
+          `💠 𝐑𝐄𝐒𝐔𝐋𝐓𝐀𝐓 ➜ ${sl89}`,
         parse_mode: null,
       };
     }

@@ -7,7 +7,7 @@
 
 const tg = require('./tg-formats');
 
-const FORMAT_COUNT = 88;   // 88 = format LUXE BACCARA (Jeu · costume · Dogon)
+const FORMAT_COUNT = 89;   // 89 = format ROYAL CLUB (Jeu · costume · Dogon · Résultat)
 
 // costumes utilisés par le moteur (avec sélecteur emoji) -> clés de tg-formats
 function normalizeSuit(suit) {

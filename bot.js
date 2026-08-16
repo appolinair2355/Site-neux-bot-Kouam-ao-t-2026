@@ -532,9 +532,8 @@ function wire(b) {
       lines.push(`• Pertes confirmées : ${g.losses}/${g.lossTrigger} nécessaire(s)`);
       lines.push('• Une nouvelle perte dans la fenêtre confirme ; un gain ou un écart trop grand relance la référence.');
     } else if (g.counting) {
-      const need = Math.max(1, g.position || 1) - 1;
       lines.push(`• Position à atteindre avant l'envoi public : N = ${g.position}`);
-      lines.push(`• Prédictions gagnées comptées en silence : ${g.seen}/${need}`);
+      lines.push(`• Prédictions comptées en silence : ${g.seen}/${g.position}`);
       lines.push('• Toute perte pendant ce décompte relance le comptage (retour phase 2).');
     } else if (g.armed) {
       lines.push('• Le seuil est atteint : la *prochaine prédiction* part publiquement dans le canal.');
@@ -546,11 +545,8 @@ function wire(b) {
     lines.push(
       `⚙️ Réglages : ${g.lossTrigger} perte(s) requise(s) · intervalle max ${g.lossInterval || 'illimité'} · fenêtre ${g.lossWindow}`
     );
-    if (g.auto && g.auto.enabled) {
-      lines.push(`🤖 Déclencheur auto (condition supplémentaire) : ${g.auto.label}`);
-    }
     lines.push('');
-    lines.push(`📤 Prochaine prédiction : ${g.sending ? 'CANAL PUBLIC' : 'CANAL SILENCIEUX uniquement'}`);
+    lines.push(`📤 Prochaine prédiction : ${g.sending ? 'CANAL CONFIGURÉ' : 'aucun envoi (silence)'}`);
     lines.push(`📡 ${g.label}`);
 
     b.sendMessage(msg.chat.id, lines.join('\n'), { parse_mode: 'Markdown' });

@@ -590,7 +590,7 @@ function gateView(key) {
             ? `Envoi ACTIF (${g.autoUnlockReason})`
             : `Phase 3 — prédiction ${g.need ? `n°${g.need} ` : ''}ENVOYÉE publiquement${cfg.sendOnlyNext ? ' — puis retour au silence' : ''}`)
         : g.counting
-          ? `Phase 3 — décompte silencieux : ${g.seen}/${Math.max(1, g.need) - 1} avant la position N=${g.need}`
+          ? `Phase 3 — décompte silencieux : ${g.seen}/${g.need} avant la position N=${g.need}`
           : g.losses >= 1
             ? `Phase 2 — référence #N${g.since} · écart ${g.window}` +
               (maxGap ? ` (confirmation si écart < ${maxGap})` : ` (fenêtre ${g.window}/${max})`) +

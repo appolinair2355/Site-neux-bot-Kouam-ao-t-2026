@@ -2,7 +2,7 @@
 'use strict';
 
 // ---------------------------------------------------------------------------
-// API IA Pollinations. Les secrets restent dans les variables d'environnement.
+// API IA Pollinations — clé en dur dans le code (aucune variable Render requise).
 // ---------------------------------------------------------------------------
 const POLLINATIONS = {
   BASE_URL: 'https://gen.pollinations.ai',
@@ -14,19 +14,35 @@ const POLLINATIONS = {
     `https://gen.pollinations.ai/video/${encodeURIComponent(prompt)}?model=${model}&duration=${duration}`,
   AUDIO_URL: (text, voice = 'nova') =>
     `https://gen.pollinations.ai/audio/${encodeURIComponent(text)}?voice=${voice}`,
-  API_KEY: process.env.POLLINATIONS_API_KEY || '',
+  API_KEY: process.env.POLLINATIONS_API_KEY || 'POLLINATIONS_KEY_A_REMPLACER',
   MODEL: process.env.POLLINATIONS_MODEL || 'openai',
 };
+
+// ---------------------------------------------------------------------------
+// Base PostgreSQL Render — ÉCRITE EN DUR (aucune variable Render nécessaire).
+// URL interne : utilisable uniquement depuis Render (plus rapide, sans SSL).
+// URL externe : utilisable depuis n'importe où (SSL obligatoire).
+// ---------------------------------------------------------------------------
+const DB_INTERNAL =
+  'postgresql://base_de_donnees_hgxo_user:Y121g3HpUQE9YpORWPeudA1MrHPLjeXO@dpg-d9qtu967bikc73ejg52g-a/base_de_donnees_hgxo';
+const DB_EXTERNAL =
+  'postgresql://base_de_donnees_hgxo_user:Y121g3HpUQE9YpORWPeudA1MrHPLjeXO@dpg-d9qtu967bikc73ejg52g-a.oregon-postgres.render.com/base_de_donnees_hgxo';
+
+// Sur Render on prend l'URL interne, ailleurs (PC local) l'URL externe.
+const ON_RENDER = Boolean(process.env.RENDER || process.env.RENDER_SERVICE_ID);
+const DB_URL = process.env.DATABASE_URL || (ON_RENDER ? DB_INTERNAL : DB_EXTERNAL);
 
 module.exports = {
   BOT_TOKEN: process.env.BOT_TOKEN || '',
   ADMIN_ID: Number(process.env.ADMIN_ID || 0),
   PORT: Number(process.env.PORT || 10000),
 
-  // PostgreSQL est toujours fourni par l'environnement de déploiement.
-  DATABASE_URL: process.env.DATABASE_URL || '',
+  // Base PostgreSQL Render (en dur — se connecte sans variable Render).
+  DATABASE_URL: DB_URL,
+  DB_INTERNAL,
+  DB_EXTERNAL,
 
-  // Analyseur IA Pollinations.ai.
+  // Analyseur IA Pollinations.ai (en dur).
   POLLINATIONS,
   POLLINATIONS_API_KEY: POLLINATIONS.API_KEY,
   POLLINATIONS_BASE_URL: `${POLLINATIONS.BASE_URL}/v1`,
