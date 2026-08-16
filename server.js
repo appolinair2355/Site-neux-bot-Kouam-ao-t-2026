@@ -19,7 +19,7 @@ const {
   strategyGames, bilanText, gameCategories, gateView, shadowRuntime,
   predictionsPanel, strategyChannels, unlockGate, sweepAutoUnlock,
 } = require('./predictor');
-const { startLoop, startBot, botStatus, activate, deactivate, persist, sendBilan, dropSender, announceConfig, announceMainBot, resolveChat, testSend, saveConfigsToDb, applyDbConfigs, setMainChannel } = require('./bot');
+const { startLoop, startBot, botStatus, activate, deactivate, persist, sendBilan, flushBilans, dropSender, announceConfig, announceMainBot, resolveChat, testSend, saveConfigsToDb, applyDbConfigs, setMainChannel } = require('./bot');
 
 const app = express();
 app.use(express.json());
@@ -263,6 +263,23 @@ app.post('/api/strategies/:key/bilan', async (req, res) => {
   if (!strategies.BY_KEY[req.params.key]) return res.status(404).json({ error: 'Stratégie inconnue' });
   await sendBilan(req.params.key);
   res.json({ ok: true, text: bilanText(req.params.key) });
+});
+
+// stratégies créées par l'IA + celles restées au-dessus d'un seuil (90% par défaut)
+app.get('/api/ai/strategies', (req, res) => {
+  const min = Number(req.query.min);
+  const list = aiAuto.listStrategies();
+  res.json({
+    total: list.length,
+    threshold: Number.isFinite(min) ? min : 90,
+    strategies: list,
+    elite: aiAuto.eliteStrategies(Number.isFinite(min) ? min : 90),
+  });
+});
+
+// publication manuelle du bilan complet (toutes stratégies + prédictions IA)
+app.post('/api/bilans/send', async (req, res) => {
+  res.json(await flushBilans('api'));
 });
 
 // bilan séparé par stratégie

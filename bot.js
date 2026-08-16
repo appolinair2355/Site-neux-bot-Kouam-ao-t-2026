@@ -9,7 +9,7 @@ const aiAuto = require('./ai-auto');
 const fmt = require('./formats');
 const strategies = require('./strategies');
 const {
-  state, evaluate, verify, registerGames, setOnFinished,
+  state, evaluate, verify, registerGames, setOnFinished, setOnGateChange,
   predictionText, predictionMessage, liveText, stats, SUITS,
   initStrategies, setStrategyConfig, resetStrategy, strategyChannels, parityRuntime,
   bilanText, canSend, noteGateSent, gateView, autoView, noteSent, shadowRuntime, sweepAutoUnlock, unlockGate,
@@ -125,6 +125,7 @@ const HELP =
   '/setstrat <clé> <format|maxr|b|lead|depart|var|decalage|streak|absence|silence|fenetre|template> <valeur>\n' +
   '/ombre — état de la stratégie « Prédiction dans l\'ombre »\n' +
   '/ombrecompte — comptage en temps réel du mode silencieux (phase actuelle, référence, écart, décompte, canal utilisé)\n' +
+  '/ombrehistorique — historique des prédictions depuis la perte de référence, avec alerte si ça dépasse la limite configurée\n' +
   '/silence <clé> <on|off> [fenêtre] — mode silencieux 1 (réservé à la stratégie « ombre »)\n' +
   '/debloquer <clé|tout> — débloque immédiatement l\'envoi (déblocage auto après 10 min)\n' +
   '/filtres — état du filtre « double perte » de chaque stratégie\n' +
@@ -134,6 +135,11 @@ const HELP =
   '/setparite <départ> <var> <décalage> <rattrapage> — configuration rapide\n' +
   '/resetstrat <clé> — remettre la configuration par défaut\n' +
   '/supprimerstrat <clé> — supprimer la configuration en base\n\n' +
+  '*Stratégies IA*\n' +
+  '/ia [n] — liste des stratégies créées par l\'IA (taux actuel et taux le plus bas)\n' +
+  '/ia90 [seuil] — stratégies IA à 90% ou plus SANS jamais descendre sous ce seuil\n' +
+  '/iabilan — bilan des prédictions IA (panneau Prédit)\n' +
+  '/bilan — publier maintenant le bilan complet (toutes stratégies + IA)\n\n' +
   '*Base de données*\n' +
   '/setdb <url> — lien PostgreSQL Render\n' +
   '/db — état de la base\n' +
@@ -549,6 +555,103 @@ function wire(b) {
     lines.push(`📤 Prochaine prédiction : ${g.sending ? 'CANAL CONFIGURÉ' : 'aucun envoi (silence)'}`);
     lines.push(`📡 ${g.label}`);
 
+    // --- explication concrète : pourquoi il n'y a (ou pas) de prédiction --
+    // le filtre « double perte » et la détection « costume absent → retour »
+    // sont deux mécanismes séparés. Le filtre peut être ARMÉ sans qu'aucune
+    // prédiction existe encore (aucun costume n'est revenu), et inversement
+    // une prédiction peut exister mais rester bloquée par le filtre.
+    const r = shadowRuntime();
+    lines.push('');
+    lines.push('🔍 *Pourquoi (pas) de prédiction en ce moment :*');
+    if (!r.enabled) {
+      lines.push('• La stratégie ombre est actuellement 🔴 arrêtée (/activerstrat ombre pour la relancer).');
+    } else if (r.prediction) {
+      lines.push(
+        `• Une prédiction est déjà calculée : ${r.prediction.label || r.prediction.suit} sur #N${r.prediction.target}.`
+      );
+      lines.push(
+        g.sending
+          ? '• Le filtre est ouvert : elle partira (ou est déjà partie) dans le canal public.'
+          : '• Le filtre « double perte » n\'est pas encore ouvert : elle reste calculée en silence, invisible sur le canal public (visible sur le site).'
+      );
+    } else {
+      const watched = r.suits.filter((x) => x.watched);
+      if (!watched.length) {
+        const closest = [...r.suits].sort((a, b) => b.absence - a.absence)[0];
+        lines.push(
+          `• Aucun costume n'est encore assez absent (seuil = ${r.absence} jeux) pour être mis sous surveillance.`
+        );
+        if (closest) {
+          lines.push(`• Le plus proche : ${closest.suit} — absent depuis ${closest.absence}/${r.absence} jeu(x).`);
+        }
+      } else {
+        lines.push(`• Sous surveillance (absent ≥ ${r.absence} jeux), en attente de RETOUR :`);
+        for (const w of watched) lines.push(`   ${w.suit} — absent depuis ${w.absence} jeu(x)`);
+        lines.push(`• Dès le retour d'un de ces costumes, la prédiction sera calculée sur le jeu + ${r.lead}.`);
+      }
+    }
+
+    b.sendMessage(msg.chat.id, lines.join('\n'), { parse_mode: 'Markdown' });
+  });
+
+  // historique des prédictions de la stratégie ombre depuis la perte de
+  // référence actuelle (g.since) — avec alerte si leur nombre dépasse la
+  // limite configurée (intervalle max, ou fenêtre si aucun intervalle réglé).
+  b.onText(/^\/ombrehistorique\b/, (msg) => {
+    const g = gateView('ombre');
+
+    if (g.since == null) {
+      return b.sendMessage(
+        msg.chat.id,
+        `📜 *Historique — Prédiction dans l'ombre*\n\n` +
+          `Aucune perte de référence pour l'instant.\n📡 ${g.label}`,
+        { parse_mode: 'Markdown' }
+      );
+    }
+
+    const list = state.predictions
+      .filter((p) => p.strategy === 'ombre' && p.target >= g.since)
+      .sort((a, b2) => a.target - b2.target);
+
+    const badgeFor = (p) =>
+      p.status === 'gagné' ? '✅' : p.status === 'perdu' ? '❌' : '⌛';
+
+    const lines = [`📜 *Historique — Prédiction dans l'ombre*`, '',
+      `• Perte de référence : #N${g.since}`, ''];
+
+    if (!list.length) {
+      lines.push('• (Aucune prédiction retrouvée pour ce numéro — historique probablement purgé.)');
+    } else {
+      list.forEach((p, i) => {
+        lines.push(
+          `${i === 0 ? '🔻' : '  •'} #N${p.target} ${badgeFor(p)} ${p.label || p.suit || ''}`.trimEnd()
+        );
+      });
+    }
+
+    const done = list.filter((p) => p.status !== 'en attente');
+    const usingInterval = !!g.lossInterval;
+    const limit = usingInterval ? g.lossInterval : g.lossWindow;
+    const limitLabel = usingInterval ? `intervalle max ${g.lossInterval}` : `fenêtre ${g.lossWindow}`;
+
+    lines.push('');
+    lines.push(`⚙️ Réglages : ${limitLabel} · ${g.lossTrigger} perte(s) requise(s)`);
+    lines.push(`📊 Prédictions terminées depuis la référence : ${done.length}/${limit}`);
+
+    if (done.length > limit) {
+      lines.push('');
+      lines.push(
+        `⚠️ Ce nombre dépasse la limite configurée (${limitLabel}). ` +
+          `Normalement, dès que l'écart dépasse cette limite, la perte suivante ` +
+          `devient automatiquement la NOUVELLE référence (repart à zéro) — un ` +
+          `dépassement visible ici signale que ça n'a pas (encore) été traité ` +
+          `ainsi. Vérifiez /ombrecompte pour l'état exact du filtre.`
+      );
+    }
+
+    lines.push('');
+    lines.push(`📡 ${g.label}`);
+
     b.sendMessage(msg.chat.id, lines.join('\n'), { parse_mode: 'Markdown' });
   });
 
@@ -676,6 +779,58 @@ function wire(b) {
         `Séquence : ${r.sequence.join(' → ')} …\n` +
         `Prochain déclencheur : #N${r.nextTrigger}`
     );
+  });
+
+  // ---- stratégies créées par l'IA -----------------------------------------
+  function iaLine(s, i) {
+    const rate = Number.isFinite(s.rate) ? s.rate : null;
+    const min = Number.isFinite(s.rateMin) ? s.rateMin : rate;
+    const flag = rate != null && min != null && rate >= 90 && min >= 90 ? '🏆' : rate >= 90 ? '⭐' : '•';
+    return `${flag} *${i + 1}. ${s.name}*\n` +
+      `   Taux : ${rate == null ? '—' : rate + '%'} • plus bas : ${min == null ? '—' : min + '%'} • mesures : ${s.observations || 1}\n` +
+      (s.support ? `   Échantillon : ${s.support}\n` : '') +
+      (s.trigger ? `   Déclencheur : ${String(s.trigger).slice(0, 120)}\n` : '') +
+      (s.target ? `   Cible : ${String(s.target).slice(0, 120)}\n` : '') +
+      `   Origine : ${s.origin || 'ia'} • ${s.active ? '🟢 active' : '⚪ inactive'}`;
+  }
+
+  b.onText(/^\/(?:ia|strategiesia)(?:@\w+)?(?:\s+(\d+))?\s*$/, (msg, m) => {
+    const limit = Math.min(Math.max(parseInt(m[1], 10) || 15, 1), 40);
+    const list = aiAuto.listStrategies();
+    if (!list.length) {
+      return b.sendMessage(msg.chat.id, "🤖 Aucune stratégie créée par l'IA pour l'instant. L'analyseur tourne en continu, réessaie plus tard.");
+    }
+    const rows = list.slice(0, limit).map(iaLine);
+    b.sendMessage(
+      msg.chat.id,
+      `🤖 *Stratégies créées par l'IA* — ${list.length} au total\n\n${rows.join('\n\n')}\n\n🏆 = 90% et jamais descendue → /ia90`,
+      { parse_mode: 'Markdown' }
+    );
+  });
+
+  b.onText(/^\/(?:ia90|elite)(?:@\w+)?(?:\s+(\d+))?\s*$/, (msg, m) => {
+    const seuil = Math.min(Math.max(parseInt(m[1], 10) || 90, 50), 100);
+    const list = aiAuto.eliteStrategies(seuil);
+    if (!list.length) {
+      return b.sendMessage(msg.chat.id, `🤖 Aucune stratégie IA à ${seuil}% ou plus sans jamais descendre pour l'instant.`);
+    }
+    b.sendMessage(
+      msg.chat.id,
+      `🏆 *Stratégies IA à ${seuil}% sans descendre* — ${list.length}\n\n${list.map(iaLine).join('\n\n')}`,
+      { parse_mode: 'Markdown' }
+    );
+  });
+
+  b.onText(/^\/iabilan\b/, (msg) => {
+    b.sendMessage(msg.chat.id, predit.globalBilanText() + '\n\n' +
+      predit.strategiesView().filter((v) => v.bilan && v.bilan.total > 0)
+        .map((v) => `• ${v.name} : ${v.bilan.win}✅/${v.bilan.loss}❌ (${v.bilan.rate}%)`).join('\n'));
+  });
+
+  b.onText(/^\/bilan\b/, async (msg) => {
+    if (!isAdmin(msg)) return deny(msg.chat.id);
+    const r = await flushBilans('commande /bilan');
+    b.sendMessage(msg.chat.id, `📊 Bilan publié : ${r.strategies.length} stratégie(s) + IA (${r.ai.ok ? 'envoyé' : r.ai.error || 'non envoyé'}).`);
   });
 
   b.onText(/^\/stats/, (msg) => {
@@ -806,6 +961,8 @@ function dropSender(token) {
 // bilan à envoyer quand le jeu reprend
 const bilanPending = new Set();
 let lastLiveNumber = null;
+let lastShoeSeq = 0;
+let firstTick = true;
 
 async function sendBilan(key) {
   const cfg = state.strategies[key] || {};
@@ -817,6 +974,25 @@ async function sendBilan(key) {
     try { await sender.sendMessage(id, text); countSent(key); }
     catch (e) { console.error('Bilan non envoyé', id, e.message); }
   }
+}
+
+// Publie le bilan COMPLET : chaque stratégie ayant prédit pendant le sabot
+// (et pas seulement celles clôturées au dernier tour) + les prédictions IA.
+async function flushBilans(reason = 'nouveau sabot') {
+  bilanPending.clear();
+  const keys = strategies.LIST
+    .map((d) => d.key)
+    .filter((key) => state.predictions.some((p) => p.strategy === key));
+  const done = [];
+  for (const key of keys) {
+    try { await sendBilan(key); done.push(key); }
+    catch (e) { console.error('Bilan non envoyé', key, e.message); }
+  }
+  let ai = { ok: false, error: 'panneau Prédit indisponible' };
+  try { ai = await predit.sendBilans(); }
+  catch (e) { ai = { ok: false, error: e.message }; }
+  console.log(`📊 Bilan (${reason}) : ${done.join(', ') || 'aucune stratégie'} • IA : ${ai.ok ? 'envoyé' : ai.error}`);
+  return { strategies: done, ai };
 }
 
 // message de confirmation envoyé dans le canal dès qu'on configure
@@ -1056,19 +1232,24 @@ async function tick() {
       bilanPending.add(p.strategy);           // bilan dès que le jeu reprend
     }
 
-    // Le bilan n'est publié QUE lorsque le jeu en live revient au jeu n°1
-    // (nouveau sabot), et non à chaque vérification.
+    // Le bilan est publié quand le jeu repart au n°1 (nouveau sabot).
+    // CORRECTIF : il partait uniquement pour les stratégies dont une prédiction
+    // venait de se clôturer sur le tout dernier tour, et jamais pour les
+    // prédictions IA. Un nouveau sabot annule aussi les prédictions en attente
+    // (resetShoe), donc plus rien n'arrivait dans « bilanPending ». On publie
+    // désormais le bilan de TOUTES les stratégies ayant prédit + celui des
+    // prédictions IA, dès que le sabot change.
     const liveNumber = state.live ? state.live.number : null;
+    const shoeSeq = state.shoeSeq || 0;
+    let nouveauSabot = shoeSeq !== lastShoeSeq;
+    lastShoeSeq = shoeSeq;
     if (liveNumber && liveNumber !== lastLiveNumber) {
       const prev = lastLiveNumber;
       lastLiveNumber = liveNumber;
-      const nouveauSabot = liveNumber === 1 || (prev != null && liveNumber < prev);
-      if (nouveauSabot && bilanPending.size) {
-        const keys = [...bilanPending];
-        bilanPending.clear();
-        for (const k of keys) await sendBilan(k);
-      }
+      if (liveNumber === 1 || (prev != null && liveNumber < prev)) nouveauSabot = true;
     }
+    if (nouveauSabot && !firstTick) await flushBilans('nouveau sabot');
+    firstTick = false;
 
     const preds = evaluate();
     for (const pred of preds) await broadcast(pred);
@@ -1139,6 +1320,14 @@ async function applyDbConfigs() {
   const missing = strategies.LIST.filter((d) => !loaded.includes(d.key)).map((d) => d.key);
   if (missing.length) await saveConfigsToDb();
 
+  // filtre « double perte » (gates) : restauré depuis la base pour survivre à
+  // un redémarrage du process (veille Render Free, redéploiement, crash…),
+  // sinon 2 pertes réellement tombées avant un redémarrage étaient « oubliées ».
+  const gateRows = await db.loadGates();
+  for (const [key, g] of Object.entries(gateRows)) {
+    if (g && typeof g === 'object') state.gates[key] = g;
+  }
+
   // Stratégies IA : la base est la source de vérité (data.json est perdu à
   // chaque redéploiement/redémarrage sur les plateformes sans disque persistant).
   const aiRows = await db.loadAiStrategies();
@@ -1171,6 +1360,7 @@ async function startLoop() {
   predit.setSender(senderFor);
   // base de données : chaque jeu terminé est archivé par date
   setOnFinished((round) => { if (db.ready) db.saveGame(round); });
+  setOnGateChange((key, g) => { if (db.ready) db.saveGate(key, g); });
   const s = await db.connect();
   console.log(s.ready ? '🗄️ Base de données connectée' : `🗄️ Base non connectée : ${s.error}`);
   if (s.ready) {
@@ -1189,4 +1379,4 @@ async function startLoop() {
   startBot();
 }
 
-module.exports = { predit, setMainChannel, broadcast, sendPrediction, updateResult, startLoop, startBot, botStatus, activate, deactivate, persist, listChannels, sendBilan, dropSender, announceConfig, announceMainBot, resolveChat, testSend, senderFor, saveConfigsToDb, applyDbConfigs };
+module.exports = { predit, flushBilans, setMainChannel, broadcast, sendPrediction, updateResult, startLoop, startBot, botStatus, activate, deactivate, persist, listChannels, sendBilan, dropSender, announceConfig, announceMainBot, resolveChat, testSend, senderFor, saveConfigsToDb, applyDbConfigs };

@@ -36,6 +36,9 @@ const panel = {
   format: 1,           // format de prédiction utilisé pour les messages
   perStrategy: 2,      // nombre de prédictions autorisées par stratégie créée
   requireCombo: false, // n'envoyer QUE les prédictions confirmées par 2 règles
+  minGap: 3,           // écart minimum (en numéro de jeu) exigé entre deux
+                        // numéros prédits par le panneau ; un nouveau numéro
+                        // trop proche du dernier numéro déjà prédit est bloqué
   certified: [],       // règles IA actuellement au-dessus du seuil
   retired: [],         // règles retirées (perdues ou quota atteint)
   predictions: [],     // prédictions du panneau (les 200 dernières)
@@ -80,6 +83,7 @@ function configure(patch = {}) {
   if (patch.maxR !== undefined) panel.maxR = Math.max(0, Math.min(5, parseInt(patch.maxR, 10) || 0));
   if (patch.format !== undefined) panel.format = fmt.clampFormat(patch.format);
   if (patch.perStrategy !== undefined) panel.perStrategy = Math.max(1, Math.min(50, parseInt(patch.perStrategy, 10) || 1));
+  if (patch.minGap !== undefined) panel.minGap = Math.max(0, Math.min(30, parseInt(patch.minGap, 10) || 0));
   persist();
   return config();
 }
@@ -94,6 +98,7 @@ function config() {
     format: panel.format,
     perStrategy: panel.perStrategy,
     requireCombo: panel.requireCombo,
+    minGap: panel.minGap,
   };
 }
 
@@ -254,6 +259,14 @@ function motifOf(entry, game, target) {
   ].filter(Boolean).join(' · ');
 }
 
+// dernier numéro de jeu ciblé par une prédiction du panneau (peu importe son
+// statut) : sert de référence pour la règle d'écart minimum ci-dessous.
+// panel.predictions est alimenté via unshift(), donc l'élément [0] est
+// toujours le tout dernier numéro prédit.
+function lastPredictedTarget() {
+  return panel.predictions.length ? panel.predictions[0].target : null;
+}
+
 function makePredictions(games) {
   const last = lastFinishedNumber(games);
   if (!last) return [];
@@ -263,6 +276,11 @@ function makePredictions(games) {
   // disponible ou a déjà une prédiction en cours, les règles < 100% sont
   // écartées de ce tour (elles ne sont pas supprimées, juste mises en attente).
   const perfectPriority = hasPerfectPriority(active);
+  // écart minimum exigé entre le numéro qui va être prédit et le dernier
+  // numéro déjà prédit par le panneau : les cibles trop rapprochées (jeux
+  // quasi consécutifs) sont bloquées plutôt qu'envoyées.
+  const minGap = Math.max(0, Math.min(30, parseInt(panel.minGap, 10) || 0));
+  let lastTarget = lastPredictedTarget();
   for (const entry of active) {
     if (!entry.rule) continue;
     if (perfectPriority && entry.rate < 100) continue;
@@ -272,6 +290,12 @@ function makePredictions(games) {
       const target = g.n + entry.rule.k;
       if (target <= last) continue; // le jeu cible est déjà joué
       if (panel.predictions.some((p) => p.source === entry.id && p.target === target)) continue;
+      if (minGap > 0 && lastTarget != null && Math.abs(target - lastTarget) < minGap) {
+        // numéro trop proche du dernier prédit : cette occurrence est
+        // bloquée (on tente quand même un autre jeu déclencheur pour cette
+        // règle, plus loin dans la fenêtre de recherche).
+        continue;
+      }
       const pred = {
         id: `predit-${entry.id}-${target}`,
         source: entry.id,
@@ -290,6 +314,7 @@ function makePredictions(games) {
         createdAt: new Date().toISOString(),
       };
       panel.predictions.unshift(pred);
+      lastTarget = target; // référence mise à jour pour les règles suivantes de ce même tour
       entry.used = (entry.used || 0) + 1;
       created.push(pred);
       if ((entry.used || 0) >= panel.perStrategy) entry.quotaAt = new Date().toISOString();
@@ -529,6 +554,43 @@ async function tick() {
   return panel;
 }
 
+// ---------------------------------------------------------------------------
+// Bilan complet des prédictions IA (envoyé quand le jeu repart au n°1)
+// ---------------------------------------------------------------------------
+function globalBilanText() {
+  const b = bilanOf(panel.predictions);
+  const nb = new Set(panel.predictions.flatMap((p) => p.sources.map((s) => s.id))).size;
+  return (
+    '📊 BILAN GLOBAL — PRÉDICTIONS IA 🤖\n\n' +
+    `🧠 Stratégies IA ayant prédit : ${nb}\n` +
+    `🎯 Prédictions : ${b.total}\n\n` +
+    `🟢 GAIN : ${b.win}\n` +
+    `🔴 PERTE : ${b.loss}\n\n` +
+    `✅ Taux de réussite : ${b.rate} %`
+  );
+}
+
+// Envoie le bilan de CHAQUE stratégie IA ayant prédit, puis le bilan global.
+async function sendBilans() {
+  const bot = typeof sender === 'function' ? sender() : null;
+  if (!bot) return { ok: false, error: 'Aucun token Telegram configuré' };
+  if (!panel.channels.length) return { ok: false, error: 'Aucun canal configuré pour le panneau Prédit' };
+  const texts = strategiesView()
+    .filter((v) => v.bilan && v.bilan.total > 0)
+    .map((v) => v.bilanText);
+  texts.push(globalBilanText());
+  const sent = [];
+  const errors = [];
+  for (const id of panel.channels) {
+    for (const text of texts) {
+      try { await bot.sendMessage(id, text); sent.push(String(id)); panel.sentCount = (panel.sentCount || 0) + 1; }
+      catch (e) { errors.push(`${id} : ${e.message}`); }
+    }
+  }
+  panel.lastError = errors.length ? errors[0] : panel.lastError;
+  return { ok: sent.length > 0, sent, errors, count: texts.length };
+}
+
 async function test() {
   const bot = typeof sender === 'function' ? sender() : null;
   if (!bot) return { ok: false, error: 'Aucun token Telegram configuré' };
@@ -573,4 +635,4 @@ function status() {
   };
 }
 
-module.exports = { panel, status, config, configure, restore, restoreFromDb, setSender, tick, mirror, test, parseChannels };
+module.exports = { panel, status, config, configure, restore, restoreFromDb, setSender, tick, mirror, test, parseChannels, sendBilans, globalBilanText, strategiesView };

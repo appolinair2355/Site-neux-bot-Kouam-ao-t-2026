@@ -62,6 +62,16 @@ CREATE TABLE IF NOT EXISTS strategies (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- filtre d'envoi « double perte » (mode silencieux) de chaque stratégie :
+-- sans cette table, l'état (phase, pertes de référence, écart mesuré…)
+-- ne vivait qu'en RAM et repartait de zéro à chaque redémarrage du process
+-- (veille/redéploiement Render Free), même si 2 pertes venaient de tomber.
+CREATE TABLE IF NOT EXISTS gates (
+  key        TEXT PRIMARY KEY,
+  payload    JSONB NOT NULL DEFAULT '{}',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 ALTER TABLE predictions ADD COLUMN IF NOT EXISTS strategy TEXT DEFAULT 'costume';
 ALTER TABLE predictions ADD COLUMN IF NOT EXISTS label    TEXT;
 ALTER TABLE predictions DROP CONSTRAINT IF EXISTS predictions_target_suit_hand_key;
@@ -85,6 +95,12 @@ CREATE TABLE IF NOT EXISTS ai_strategies (
   active      BOOLEAN NOT NULL DEFAULT false,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- suivi du taux dans le temps (stratégies IA restées à 90% sans descendre)
+ALTER TABLE ai_strategies ADD COLUMN IF NOT EXISTS rate_min NUMERIC;
+ALTER TABLE ai_strategies ADD COLUMN IF NOT EXISTS rate_max NUMERIC;
+ALTER TABLE ai_strategies ADD COLUMN IF NOT EXISTS observations INT NOT NULL DEFAULT 1;
+ALTER TABLE ai_strategies ADD COLUMN IF NOT EXISTS rate_history JSONB;
 
 -- Toutes les analyses IA sont conservées séparément des stratégies proposées.
 -- Le payload JSONB garde les découvertes, résumés et résultats complets.
@@ -251,6 +267,26 @@ async function deleteStrategy(key) {
   return q(`DELETE FROM strategies WHERE key = $1`, [key]);
 }
 
+// ---- filtre « double perte » (gates) -----------------------------------
+async function saveGate(key, payload) {
+  return q(
+    `INSERT INTO gates (key, payload, updated_at)
+     VALUES ($1,$2,now())
+     ON CONFLICT (key) DO UPDATE SET payload=EXCLUDED.payload, updated_at=now()`,
+    [key, JSON.stringify(payload || {})]
+  );
+}
+
+async function loadGates() {
+  const r = await q(`SELECT key, payload FROM gates`);
+  if (!r) return {};
+  const out = {};
+  for (const row of r.rows) {
+    out[row.key] = typeof row.payload === 'string' ? JSON.parse(row.payload || '{}') : row.payload || {};
+  }
+  return out;
+}
+
 // bilan des prédictions par stratégie
 async function strategyStats(key) {
   const r = await q(
@@ -284,19 +320,25 @@ async function clearPredictions(key) {
 async function saveAiStrategy(item) {
   return q(
     `INSERT INTO ai_strategies (id, name, logic, trigger_txt, target_txt, evidence, risks,
-        rate, support, minimum_sample, compatible_existing, origin, active, created_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, coalesce($14, now()))
+        rate, support, minimum_sample, compatible_existing, origin, active, created_at,
+        rate_min, rate_max, observations, rate_history)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, coalesce($14, now()), $15,$16,$17,$18)
      ON CONFLICT (id) DO UPDATE SET
        name=EXCLUDED.name, logic=EXCLUDED.logic, trigger_txt=EXCLUDED.trigger_txt,
        target_txt=EXCLUDED.target_txt, evidence=EXCLUDED.evidence, risks=EXCLUDED.risks,
        rate=EXCLUDED.rate, support=EXCLUDED.support, minimum_sample=EXCLUDED.minimum_sample,
        compatible_existing=EXCLUDED.compatible_existing, origin=EXCLUDED.origin,
-       active=EXCLUDED.active`,
+       active=EXCLUDED.active, rate_min=EXCLUDED.rate_min, rate_max=EXCLUDED.rate_max,
+       observations=EXCLUDED.observations, rate_history=EXCLUDED.rate_history`,
     [
       item.id, item.name, item.logic || null, item.trigger || null, item.target || null,
       item.evidence || null, item.risks || null, item.rate, item.support || null,
       item.minimumSample || null, item.compatibleExisting || null, item.origin || null,
       !!item.active, item.createdAt || null,
+      item.rateMin != null ? item.rateMin : item.rate,
+      item.rateMax != null ? item.rateMax : item.rate,
+      item.observations || 1,
+      JSON.stringify(item.rateHistory || []),
     ]
   );
 }
@@ -319,6 +361,10 @@ async function loadAiStrategies() {
     origin: row.origin,
     active: row.active,
     createdAt: row.created_at,
+    rateMin: row.rate_min == null ? (row.rate == null ? null : Number(row.rate)) : Number(row.rate_min),
+    rateMax: row.rate_max == null ? (row.rate == null ? null : Number(row.rate)) : Number(row.rate_max),
+    observations: row.observations == null ? 1 : Number(row.observations),
+    rateHistory: Array.isArray(row.rate_history) ? row.rate_history : [],
   }));
 }
 
@@ -549,6 +595,7 @@ module.exports = {
   connect, status, saveGame, gamesByDate, dailySummary, exec, rows,
   savePrediction, closePrediction, setSetting, getSetting, normalizeDate,
   saveStrategy, loadStrategies, deleteStrategy, strategyStats, strategyPredictions, clearPredictions,
+  saveGate, loadGates,
   saveAiStrategy, loadAiStrategies, deleteAiStrategy,
   saveAiAnalysis, loadAiAnalyses,
   lastGames, gameByNumber, predictionsByDate, predictionSummary,

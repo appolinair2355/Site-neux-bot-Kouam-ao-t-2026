@@ -196,3 +196,39 @@ Recalculé à chaque appel (aucun cache), il affiche :
 - le **canal utilisé pour la prochaine prédiction** (public ou silencieux) ;
 - les réglages en cours et, le cas échéant, l'état du déclencheur automatique.
 Les mêmes informations sont exposées sur `GET /api/ombre` et `GET /api/gates`.
+
+## Version 3.4 — stratégies IA visibles + bilan complet
+
+### Nouvelles commandes Telegram
+- `/ia [n]` — liste des stratégies **créées par l'IA** : taux actuel, **taux le
+  plus bas jamais observé**, nombre de mesures, déclencheur, cible, origine.
+- `/ia90 [seuil]` — uniquement les stratégies **à 90 % ou plus qui ne sont
+  jamais descendues** sous ce seuil (`rateMin >= seuil`). Alias : `/elite`.
+- `/iabilan` — bilan des prédictions IA (panneau « Prédit »).
+- `/bilan` — publication immédiate du bilan complet (admin).
+
+Le taux de chaque stratégie IA est désormais **remesuré à chaque analyse** :
+avant, une stratégie déjà connue était ignorée et son taux restait figé, il était
+donc impossible de savoir si elle était descendue. Les champs `rateMin`,
+`rateMax`, `observations` et `rateHistory` sont enregistrés en base
+(`ai_strategies`).
+
+API : `GET /api/ai/strategies?min=90` renvoie la liste complète et la sélection
+« jamais descendue ».
+
+### Correctif : bilan manquant après le retour au jeu n°1
+Le bilan n'était envoyé que pour les stratégies dont une prédiction venait juste
+de se clôturer sur le dernier tour du sabot. Or le nouveau sabot déclenche
+`resetShoe()`, qui annule les prédictions encore en attente : plus rien
+n'arrivait dans la file d'attente et **aucun bilan ne partait**, ni pour les
+stratégies existantes, ni pour les prédictions IA (le panneau « Prédit » n'avait
+même pas de bilan Telegram).
+
+Désormais :
+1. `resetShoe()` incrémente `state.shoeSeq` : le changement de sabot est détecté
+   de façon fiable (et plus seulement via le numéro live).
+2. `flushBilans()` publie le bilan de **toutes** les stratégies ayant prédit
+   pendant le sabot, dans leurs canaux respectifs.
+3. `predit.sendBilans()` publie le bilan de **chaque stratégie IA** ayant prédit
+   plus un **bilan global IA** dans le canal du panneau « Prédit ».
+4. Déclenchement manuel : `/bilan` ou `POST /api/bilans/send`.

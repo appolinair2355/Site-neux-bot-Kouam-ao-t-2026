@@ -41,12 +41,36 @@ function proposalRate(proposal) {
   return Number.isFinite(r) ? r : null;
 }
 
+// Suivi de la qualité d'une stratégie IA dans le temps :
+//  • rateMin  = taux le plus BAS jamais observé (sert au filtre « 90% sans descendre »)
+//  • rateMax  = meilleur taux observé
+//  • observations = nombre de mesures
+function trackRate(item, rate) {
+  if (!Number.isFinite(rate)) return item;
+  item.rate = rate;
+  item.rateMin = Number.isFinite(item.rateMin) ? Math.min(item.rateMin, rate) : rate;
+  item.rateMax = Number.isFinite(item.rateMax) ? Math.max(item.rateMax, rate) : rate;
+  item.observations = (item.observations || 0) + 1;
+  item.rateHistory = [...(item.rateHistory || []), { rate, at: new Date().toISOString() }].slice(-30);
+  item.lastRateAt = new Date().toISOString();
+  return item;
+}
+
 function saveProposal(proposal, origin = 'auto-local') {
   if (!proposal || !proposal.name) return null;
   const rate = proposalRate(proposal);
   if (rate == null || rate < MIN_STRATEGY_RATE) return null;
   const name = String(proposal.name).slice(0, 100);
-  if ((state.aiStrategies || []).some((s) => slug(s.name) === slug(name))) return null;
+  // CORRECTIF : avant, une stratégie déjà connue était simplement ignorée et son
+  // taux ne bougeait jamais. On met désormais la mesure à jour pour pouvoir
+  // suivre les stratégies qui restent à 90% ou plus sans jamais descendre.
+  const existing = (state.aiStrategies || []).find((s) => slug(s.name) === slug(name));
+  if (existing) {
+    trackRate(existing, rate);
+    existing.support = Number(proposal.support) || existing.support || null;
+    if (db.ready) db.saveAiStrategy(existing).catch(() => {});
+    return null;
+  }
   const item = {
     id: `ai-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     name,
@@ -63,12 +87,32 @@ function saveProposal(proposal, origin = 'auto-local') {
     createdAt: new Date().toISOString(),
     active: false,
   };
+  trackRate(item, rate);
+  item.observations = 1;
   state.aiStrategies = [item, ...(state.aiStrategies || [])].slice(0, 40);
   auto.createdCount += 1;
   // Enregistrement durable en base : sans ça, la stratégie ne survivait qu'en
   // mémoire/data.json et disparaissait au redémarrage du serveur (Render).
   if (db.ready) db.saveAiStrategy(item).catch(() => {});
   return item;
+}
+
+// Liste complète des stratégies créées par l'IA (la plus récente d'abord)
+function listStrategies() {
+  return [...(state.aiStrategies || [])].map((s) => ({
+    ...s,
+    rateMin: Number.isFinite(s.rateMin) ? s.rateMin : (Number.isFinite(s.rate) ? s.rate : null),
+    rateMax: Number.isFinite(s.rateMax) ? s.rateMax : (Number.isFinite(s.rate) ? s.rate : null),
+    observations: s.observations || 1,
+  }));
+}
+
+// Stratégies « au-dessus de la barre » : taux actuel >= seuil ET jamais
+// descendues sous ce seuil depuis leur création (rateMin >= seuil).
+function eliteStrategies(threshold = 90) {
+  return listStrategies()
+    .filter((s) => Number.isFinite(s.rate) && s.rate >= threshold && Number.isFinite(s.rateMin) && s.rateMin >= threshold)
+    .sort((a, b) => (b.rate - a.rate) || (b.rateMin - a.rateMin));
 }
 
 function pushResult(result) {
@@ -164,7 +208,10 @@ function start(onChange) {
     }).catch((e) => { auto.lastError = e.message; });
   };
   const tickRemote = () => {
-    refreshPastDays().then(() => runRemote()).then((r) => { if (r && onChange) onChange(); });
+    refreshPastDays()
+      .then(() => runRemote())
+      .then((r) => { if (r && onChange) onChange(); })
+      .catch((e) => { auto.lastError = e.message; auto.lastRemoteAt = Date.now(); });
   };
   tickLocal();
   localTimer = setInterval(tickLocal, config.AI_LOCAL_INTERVAL_MS);
@@ -194,4 +241,4 @@ function status() {
   };
 }
 
-module.exports = { MIN_STRATEGY_RATE, start, stop, status, cumulative, runLocal, runRemote, saveProposal, refreshPastDays, getPastDays: () => pastDays, auto };
+module.exports = { MIN_STRATEGY_RATE, listStrategies, eliteStrategies, trackRate, start, stop, status, cumulative, runLocal, runRemote, saveProposal, refreshPastDays, getPastDays: () => pastDays, auto };

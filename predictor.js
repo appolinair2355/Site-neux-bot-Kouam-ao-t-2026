@@ -256,6 +256,18 @@ function emptyGate() {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Persistance du filtre « double perte » (state.gates) : sans ce hook, l'état
+// (pertes de référence, phase, écart mesuré…) ne vit qu'en RAM et repart de
+// zéro à chaque redémarrage du process (ex. veille/redéploiement Render Free),
+// même si 2 pertes viennent réellement de tomber. On notifie donc l'appelant
+// (bot.js) à chaque mutation d'un gate pour qu'il le sauvegarde en base.
+let onGateChangeHook = null;
+function setOnGateChange(fn) { onGateChangeHook = fn; }
+function emitGateChange(key) {
+  if (onGateChangeHook) { try { onGateChangeHook(key, state.gates[key]); } catch (_) {} }
+}
+
 function gate(key) {
   if (!state.gates[key]) state.gates[key] = emptyGate();
   const g = state.gates[key];
@@ -266,6 +278,7 @@ function gate(key) {
 
 function resetGate(key) {
   state.gates[key] = emptyGate();
+  emitGateChange(key);
   return state.gates[key];
 }
 
@@ -280,6 +293,7 @@ function unlockGate(key, manual = true) {
   g.autoUnlockReason = manual ? 'déblocage manuel' : 'déblocage automatique (10 min)';
   const cfg = state.strategies[key];
   if (cfg && cfg.autoEnabled) { const a = autoGate(key); a.armed = true; a.counting = false; a.reason = 'déblocage manuel'; }
+  emitGateChange(key);
   return g;
 }
 
@@ -344,6 +358,10 @@ function startWindow(key, target) {
 
 // mise à jour du filtre à chaque prédiction terminée
 function noteClosed(pred) {
+  try { noteClosedInner(pred); } finally { emitGateChange(pred.strategy); }
+}
+
+function noteClosedInner(pred) {
   const cfg = state.strategies[pred.strategy];
   if (!cfg) return;
   noteClosedAuto(pred);
@@ -652,6 +670,9 @@ function resetShoe(reason = 'nouveau sabot') {
   }
   state.shoeResetAt = Date.now();
   state.shoeResetReason = reason;
+  // compteur de sabots : le bot s'en sert pour publier le bilan complet
+  // (toutes les stratégies + prédictions IA) dès que le jeu repart à 1.
+  state.shoeSeq = (state.shoeSeq || 0) + 1;
   return true;
 }
 
@@ -1189,6 +1210,7 @@ module.exports = {
   verify,
   registerGames,
   setOnFinished,
+  setOnGateChange,
   suitForNumber,
   nextTarget,
   handSuits,
