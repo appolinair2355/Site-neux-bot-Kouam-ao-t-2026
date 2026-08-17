@@ -361,7 +361,12 @@
       </div>
       <button class="logout-home-btn" onclick="doLogout()">🔴 Se déconnecter</button>`;
     }
-    function strategiesPage() { setNav('strategies'); $('#app').innerHTML = `<div class="section-head" style="padding-top:38px"><div><span class="eyebrow">Catalogue</span><h2 style="margin-top:7px">Choisir une stratégie</h2></div></div><div class="strategy-grid">${strategyButtons()}</div>`; }
+    function strategiesPage() { setNav('strategies'); $('#app').innerHTML = `<div class="section-head" style="padding-top:38px"><div><span class="eyebrow">Catalogue</span><h2 style="margin-top:7px">Choisir une stratégie</h2></div><button class="button ghost" onclick="resetAllStrategies()">Réinitialiser TOUT aux valeurs du code</button></div><div class="strategy-grid">${strategyButtons()}</div>`; }
+    async function resetAllStrategies() {
+      if (!confirm('Réinitialiser TOUTES les stratégies aux valeurs par défaut actuelles du code ? Les réglages personnalisés (rattrapages, absence, canaux...) seront perdus.')) return;
+      try { const r = await api('/api/strategies/reset-all', 'POST', {}); await refresh(); strategiesPage(); toast(`${(r.reset||[]).length} stratégie(s) réinitialisée(s).`); }
+      catch (e) { toast(e.message, 'error'); }
+    }
     function routeRows(s) {
       const pub = s.publishedChannels || s.channels || [], shadow = s.shadowChannels || [];
       // « ombre » : un seul canal. La stratégie n'envoie jamais rien tant que
