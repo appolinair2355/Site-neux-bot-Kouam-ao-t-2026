@@ -178,16 +178,30 @@ function pushResult(result) {
 let pastDays = [];
 let pastDaysAt = 0;
 
+// CORRECTIF : PostgreSQL renvoie une colonne DATE comme un objet JS `Date`
+// (minuit UTC), pas comme une chaîne « AAAA-MM-JJ ». `String(dateObj)`
+// produit un format du type « Wed Apr 01 2026 00:00:00 GMT... », que
+// `.slice(0, 10)` tronque n'importe comment (« Wed Apr 01 » au lieu de
+// « 2026-04-01 »). Résultat : `normalizeDate()` (voir db.js) ne reconnaissait
+// jamais cette date, `gamesByDate()` renvoyait alors [] pour CHAQUE journée
+// antérieure — la comparaison entre aujourd'hui et les jours précédents
+// portait donc toujours sur un historique vide (0 jour comparé). Même
+// correctif que `fmtDate()` dans bot.js.
+function isoDate(d) {
+  if (!d) return null;
+  return d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10);
+}
+
 async function refreshPastDays(force = false) {
   if (!db.ready) { pastDays = []; return pastDays; }
   if (!force && Date.now() - pastDaysAt < 5 * 60 * 1000) return pastDays;
   try {
     const dates = await db.availableDates(8);
-    const today = new Date().toISOString().slice(0, 10);
+    const today = isoDate(new Date());
     const out = [];
     for (const row of dates) {
-      const date = String(row.played_on).slice(0, 10);
-      if (date === today) continue;
+      const date = isoDate(row.played_on);
+      if (!date || date === today) continue;
       out.push({ date, games: await db.gamesByDate(date, 400) });
       if (out.length >= 6) break;
     }

@@ -17,6 +17,7 @@ const cumulative = require('./cumulative');
 const advisor = require('./strategy-advisor');
 const aiQa = require('./ai-qa');
 const predit = require('./predit');
+const afterLoss = require('./after-loss');
 const dayCompare = require('./day-compare');
 const {
   state, stats, predictionMessage, recentGames, SUITS,
@@ -182,6 +183,7 @@ app.get('/api/state', async (req, res) => {
       config: state.strategies[d.key] || {}, stats: stats(d.key),
     })),
     predit: predit.status(),
+    afterLoss: afterLoss.status(),
     predictions: state.predictions.slice(0, 50).map((p) => ({
       strategy: p.strategy, strategyName: p.strategyName, label: p.label,
       target: p.target, suit: p.suit, hand: p.hand, step: p.step, maxR: p.maxR,
@@ -842,6 +844,57 @@ app.post('/api/predit/test', async (req, res) => {
 app.post('/api/predit/scan', async (req, res) => {
   await predit.tick();
   res.json(predit.status());
+});
+
+// --- panneau « Prédiction après perte » (relais après N pertes) ------------
+app.get('/api/after-loss', (req, res) => res.json(afterLoss.status()));
+
+app.post('/api/after-loss/config', (req, res) => {
+  afterLoss.configure(req.body || {});
+  res.json(afterLoss.status());
+});
+
+app.post('/api/after-loss/channel', async (req, res) => {
+  const idsList = afterLoss.parseChannels(req.body && req.body.channelId);
+  if (!idsList.length) return res.status(400).json({ error: 'ID de canal invalide' });
+  const check = await resolveChat(idsList[0]);
+  if (!check.ok) return res.status(400).json({ error: check.error });
+  afterLoss.configure({ channels: idsList });
+  const notice = await afterLoss.test();
+  res.json({ ok: true, channel: check.chat, notice, afterLoss: afterLoss.status() });
+});
+
+app.delete('/api/after-loss/channel', (req, res) => {
+  afterLoss.configure({ channels: [] });
+  res.json(afterLoss.status());
+});
+
+app.post('/api/after-loss/test', async (req, res) => {
+  const r = await afterLoss.test();
+  res.status(r.ok ? 200 : 400).json(r);
+});
+
+app.post('/api/after-loss/scan', async (req, res) => {
+  await afterLoss.tick();
+  res.json(afterLoss.status());
+});
+
+app.post('/api/after-loss/trackers', (req, res) => {
+  try {
+    const t = afterLoss.addTracker(req.body && req.body.key, req.body && req.body.lossThreshold);
+    res.json({ ok: true, tracker: t, afterLoss: afterLoss.status() });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.put('/api/after-loss/trackers/:id', (req, res) => {
+  const t = afterLoss.updateTracker(req.params.id, req.body || {});
+  if (!t) return res.status(404).json({ error: 'Stratégie suivie introuvable' });
+  res.json({ ok: true, tracker: t, afterLoss: afterLoss.status() });
+});
+
+app.delete('/api/after-loss/trackers/:id', (req, res) => {
+  afterLoss.removeTracker(req.params.id);
+  res.json(afterLoss.status());
 });
 
 // --- diagnostic complet des envois de prédictions ---------------------------

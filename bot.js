@@ -9,6 +9,7 @@ const auth = require('./auth');
 const aiAuto = require('./ai-auto');
 const fmt = require('./formats');
 const strategies = require('./strategies');
+const afterLoss = require('./after-loss');
 const {
   state, evaluate, verify, registerGames, setOnFinished, setOnGateChange, setOnConfirm,
   predictionText, predictionMessage, liveText, stats, SUITS,
@@ -1423,6 +1424,10 @@ async function tick() {
 
     // panneau « Prédit » : prédictions certifiées à 100% (IA)
     await predit.tick();
+
+    // panneau « Prédiction après perte » : relais de la prochaine prédiction
+    // d'une stratégie suivie (existante ou IA) après N pertes consécutives.
+    await afterLoss.tick();
   } catch (e) {
     state.lastError = e.message;
   } finally {
@@ -1550,12 +1555,15 @@ async function applyDbConfigs() {
     aiAnalyses: state.aiAnalyses,
   });
   await predit.restoreFromDb();
+  await afterLoss.restoreFromDb();
   return { ok: true, loaded, added: missing, restored, aiStrategiesLoaded: aiRows.length };
 }
 
 async function startLoop() {
   predit.restore();
   predit.setSender(senderFor);
+  afterLoss.restore();
+  afterLoss.setSender(senderFor);
   // base de données : chaque jeu terminé est archivé par date
   setOnFinished((round) => { if (db.ready) db.saveGame(round); });
   setOnGateChange((key, g) => { if (db.ready) db.saveGate(key, g); });

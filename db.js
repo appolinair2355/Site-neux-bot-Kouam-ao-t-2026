@@ -556,6 +556,16 @@ async function loadPreditState() {
   try { return JSON.parse(raw); } catch (_) { return null; }
 }
 
+async function saveAfterLossState(value) {
+  return setSetting('after_loss_state', JSON.stringify(value || {}));
+}
+
+async function loadAfterLossState() {
+  const raw = await getSetting('after_loss_state');
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch (_) { return null; }
+}
+
 // ---- panneau base de données : tout ce qui est stocké ----------------------
 async function allSettings() {
   const r = await q(`SELECT key, value FROM settings ORDER BY key`);
@@ -711,7 +721,7 @@ module.exports = {
   saveAiAnalysis, loadAiAnalyses,
   lastGames, gameByNumber, predictionsByDate, predictionSummary,
   overview, availableDates, readOnlyQuery,
-  saveAppConfig, loadAppConfig, savePreditState, loadPreditState,
+  saveAppConfig, loadAppConfig, savePreditState, loadPreditState, saveAfterLossState, loadAfterLossState,
   dump, allSettings, lastPredictions, strategyRows, tableCounts,
   get ready() { return ready; },
 };

@@ -27,11 +27,21 @@ function parseCard(card) {
   return { rank, suit, token: `${rank}${suit}` };
 }
 
+// CORRECTIF : une colonne DATE renvoyée par PostgreSQL est un objet JS
+// `Date` (minuit UTC), pas une chaîne « AAAA-MM-JJ » — `String(dateObj)`
+// donne un format non-ISO (« Wed Apr 01 2026 00:00:00 GMT... ») que
+// `.slice(0, 10)` coupe n'importe où. Même correctif que fmtDate() (bot.js)
+// et isoDate() (ai-auto.js).
+function isoDate(d) {
+  if (!d) return null;
+  return d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10);
+}
+
 function normalize(rawGames = []) {
   return rawGames
     .map((g) => ({
       n: Number(g.number ?? g.n),
-      date: g.played_on ? String(g.played_on).slice(0, 10) : g.date || null,
+      date: g.played_on ? isoDate(g.played_on) : g.date || null,
       playerCards: (g.player || g.player_cards || []).map(String),
       bankerCards: (g.banker || g.banker_cards || []).map(String),
       playerSuits: (g.playerSuits || g.player_suits || []).map(String),

@@ -13,14 +13,25 @@ const config = require('./config');
 const ai = require('./ai-analyzer');
 const db = require('./db');
 const strategies = require('./strategies');
-const { state, gateView } = require('./predictor');
+const { state, gateView, stats: strategyStats } = require('./predictor');
+const store = require('./store');
+const predit = require('./predit');
+const advisor = require('./strategy-advisor');
 
 const MAX_HISTORY = 12; // nombre d'échanges question/réponse gardés en mémoire (par admin)
+const HISTORY_TTL_MS = 5 * 60 * 1000; // 5 minutes : au-delà, une question/réponse est effacée
 const runtime = {
   lastAskedAt: null,
   lastError: null,
   history: [], // { question, answer, at }
 };
+
+// retire du journal toute question/réponse vieille de plus de 5 minutes —
+// après ce délai, la liste « Questions précédentes » redevient vide.
+function pruneHistory() {
+  const cutoff = Date.now() - HISTORY_TTL_MS;
+  runtime.history = runtime.history.filter((e) => new Date(e.at).getTime() >= cutoff);
+}
 
 // extrait les numéros de jeu mentionnés dans la question : « jeu 12 »,
 // « #N12 », « le 12 », « numéro 12 »…
@@ -75,11 +86,27 @@ async function findPredictionsForNumber(number) {
   }
 }
 
-// état courant (config + filtre) de chaque stratégie, condensé pour le contexte IA
+// nom lisible d'un canal (titre connu si le bot y a déjà été ajouté, sinon
+// juste son identifiant Telegram)
+function channelLabel(id) {
+  try {
+    const known = ((store.read() || {}).channels || []).find((c) => String(c.id) === String(id));
+    return known && known.title ? `${known.title} (${id})` : String(id);
+  } catch (_) { return String(id); }
+}
+
+// état courant (config + filtre + CANAUX + BILAN) de chaque stratégie,
+// condensé pour le contexte IA — sans le bilan/pourcentage, l'IA ne peut pas
+// dire « je préfère telle stratégie car son taux de réussite est... ».
 function strategiesSnapshot() {
   return strategies.LIST.map((def) => {
     const cfg = (state.strategies && state.strategies[def.key]) || strategies.defaultsFor(def.key);
     const g = gateView(def.key);
+    const s = strategyStats(def.key);
+    const published = Array.isArray(cfg.publishedChannels) && cfg.publishedChannels.length
+      ? cfg.publishedChannels
+      : (Array.isArray(cfg.channels) ? cfg.channels : []);
+    const shadow = Array.isArray(cfg.shadowChannels) ? cfg.shadowChannels : [];
     return {
       key: def.key,
       name: def.name,
@@ -89,9 +116,63 @@ function strategiesSnapshot() {
         silent: !!cfg.silent, lossTrigger: cfg.lossTrigger, lossWindow: cfg.lossWindow,
         lossInterval: cfg.lossInterval, resetOnWin: cfg.resetOnWin,
       },
+      bilan: { gains: s.win, pertes: s.loss, enAttente: s.pending, total: s.total, pourcentageReussite: s.rate },
+      canalPublic: published.length ? published.map(channelLabel) : 'aucun canal public configuré',
+      canalSilencieux: shadow.length ? shadow.map(channelLabel) : 'aucun canal silencieux configuré',
       gate: { phase: g.phase, label: g.label, sending: g.sending, queueLength: g.queueLength },
     };
   });
+}
+
+// avis de l'IA-conseillère (strategy-advisor.js) : verdict + conseils de
+// réglages concrets par stratégie existante, calculés sur le cumul du jour.
+// C'est de là que viennent des phrases comme « je te conseille de choisir
+// 2 pertes avant la prédiction suivante » ou « le déclencheur le plus fiable
+// est... » — jamais inventées, toujours dérivées des vraies statistiques.
+async function advisorSnapshot() {
+  try {
+    await advisor.run({ remote: false });
+    const st = advisor.status();
+    return {
+      analysePortantSur: st.range,
+      meilleureStrategie: st.global && st.global.best ? st.global.best : null,
+      strategieLaPlusFaible: st.global && st.global.worst ? st.global.worst : null,
+      resumeGlobal: st.global ? st.global.advice : null,
+      avisParStrategie: (st.advices || []).map((a) => ({
+        key: a.key,
+        name: a.name,
+        verdict: a.verdict,
+        bilan: { gains: a.stats.win, pertes: a.stats.loss, total: a.stats.total, pourcentageReussite: a.stats.rate },
+        reglagesActuels: a.settings,
+        conseils: a.advice,
+      })),
+    };
+  } catch (_) { return null; }
+}
+
+// bilan de la stratégie IA « Prédit » (règles découvertes automatiquement),
+// pour permettre la comparaison « stratégie existante vs prédiction IA ».
+function preditSnapshot() {
+  try {
+    const st = predit.status();
+    return {
+      bilanGlobal: {
+        gains: st.globalBilan.win, pertes: st.globalBilan.loss,
+        total: st.globalBilan.total, pourcentageReussite: st.globalBilan.rate,
+      },
+      reglesActives: (st.strategies || []).filter((s) => s.active).map((s) => ({
+        nom: s.name, pourcentageFiabilite: s.rate, echantillon: s.sample,
+        bilan: { gains: s.bilan.win, pertes: s.bilan.loss, pourcentageReussite: s.bilan.rate },
+      })),
+    };
+  } catch (_) { return null; }
+}
+
+// liste globale des canaux connus du bot (tous usages confondus)
+function channelsSnapshot() {
+  try {
+    return ((store.read() || {}).channels || []).map((c) => ({ id: c.id, titre: c.title || String(c.id) }));
+  } catch (_) { return []; }
 }
 
 // dernières prédictions toutes stratégies confondues (contexte général si la
@@ -115,6 +196,9 @@ async function buildContext(question) {
     questionNumerosDetectes: numbers,
     predictionsCorrespondantes: matches,
     strategiesActuelles: strategiesSnapshot(),
+    avisEtConseils: await advisorSnapshot(),
+    predictionIA: preditSnapshot(),
+    canauxConnusDuBot: channelsSnapshot(),
     dernieresPredictions: recentPredictionsSnapshot(),
   };
 }
@@ -140,6 +224,21 @@ function fallbackAnswer(context) {
   return parts.join('\n');
 }
 
+// filet de sécurité : au cas où le modèle renverrait quand même du markdown
+// ou un bloc de raisonnement, on nettoie avant d'afficher la réponse.
+function cleanAnswer(text) {
+  return String(text || '')
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/```[\s\S]*?```/g, (m) => m.replace(/```/g, ''))
+    .replace(/^\s{0,3}[-*•]\s+/gm, '')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 async function ask(question) {
   const q = String(question || '').trim();
   if (!q) { const e = new Error('Question vide.'); e.code = 'EMPTY_QUESTION'; throw e; }
@@ -149,11 +248,14 @@ async function ask(question) {
   let source;
   if (ai.keyLooksValid()) {
     const system = [
-      'Tu es l\'assistant technique du bot de prédiction Baccarat « Ombre ».',
-      'Tu réponds UNIQUEMENT à partir des données JSON fournies (prédictions réelles, raisons enregistrées par le moteur, réglages des stratégies, état des filtres).',
-      'Si l\'information demandée n\'est pas dans les données fournies, dis-le clairement : ne devine jamais un numéro de jeu, une raison ou un résultat qui n\'y figure pas.',
-      'Le champ "reason" d\'une prédiction est la raison réelle, déjà calculée par le bot : reformule-la clairement en français plutôt que de la réinventer.',
-      'Réponds de façon concise, factuelle, en français, sans markdown ni listes inutiles pour une question simple.',
+      'Tu es l\'assistant technique du bot de prédiction Baccarat « Ombre ». Tu discutes avec des utilisateurs humains : reste toujours poli, chaleureux et naturel, comme dans une vraie conversation, jamais robotique.',
+      'Tu dois pouvoir répondre à TOUT ce qui concerne le bot : salutations, échanges normaux, questions sur une prédiction précise, sur les réglages ou canaux d\'une stratégie, sur le bilan et le pourcentage de réussite de chaque stratégie (y compris la stratégie IA « Prédit »), et donner ton avis motivé sur quelle stratégie privilégier.',
+      'Le champ avisEtConseils contient l\'analyse déjà calculée par le module conseiller (verdict, conseils de réglages, meilleure et pire stratégie du jour) : appuie-toi dessus pour répondre à des questions comme « quelle stratégie préfères-tu et pourquoi », en citant le bilan et le pourcentage réel qui justifient ton avis. Le champ predictionIA donne le bilan de la stratégie IA « Prédit » pour la comparer aux autres.',
+      'Quand on te demande un conseil de réglage (ex. le nombre de pertes avant d\'envoyer la prédiction suivante, ou le meilleur déclencheur), utilise les conseils déjà présents dans avisEtConseils et les réglages actuels (reglagesActuels) pour formuler une recommandation concrète et chiffrée, comme le ferait un expert qui connaît les statistiques du bot.',
+      'Base-toi UNIQUEMENT sur les données JSON fournies pour tout ce qui concerne le bot. Si l\'information demandée n\'y figure pas, dis-le clairement au lieu d\'inventer un chiffre, un canal ou un résultat.',
+      'Pour une simple salutation ou une question générale sans rapport avec les données, réponds normalement et naturellement, sans mentionner l\'absence de données.',
+      'Le champ "reason" d\'une prédiction est la raison réelle déjà calculée par le bot : reformule-la clairement plutôt que de la réinventer.',
+      'FORMAT DE RÉPONSE STRICT : texte brut uniquement, en phrases complètes qui s\'enchaînent naturellement (comme à l\'oral), en français. INTERDIT : markdown, astérisques, dièses, puces, tirets de liste, numérotation de type "1)", ou tout symbole de mise en forme — même pour énumérer plusieurs éléments, relie-les par des mots de liaison (« ensuite », « par ailleurs », « de plus »). N\'affiche jamais de raisonnement intermédiaire ni de balises — donne directement la réponse finale, claire, précise et bien polie.',
     ].join(' ');
     try {
       const response = await fetch(config.POLLINATIONS.CHAT_URL, {
@@ -177,6 +279,7 @@ async function ask(question) {
       if (!response.ok) throw new Error(body?.error?.message || `Pollinations.ai a répondu ${response.status}.`);
       answer = (body?.choices?.[0]?.message?.content || body?.choices?.[0]?.text || '').trim();
       if (!answer) throw new Error('Réponse vide de Pollinations.ai.');
+      answer = cleanAnswer(answer);
       source = 'pollinations';
     } catch (e) {
       runtime.lastError = e.message;
@@ -190,6 +293,7 @@ async function ask(question) {
   }
 
   const entry = { question: q, answer, source, at: new Date().toISOString() };
+  pruneHistory();
   runtime.history = [entry, ...runtime.history].slice(0, MAX_HISTORY);
   runtime.lastAskedAt = Date.now();
   if (source === 'pollinations') runtime.lastError = null;
@@ -197,6 +301,7 @@ async function ask(question) {
 }
 
 function history() {
+  pruneHistory();
   return runtime.history;
 }
 
