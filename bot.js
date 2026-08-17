@@ -14,7 +14,7 @@ const {
   predictionText, predictionMessage, liveText, stats, SUITS,
   initStrategies, setStrategyConfig, resetStrategy, strategyChannels, parityRuntime,
   bilanText, canSend, noteGateSent, gateView, autoView, noteSent, shadowRuntime, sweepAutoUnlock, unlockGate,
-  fulfillAnnouncement, announcementsFor,
+  fulfillAnnouncement, announcementsFor, queueFloor,
   setOnAnnouncementSave, setOnAnnouncementDelete, restoreAnnouncements,
 } = require('./predictor');
 
@@ -574,11 +574,19 @@ function wire(b) {
     } else if (g.counting) {
       lines.push(`• Position à atteindre avant l'envoi public : N = ${g.position}`);
       lines.push(`• Prédictions comptées en silence : ${g.seen}/${g.position}`);
-      lines.push('• Toute perte pendant ce décompte relance le comptage (retour phase 2).');
+      lines.push('• La mesure de référence continue en parallèle (phase 2) : une nouvelle perte dans l\'intervalle ajoute une AUTRE position en file, sans jamais interrompre celle-ci.');
     } else if (g.armed) {
       lines.push('• Le seuil est atteint : la *prochaine prédiction* part publiquement dans le canal.');
       if (g.sendOnlyNext) lines.push('• Une seule prédiction sera envoyée, puis retour immédiat au silence.');
-      if (g.resetOnWin !== false) lines.push('• Un gain après l\'envoi remet le comptage à zéro.');
+      if (g.resetOnWin !== false) lines.push('• Un gain public après l\'envoi remet le comptage à zéro.');
+    }
+
+    if (g.queueLength > 1) {
+      lines.push('');
+      lines.push(`📋 File d'attente (${g.queueLength} position(s), envoyées dans cet ordre) :`);
+      g.queue.forEach((q, i) => {
+        lines.push(`   ${i + 1}. N=${q.position} — ${q.ready ? 'prête (en attente de tour d\'envoi)' : `${q.seen}/${q.position} compté(s)`}`);
+      });
     }
 
     lines.push('');
@@ -1350,7 +1358,14 @@ async function tick() {
     // reprend ici la plus ancienne prédiction ombre jamais envoyée (encore
     // en attente, OU déjà résolue en silence) et on l'envoie maintenant que
     // c'est autorisé — avec son résultat réel si elle est déjà terminée.
-    if (canSend('ombre')) {
+    // CORRECTIF FILE D'ATTENTE : la file « ombre » peut contenir plusieurs
+    // positions confirmées d'affilée (voir predictor.js). On les envoie donc
+    // en BOUCLE tant que canSend() reste vrai — jamais une seule par tick —
+    // afin de ne jamais en laisser une bloquée derrière une autre déjà prête.
+    // Chaque envoi dépile la tête de file (fulfillAnnouncement), donc canSend()
+    // reflète ensuite l'état de la position suivante, toujours dans l'ordre.
+    let guard = 0;
+    while (canSend('ombre') && guard++ < 20) {
       // CORRECTIF : exclure les prédictions « annulé » (tuées par un reset de
       // sabot en cours de décompte, voir resetShoe()). Sans ce filtre, dès que
       // la position N était enfin prête, le bot pouvait ressusciter une vieille
@@ -1358,22 +1373,19 @@ async function tick() {
       // laisser la vraie prédiction « ombre » du sabot courant partir — ce qui
       // désynchronisait complètement la position réellement envoyée par
       // rapport à celle annoncée dans /ombreannonces.
-      // CORRECTIF #2 : même problème avec un cycle (phase 1→2→3) ABANDONNÉ en
-      // cours de route (écart dépassé → resetGate, nouvelle référence…) : la
+      // CORRECTIF #2 : même problème avec un cycle (phase 1→2→3) ABANDONNÉ
+      // (changement de réglages, déblocage manuel qui remet tout à zéro…) : la
       // prédiction « ombre » restée silencieuse de ce cycle-là n'était ni
-      // envoyée ni annulée, donc toujours candidate au rattrapage. Une fois
-      // qu'un cycle SUIVANT confirmait une nouvelle position, ce rattrapage
-      // pouvait ressortir cette vieille prédiction hors contexte et
-      // « fulfillAnnouncement » la rattachait quand même à l'annonce actuelle
-      // → doublon visible (deux prédictions pour ce qui semblait être la même
-      // annonce). On ignore donc toute prédiction antérieure à la référence
-      // (`since`) du cycle EN COURS.
-      const since = gateView('ombre').since;
+      // envoyée ni annulée, donc toujours candidate au rattrapage. On ignore
+      // donc toute prédiction antérieure à la plus ancienne référence encore
+      // active (file d'attente comprise) — voir queueFloor().
+      const floor = queueFloor('ombre');
       const stuck = state.predictions
         .filter((p) => p.strategy === 'ombre' && p.status !== 'annulé' && (!p.messages || !p.messages.length)
-          && (since == null || p.target >= since))
+          && (floor == null || p.target >= floor))
         .sort((a, b) => a.target - b.target)[0];
-      if (stuck) await broadcast(stuck);
+      if (!stuck) break;
+      await broadcast(stuck);
     }
 
     // CORRECTIF : le bilan partait à CHAQUE nouveau sabot (donc plusieurs fois

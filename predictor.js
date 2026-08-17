@@ -254,6 +254,13 @@ function emptyGate() {
     armed: false, losses: 0, window: 0, since: null,
     counting: false, need: 0, seen: 0,
     blockedSince: Date.now(), autoUnlockedAt: null,
+    // CORRECTIF file d'attente « ombre » : plusieurs positions confirmées
+    // (phase 2 → 3) peuvent désormais patienter EN MÊME TEMPS, chacune avec
+    // son propre décompte. `queue[0]` est toujours la plus ANCIENNE — c'est
+    // elle qui doit partir en premier dans le canal public (voir canSend()) ;
+    // les suivantes patientent leur tour, sans jamais être ignorées.
+    //   entrée : { id, need, seen, refNumber, ready }
+    queue: [],
   };
 }
 
@@ -342,27 +349,24 @@ function pushAnnouncement(key, info) {
 
 // la prédiction annoncée finit par partir réellement dans le canal public
 function fulfillAnnouncement(key, gameNumber) {
-  const entry = [...state.announcements].reverse()
-    .find((a) => a.strategy === key && a.status === 'en_attente');
+  // CORRECTIF file d'attente : on cible désormais explicitement la plus
+  // ANCIENNE annonce en attente (queue FIFO) — c'est toujours elle qui doit
+  // partir en premier, jamais une plus récente qui aurait été confirmée
+  // entre-temps pendant que celle-ci patientait encore.
+  const entry = state.announcements
+    .filter((a) => a.strategy === key && a.status === 'en_attente')
+    .sort((a, b) => a.id - b.id)[0];
   if (!entry) return null;
   entry.status = 'envoyee';
   entry.sentNumber = gameNumber;
   entry.sentAt = Date.now();
   emitAnnouncementSave(entry);
-  return entry;
-}
-
-// une perte interrompt le décompte avant l'envoi : l'annonce en attente ne se
-// réalisera jamais → elle est retirée de l'historique (rien à afficher pour elle).
-function cancelPendingAnnouncement(key) {
-  const idx = [...state.announcements]
-    .map((a, i) => [a, i])
-    .reverse()
-    .find(([a]) => a.strategy === key && a.status === 'en_attente');
-  if (!idx) return null;
-  const [entry, i] = idx;
-  state.announcements.splice(i, 1);
-  emitAnnouncementDelete(entry.id);
+  // retire l'entrée correspondante de la file d'attente interne (phase 3) :
+  // sa position vient de partir réellement dans le canal public — la
+  // suivante (s'il y en a une) devient la nouvelle tête de file.
+  const g = gate(key);
+  const idx = g.queue.findIndex((q) => q.id === entry.id);
+  if (idx !== -1) { g.queue.splice(idx, 1); emitGateChange(key); }
   return entry;
 }
 
@@ -378,24 +382,74 @@ function gate(key) {
   const g = state.gates[key];
   if (g.blockedSince == null) g.blockedSince = Date.now();
   if (g.counting === undefined) { g.counting = false; g.need = 0; g.seen = 0; }
+  // MIGRATION (« ombre » uniquement) : anciens gates persistés (avant la file
+  // d'attente multi-positions) — on convertit l'unique position en cours
+  // (s'il y en avait une) en première entrée de la nouvelle file, pour ne
+  // rien perdre au premier redémarrage après la mise à jour. Les autres
+  // stratégies gardent leur format d'origine (armed/counting/need/seen).
+  if (key === 'ombre' && !Array.isArray(g.queue)) {
+    g.queue = (g.counting || g.armed) && g.need
+      ? [{ id: 0, need: g.need, seen: g.seen || 0, refNumber: g.since, ready: !!g.armed }]
+      : [];
+  }
+  if (!Array.isArray(g.queue)) g.queue = [];
   return g;
 }
 
+// annule TOUTES les annonces encore « en_attente » (il peut désormais y en
+// avoir plusieurs empilées, une par position confirmée dans la file d'attente)
+function cancelAllPendingAnnouncements(key) {
+  const pending = state.announcements.filter((a) => a.strategy === key && a.status === 'en_attente');
+  for (const entry of pending) {
+    const idx = state.announcements.indexOf(entry);
+    if (idx !== -1) state.announcements.splice(idx, 1);
+    emitAnnouncementDelete(entry.id);
+  }
+  return pending;
+}
+
+// reset COMPLET et volontaire (changement de réglages, déblocage manuel qui
+// repart de zéro, etc.) : ici, contrairement à un simple écart dépassé, on
+// vide aussi la file d'attente — l'utilisateur a explicitement demandé à
+// repartir de zéro.
 function resetGate(key) {
-  // CORRECTIF : cancelPendingAnnouncement() existait déjà mais n'était jamais
-  // appelée. Si le cycle repart de zéro (écart dépassé, etc.) alors qu'une
-  // annonce de phase 3 était encore « en_attente », elle restait bloquée pour
-  // toujours dans l'historique — un nouveau cycle en créait une seconde →
-  // deux annonces visibles dans /ombreannonces pour la même séquence.
-  if (key === 'ombre') cancelPendingAnnouncement(key);
+  if (key === 'ombre') cancelAllPendingAnnouncements(key);
   state.gates[key] = emptyGate();
   emitGateChange(key);
   return state.gates[key];
 }
 
+// reset de la seule mesure de référence (phases 1/2), utilisé quand l'écart
+// dépasse l'intervalle maximum : contrairement à resetGate(), la file
+// d'attente des positions déjà confirmées (phase 3) n'est JAMAIS touchée —
+// rien de ce qui est déjà en file ne doit être perdu ou ignoré.
+function resetReference(g) {
+  g.losses = 0;
+  g.window = 0;
+  g.since = null;
+  g.blockedSince = Date.now();
+  g.autoUnlockReason = null;
+}
+
 // déblocage manuel (bouton du panneau / commande Telegram)
 function unlockGate(key, manual = true) {
   const g = gate(key);
+  if (key === 'ombre') {
+    // débloque la position déjà EN TÊTE de file si elle existe (elle patiente
+    // simplement plus vite), sinon en crée une nouvelle immédiate (position 1)
+    if (g.queue.length) {
+      g.queue[0].ready = true;
+    } else {
+      const entry = pushAnnouncement(key, { position: 1, refNumber: g.since });
+      g.queue.push({ id: entry.id, need: 1, seen: 0, refNumber: entry.refNumber, ready: true });
+    }
+    g.losses = Math.max(g.losses, 1);
+    g.blockedSince = null;
+    g.autoUnlockedAt = Date.now();
+    g.autoUnlockReason = manual ? 'déblocage manuel' : 'déblocage automatique (10 min)';
+    emitGateChange(key);
+    return g;
+  }
   g.armed = true;
   g.losses = Math.max(g.losses, 1);
   g.window = 0;
@@ -453,12 +507,9 @@ function lossIntervalMax(cfg) {
 function lossIntervalMin(cfg) { return lossIntervalMax(cfg); }
 
 // phase 2 : cette perte devient la référence, la fenêtre d'écart repart de 0
+// (ne touche JAMAIS à la file d'attente — voir resetReference()/confirmQueueEntry())
 function startWindow(key, target) {
   const g = gate(key);
-  g.armed = false;
-  g.counting = false;
-  g.seen = 0;
-  g.need = 0;
   g.losses = 1;
   g.window = 0;
   g.since = target;
@@ -495,15 +546,40 @@ function noteClosedInner(pred) {
   const need = Math.max(1, Math.min(5, parseInt(cfg.lossTrigger, 10) || 2));
   const maxGap = lossIntervalMax(cfg);
 
-  // --- envoi déjà ouvert (prédiction publiée) -----------------------------
-  if (g.armed) { phaseArmed(pred, g, cfg, win); return; }
+  // --- CORRECTIF FILE D'ATTENTE -------------------------------------------
+  // Avant ce correctif, dès qu'une position était confirmée (phase 2 → 3),
+  // le filtre entrait en « comptage silencieux » ÉTANCHE : toute nouvelle
+  // perte de référence pendant ce décompte était totalement IGNORÉE — la
+  // mesure de l'écart (phase 1/2) ne reprenait qu'une fois la position en
+  // cours envoyée. Résultat : impossible d'avoir 2 positions en attente en
+  // même temps, et une perte survenue pendant le décompte silencieux était
+  // purement et simplement perdue.
+  //
+  // Nouveau fonctionnement :
+  //  1) la file d'attente (phase 3) avance TOUJOURS, sur CHAQUE prédiction
+  //     « ombre » qui se termine (gagnée ou perdue) — chaque position déjà
+  //     confirmée compte indépendamment, dans l'ordre où elle a été ajoutée ;
+  //  2) la mesure de référence (phases 1 → 2) ne s'arrête JAMAIS : elle
+  //     continue de tourner MÊME pendant qu'une ou plusieurs positions
+  //     patientent déjà en file, afin de pouvoir en confirmer une deuxième
+  //     (ou plus) sans jamais ignorer une perte ;
+  //  3) dès qu'une confirmation a lieu, la perte qui vient de confirmer sert
+  //     IMMÉDIATEMENT de nouvelle référence : le filtre repart directement
+  //     en phase 2 (PAS en phase 1) et continue son travail. Tant qu'il y a
+  //     des pertes dans l'intervalle, il reste en phase 2 pour alimenter la
+  //     file ; seul un écart supérieur à l'intervalle max le fait revenir en
+  //     phase 1 — et cela ne touche QUE la mesure de référence, jamais la
+  //     file d'attente déjà constituée (rien de ce qui y est n'est perdu).
+  advanceQueue(g);
 
-  // --- phase 3 : décompte silencieux vers la position N, ÉTANCHE aux ------
-  //     autres phases — elle ne fait qu'ATTENDRE, sans jamais s'interrompre
-  //     sur une perte. Elle compte toute prédiction « ombre » qui se termine
-  //     réellement (gagné OU perdu) ; une prédiction annulée (reset de sabot)
-  //     n'appelle jamais noteClosed() donc ne la fait pas dériver non plus.
-  if (g.counting) { phase3Counting(g); return; }
+  // une prédiction réellement ENVOYÉE PUBLIQUEMENT qui gagne referme le
+  // cycle de référence (si resetOnWin) — la file d'attente, elle, continue
+  // de vivre sa vie normalement pour les positions suivantes déjà en cours.
+  const wasPublic = !!(pred.messages && pred.messages.length);
+  if (win && wasPublic && cfg.resetOnWin !== false) {
+    resetReference(g);
+    return;
+  }
 
   // --- phase 1 : aucune référence, on attend la 1ʳᵉ perte ----------------
   if (g.losses === 0) { phase1Waiting(pred, g, win, need); return; }
@@ -512,78 +588,70 @@ function noteClosedInner(pred) {
   phase2Measuring(pred, g, win, need, maxGap);
 }
 
-// phase « envoi actif » : une prédiction gagnée referme le filtre (si
-// resetOnWin), une prédiction perdue redevient directement la nouvelle
-// référence (retour en phase 2 sans repasser par la phase 1).
-function phaseArmed(pred, g, cfg, win) {
-  if (win) { if (cfg.resetOnWin !== false) resetGate(pred.strategy); return; }
-  startWindow(pred.strategy, pred.target);
+// fait avancer TOUTES les entrées encore en décompte de la file d'attente
+// (phase 3) — chacune compte indépendamment depuis sa propre confirmation,
+// jusqu'à atteindre sa position N. Une fois prête, une entrée n'avance plus :
+// elle attend simplement son tour d'être réellement envoyée (voir canSend()
+// et fulfillAnnouncement(), qui la retire de la file une fois partie).
+function advanceQueue(g) {
+  for (const entry of g.queue) {
+    if (entry.ready) continue;
+    entry.seen += 1;
+    if (entry.seen >= Math.max(1, entry.need) - 1) entry.ready = true;
+  }
 }
 
-// phase 3 : ÉTANCHE et INDÉPENDANTE des phases 1/2 — une fois l'annonce
-// publiée, elle ne fait qu'une chose : compter les prédictions « ombre » qui
-// se terminent (gagné OU perdu, peu importe) jusqu'à atteindre la position
-// annoncée (g.need), puis exécuter l'envoi public. Rien ne l'interrompt ni
-// ne l'annule pendant l'attente — une perte pendant le décompte est comptée
-// normalement comme n'importe quelle autre prédiction, elle ne relance pas
-// une nouvelle référence et ne retire pas l'annonce en cours.
-function phase3Counting(g) {
-  g.seen += 1;
-  if (g.seen >= Math.max(1, g.need) - 1) {
-    g.counting = false;
-    g.armed = true;
-    g.blockedSince = null;
-  }
+// une confirmation (phase 2 atteinte) : la position N rejoint la file
+// d'attente (elle patientera son tour derrière celles déjà présentes, voir
+// canSend() qui ne sert jamais que la plus ANCIENNE en premier), PUIS la
+// perte qui vient de confirmer sert directement de nouvelle référence pour
+// continuer la mesure (retour immédiat en phase 2, sans repasser par la
+// phase 1) — comme demandé : tant qu'il y a des pertes dans l'intervalle, on
+// reste en phase 2 pour alimenter la file.
+function confirmQueueEntry(pred, g, N) {
+  const entry = pushAnnouncement(pred.strategy, { position: N, refNumber: pred.hitNumber ?? pred.target });
+  g.queue.push({ id: entry.id, need: N, seen: 0, refNumber: entry.refNumber, ready: N <= 1 });
+  emitConfirm(pred.strategy, entry);
+  startWindow(pred.strategy, pred.target);
 }
 
 // phase 1 : première perte rencontrée → elle devient la référence et ouvre
 // la fenêtre de mesure (phase 2). Avec lossTrigger=1, cette perte seule
-// suffit à confirmer : on passe directement en position 1 (phase 3 triviale).
+// suffit à confirmer : elle rejoint directement la file en position 1.
 function phase1Waiting(pred, g, win, need) {
   if (win) return;
+  if (need <= 1) { confirmQueueEntry(pred, g, 1); return; }
   startWindow(pred.strategy, pred.target);
-  if (need <= 1) {
-    g.armed = true; g.need = 1; g.blockedSince = null;
-    const entry = pushAnnouncement(pred.strategy, { position: 1, refNumber: pred.hitNumber ?? pred.target });
-    emitConfirm(pred.strategy, entry);
-  }
 }
 
 // phase 2 : mesure l'écart (en prédictions terminées) entre la perte de
 // référence et la perte suivante. Écart STRICTEMENT supérieur à l'intervalle
-// configuré (gain OU perte, peu importe) → retour COMPLET en phase 1 (aucune
-// référence, gate vidée) : on n'essaie plus de récupérer ce jeu comme
-// nouvelle référence, on attend une toute nouvelle 1ʳᵉ perte depuis zéro.
+// configuré (gain OU perte, peu importe) → la mesure de référence REPART en
+// phase 1 (aucune référence) — SANS jamais toucher à la file d'attente déjà
+// constituée : rien de ce qui y est déjà n'est ignoré ou annulé.
 // Un écart ÉGAL à l'intervalle reste valide (pas de retour en phase 1) : si
-// c'est une perte, elle peut confirmer normalement et faire basculer en
-// phase 3. Sinon, dès que `need` pertes sont réunies dans la fenêtre, l'écart
-// mesuré devient la position N annoncée puis on bascule en phase 3.
+// c'est une perte, elle peut confirmer normalement et rejoindre la file.
+// Sinon, dès que `need` pertes sont réunies dans la fenêtre, l'écart mesuré
+// devient la position N, elle rejoint la file, et la mesure repart aussitôt
+// en phase 2 (voir confirmQueueEntry).
 function phase2Measuring(pred, g, win, need, maxGap) {
   g.window += 1;
   if (maxGap && g.window > maxGap) {
-    resetGate(pred.strategy);
+    resetReference(g);
     return;
   }
   if (win) return;
   g.losses += 1;
   if (g.losses >= need) {
     const N = Math.max(1, g.window);
-    g.window = 0;
-    if (N <= 1) {
-      g.armed = true; g.counting = false; g.need = 1; g.seen = 0; g.blockedSince = null;
-    } else {
-      g.counting = true; g.need = N; g.seen = 0;
-    }
-    // repère interne (jamais public — voir bot.js) : mémorise la position
-    // à atteindre pour la phase 3 et alimente /ombreannonces.
-    const entry = pushAnnouncement(pred.strategy, { position: g.need, refNumber: pred.hitNumber ?? pred.target });
-    emitConfirm(pred.strategy, entry);
+    confirmQueueEntry(pred, g, N);
     return;
   }
   // sans intervalle max configuré, on garde la limite « lossWindow » (fenêtre
-  // dépassée sans confirmation → tout repart à zéro, gate remise à vide).
+  // dépassée sans confirmation → seule la référence repart à zéro, la file
+  // d'attente déjà constituée reste intacte).
   const max = windowSize(state.strategies[pred.strategy]);
-  if (!maxGap && g.window >= max) resetGate(pred.strategy);
+  if (!maxGap && g.window >= max) resetReference(g);
 }
 
 
@@ -698,7 +766,10 @@ function canSend(key) {
   // filtre, pas deux qui se cumulent).
   if (key === 'ombre') {
     applyAutoUnlock(key);
-    return !!gate(key).armed;
+    // seule la position en TÊTE de file (la plus ancienne) peut être envoyée :
+    // même si une position plus récente est déjà prête, elle attend son tour.
+    const g = gate(key);
+    return !!(g.queue.length && g.queue[0].ready);
   }
   // le déclencheur automatique remplace le filtre « double perte » quand il est actif
   if (cfg.autoEnabled) return !!autoGate(key).armed;
@@ -714,8 +785,20 @@ function noteGateSent(key) {
   const cfg = state.strategies[key];
   if (!cfg || cfg.autoEnabled || !cfg.silent || !cfg.sendOnlyNext) return;
   const g = gate(key);
-  if (!g.armed) return;
+  const wasReady = key === 'ombre' ? true /* fulfillAnnouncement vient de dépiler la tête de file */ : !!g.armed;
+  if (!wasReady) return;
   resetGate(key);
+}
+
+// plus petit refNumber encore actif pour « ombre » (garde-fou anti-résurrection
+// d'une vieille prédiction d'un cycle abandonné, voir bot.js/tick()) : couvre
+// aussi bien la file d'attente (positions déjà confirmées) que la mesure de
+// référence en cours (g.since), en prenant la plus ancienne des deux.
+function queueFloor(key) {
+  const g = gate(key);
+  const refs = g.queue.map((q) => q.refNumber).filter((n) => n != null);
+  if (g.since != null) refs.push(g.since);
+  return refs.length ? Math.min(...refs) : null;
 }
 
 // état lisible du filtre (panel web / Telegram)
@@ -728,12 +811,20 @@ function gateView(key) {
   const maxGap = lossIntervalMax(cfg);
   const delay = autoUnlockMs(cfg);
   const waitedMs = g.blockedSince ? Date.now() - g.blockedSince : 0;
-  const phase = g.armed ? 3 : g.counting ? 3 : g.losses >= 1 ? 2 : 1;
+  // « ombre » : la file d'attente peut contenir plusieurs positions confirmées
+  // en même temps. Pour compatibilité avec tout ce qui lisait déjà armed /
+  // counting / position / seen, ces champs reflètent la TÊTE de file (la plus
+  // ancienne, celle qui part en premier) ; `queue` expose la liste complète.
+  const isOmbre = key === 'ombre';
+  const front = isOmbre ? (g.queue[0] || null) : null;
+  const armed = isOmbre ? !!(front && front.ready) : !!g.armed;
+  const counting = isOmbre ? !!(front && !front.ready) : !!g.counting;
+  const phase = armed ? 3 : counting ? 3 : g.losses >= 1 ? 2 : 1;
   return {
     lossTrigger: need,
     lossInterval: maxGap,
     autoUnlockMin: delay ? Math.round(delay / 60000) : 0,
-    autoUnlockInSec: delay && g.blockedSince && !g.armed ? Math.max(0, Math.round((delay - waitedMs) / 1000)) : null,
+    autoUnlockInSec: delay && g.blockedSince && !armed ? Math.max(0, Math.round((delay - waitedMs) / 1000)) : null,
     autoUnlocked: !!g.autoUnlockedAt,
     autoUnlockReason: g.autoUnlockReason || null,
     silent: !!cfg.silent,
@@ -741,31 +832,38 @@ function gateView(key) {
     lossWindow: max,
     resetOnWin: cfg.resetOnWin !== false,
     sendOnlyNext: !!cfg.sendOnlyNext,
-    armed: !!g.armed,
+    armed,
     losses: g.losses,
     used: g.window,
     phase,
-    counting: !!g.counting,
-    position: g.need || null,
-    seen: g.seen || 0,
+    counting,
+    position: front ? front.need : (g.need || null),
+    seen: front ? front.seen : (g.seen || 0),
     since: g.since,
     left: g.losses === 1 && !maxGap ? Math.max(0, max - g.window) : null,
     sending: canSend(key),
+    // file d'attente complète (« ombre » uniquement) : chaque position en
+    // attente, dans l'ordre exact où elle sera envoyée.
+    queueLength: isOmbre ? g.queue.length : undefined,
+    queue: isOmbre ? g.queue.map((q) => ({ position: q.need, seen: q.seen, ready: q.ready })) : undefined,
     priority: key === 'ombre' ? 'silencieux' : cfg.autoEnabled ? 'auto' : 'direct',
     label: cfg.autoEnabled && key !== 'ombre'
       ? autoView(key).label
       : !cfg.silent
       ? 'Envoi direct (mode silencieux désactivé)'
-      : g.armed
+      : armed
         ? (g.autoUnlockReason
             ? `Envoi ACTIF (${g.autoUnlockReason})`
-            : `Phase 3 — prédiction ${g.need ? `n°${g.need} ` : ''}ENVOYÉE publiquement${cfg.sendOnlyNext ? ' — puis retour au silence' : ''}`)
-        : g.counting
-          ? `Phase 3 — décompte silencieux : ${g.seen}/${g.need} avant la position N=${g.need}`
+            : `Phase 3 — prédiction ${front && front.need ? `n°${front.need} ` : ''}ENVOYÉE publiquement${cfg.sendOnlyNext ? ' — puis retour au silence' : ''}` +
+              (isOmbre && g.queue.length > 1 ? ` · +${g.queue.length - 1} en attente derrière` : ''))
+        : counting
+          ? `Phase 3 — décompte silencieux : ${front.seen}/${front.need} avant la position N=${front.need}` +
+            (isOmbre && g.queue.length > 1 ? ` · +${g.queue.length - 1} en attente derrière` : '')
           : g.losses >= 1
             ? `Phase 2 — référence #N${g.since} · écart ${g.window}` +
               (maxGap ? ` (confirmation si écart ≤ ${maxGap})` : ` (fenêtre ${g.window}/${max})`) +
-              ` — ${g.losses}/${need} perte(s)`
+              ` — ${g.losses}/${need} perte(s)` +
+              (isOmbre && g.queue.length ? ` · ${g.queue.length} position(s) déjà en file` : '')
             : delay
               ? `Phase 1 — on attend la 1ʳᵉ perte (déblocage auto dans ${Math.max(0, Math.round((delay - waitedMs) / 60000))} min)`
               : "Phase 1 — on attend la 1ʳᵉ perte",
@@ -1406,6 +1504,7 @@ module.exports = {
   noteSent,
   resetGate,
   noteClosed,
+  queueFloor,
   shadowRuntime,
   syncCostume,
   pullCostume,
