@@ -59,6 +59,33 @@
   }
   #verifyModalBackdrop.open #verifyModal { transform: translateY(0) scale(1); }
 
+  /* ── Fenêtre modale : « patientez, l'administrateur va traiter » ────── */
+  #pendingModalBackdrop, #blockedModalBackdrop {
+    position: fixed; inset: 0; z-index: 1000; background: rgba(5,7,13,.72);
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+    opacity: 0; pointer-events: none; transition: opacity 220ms ease;
+  }
+  #pendingModalBackdrop.open, #blockedModalBackdrop.open { opacity: 1; pointer-events: auto; }
+  #pendingModal, #blockedModal {
+    width: 100%; max-width: 360px; background: #171a21; border: 1px solid #2c3140;
+    border-radius: 16px; padding: 30px 24px; box-shadow: 0 20px 60px rgba(0,0,0,.5);
+    text-align: center; transform: translateY(14px) scale(.97); transition: transform 220ms ease;
+  }
+  #pendingModalBackdrop.open #pendingModal, #blockedModalBackdrop.open #blockedModal { transform: translateY(0) scale(1); }
+  .wait-ico {
+    width: 40px; height: 40px; margin: 0 auto 16px; border: 3px solid rgba(91,124,255,.3);
+    border-top-color: #5b7cff; border-radius: 50%; animation: spinIco 900ms linear infinite;
+  }
+  .lock-ico { font-size: 38px; margin-bottom: 10px; }
+  #pendingModal p, #blockedModal p { color: #9098a8; font-size: 13px; margin: 0 0 4px; }
+  .telegram-link {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    width: 100%; margin-top: 18px; padding: 12px; border-radius: 9px;
+    background: #229ed9; color: #fff; font-size: 14px; font-weight: 600;
+    text-decoration: none; box-sizing: border-box;
+  }
+  .telegram-link:hover { background: #1c8bc0; }
+
   /* ── Écran d'intro animé (avant connexion) : chargement puis image ──── */
   #splash {
     position: fixed; inset: 0; z-index: 999;
@@ -165,6 +192,28 @@
     </div>
   </div>
 
+  <!-- ── Fenêtre modale : compte en attente de traitement par l'admin ───── -->
+  <div id="pendingModalBackdrop">
+    <div id="pendingModal">
+      <div class="wait-ico"></div>
+      <h1 style="font-size:17px">Merci de patienter</h1>
+      <p>Votre nom, votre identifiant Gmail et votre mot de passe ont bien été confirmés.</p>
+      <p>L'administrateur va maintenant traiter votre compte. Vous pourrez vous connecter dès qu'il l'aura accepté.</p>
+      <button style="margin-top:18px" onclick="closePendingModal()">Retour à la connexion</button>
+    </div>
+  </div>
+
+  <!-- ── Fenêtre modale : compte bloqué (temps accordé écoulé) ──────────── -->
+  <div id="blockedModalBackdrop">
+    <div id="blockedModal">
+      <div class="lock-ico">🔒</div>
+      <h1 style="font-size:17px">Compte bloqué</h1>
+      <p>Le temps d'accès accordé par l'administrateur est écoulé.</p>
+      <a class="telegram-link" id="blockedTelegramLink" href="https://t.me/Kouamappoloak" target="_blank" rel="noopener">✈️ Contacter l'administrateur sur Telegram</a>
+      <button class="ghost" style="margin-top:12px" onclick="closeBlockedModal()">Fermer</button>
+    </div>
+  </div>
+
 <script>
 let pendingEmail = '';
 
@@ -232,6 +281,37 @@ function closeVerifyModal() {
   document.getElementById('verifyModalBackdrop').classList.remove('open');
 }
 
+function openPendingModal() {
+  closeVerifyModal();
+  document.getElementById('pendingModalBackdrop').classList.add('open');
+}
+function closePendingModal() {
+  document.getElementById('pendingModalBackdrop').classList.remove('open');
+  showView('login');
+}
+
+function openBlockedModal(telegram) {
+  const link = document.getElementById('blockedTelegramLink');
+  if (telegram) {
+    const url = /^https?:\/\//i.test(telegram) ? telegram : 'https://' + telegram;
+    link.href = url;
+  }
+  document.getElementById('blockedModalBackdrop').classList.add('open');
+}
+function closeBlockedModal() {
+  document.getElementById('blockedModalBackdrop').classList.remove('open');
+}
+
+// arrivée depuis une session coupée en cours de route (temps expiré pendant
+// que la personne utilisait déjà le tableau de bord) : voir server.js.
+(function checkBlockedRedirect() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('blocked') === '1') {
+    closeSplash();
+    openBlockedModal(params.get('telegram') || '');
+  }
+})();
+
 function setBusy(btnId, busy, busyText, idleText) {
   const btn = document.getElementById(btnId);
   if (!btn) return;
@@ -272,6 +352,14 @@ async function doLogin() {
     openVerifyModal(data.email);
     return;
   }
+  if (data.pendingApproval) {
+    showMsg('loginMsg', data.error || "Compte en attente de validation par l'administrateur.", false);
+    return;
+  }
+  if (data.blocked) {
+    openBlockedModal(data.telegram);
+    return;
+  }
   if (data.unknown) {
     showMsg('loginMsg', "Identifiants inconnus — vous pouvez créer un compte ci-dessous.", false);
     return;
@@ -302,6 +390,10 @@ async function doVerify() {
   const { ok, data } = await post('/api/auth/verify', { email: pendingEmail, code });
   setBusy('verifyBtn', false, '', 'Valider');
   if (ok && data.ok) {
+    if (data.pendingApproval) {
+      openPendingModal();
+      return;
+    }
     showMsg('verifyMsg', 'Compte vérifié — ouverture du site…', true);
     setTimeout(() => { window.location.href = '/'; }, 500);
     return;

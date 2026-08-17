@@ -57,6 +57,9 @@
     .status { display: inline-flex; gap: 8px; align-items: center; color: var(--muted); font-size: 12px; }
     .status i { width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
     .status.ok i { background: var(--green); box-shadow: 0 0 0 5px rgba(117,223,174,.1); }
+    .readonly-badge { color: var(--orange); }
+    .readonly-badge i { background: var(--orange); box-shadow: 0 0 0 5px rgba(245,184,107,.12); }
+    button.readonly-locked, button.readonly-locked:hover { opacity: .4; cursor: not-allowed; transform: none; }
     .eyebrow { color: var(--cyan); font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
     h1, h2, h3, p { margin-top: 0; }
     h1 { max-width: 730px; margin: 16px 0 14px; font-size: clamp(34px, 6vw, 68px); line-height: .98; letter-spacing: -.065em; }
@@ -109,6 +112,10 @@
     .notice { padding: 13px 15px; margin: 14px 0; border-radius: 12px; color: var(--soft); background: rgba(112,225,229,.06); border: 1px solid rgba(112,225,229,.18); font-size: 12px; line-height: 1.55; }
     .notice.warn { border-color: rgba(245,184,107,.28); background: rgba(245,184,107,.06); }
     .notice.error { border-color: rgba(255,131,144,.28); background: rgba(255,131,144,.06); }
+    .ai-qa-entry { padding: 18px 20px; margin: 14px 0; border-radius: 14px; background: #ffffff; border: 1px solid #dbe2ec; box-shadow: 0 2px 10px rgba(0,0,0,.18); }
+    .ai-qa-entry .ai-qa-question { color: #0b3d91; font-size: 17px; font-weight: 700; line-height: 1.4; }
+    .ai-qa-entry .ai-qa-text { margin-top: 10px; color: #10161f; font-size: 17px; line-height: 1.65; white-space: pre-wrap; }
+    .ai-qa-entry .ai-qa-meta { margin-top: 10px; color: #55617a; font-size: 12.5px; }
     .route-card { padding: 18px; border: 1px solid var(--line); border-radius: 16px; background: rgba(8,11,18,.34); }
     .route-card.public { border-color: rgba(117,223,174,.25); }
     .route-card.shadow { border-color: rgba(183,162,255,.28); }
@@ -212,6 +219,7 @@
         <a href="#/settings" data-nav="settings">Configuration</a>
       </nav>
       <span id="botStatus" class="status"><i></i> Connexion...</span>
+      <span id="roleBadge" class="status readonly-badge" style="display:none"><i></i> Lecture seule</span>
     </div>
   </header>
   <main id="app" class="shell"><div class="loading">Chargement du centre de contrôle...</div></main>
@@ -272,6 +280,12 @@
     async function api(url, method = 'GET', body) {
       const res = await fetch(url, { method, headers: body ? {'Content-Type':'application/json'} : {}, body: body ? JSON.stringify(body) : undefined });
       const data = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        // session coupée (non connecté, ou temps d'accès accordé par l'admin écoulé)
+        const qs = data.blocked ? `?blocked=1&telegram=${encodeURIComponent(data.telegram || '')}` : '';
+        window.location.href = '/login.html' + qs;
+        throw new Error(data.error || 'Session expirée.');
+      }
       if (!res.ok) throw new Error(data.error || `Erreur ${res.status}`);
       return data;
     }
@@ -284,6 +298,28 @@
       const bot = snapshot?.bot;
       const status = $('#botStatus');
       if (status) { status.className = `status ${bot?.running ? 'ok' : ''}`; status.innerHTML = `<i></i>${bot?.running ? 'Bot actif' : bot?.tokenSet ? 'Bot arrêté' : 'Bot non configuré'}`; }
+      const roleBadge = $('#roleBadge');
+      if (roleBadge) roleBadge.style.display = snapshot?.role === 'admin' ? 'none' : '';
+    }
+    // Comptes « user » : lecture seule — seule la Question IA reste active.
+    // Les boutons de navigation (location.hash=...) restent cliquables ;
+    // tout bouton qui déclenche une action d'écriture est désactivé (le
+    // serveur refuse de toute façon la requête, ceci n'est qu'un confort
+    // visuel pour éviter un clic dans le vide).
+    const READONLY_ALLOW = new Set(['reloadView()', 'usersPage()', 'doLogout()', 'closeModal()', 'askAi()']);
+    function applyReadOnly() {
+      const app = $('#app');
+      const modal = document.getElementById('modalRoot');
+      [app, modal].forEach((scope) => {
+        if (!scope || snapshot?.role === 'admin') return;
+        scope.querySelectorAll('button').forEach((btn) => {
+          const onclick = (btn.getAttribute('onclick') || '').trim();
+          if (!onclick || onclick.startsWith('location.hash') || READONLY_ALLOW.has(onclick)) return;
+          btn.disabled = true;
+          btn.classList.add('readonly-locked');
+          btn.title = "Réservé à l'administrateur — votre compte est en lecture seule.";
+        });
+      });
     }
     async function refresh() { snapshot = await api('/api/state'); return snapshot; }
     function liveCard() {
@@ -304,6 +340,7 @@
       root.innerHTML = `<div class="modal" role="dialog" aria-modal="true">${html}</div>`;
       root.addEventListener('click', (e) => { if (e.target === root) closeModal(); });
       document.body.appendChild(root);
+      applyReadOnly();
     }
     function channelModal(strategy, mode, payload) {
       const chat = payload.channel || {};
@@ -362,10 +399,73 @@
         <button class="home-button" onclick="location.hash='#/database'">Base de données<small>Historique enregistré</small></button>
         <button class="home-button" onclick="location.hash='#/formats'">Formats<small>89 formats de prédiction</small></button>
         <button class="home-button" onclick="location.hash='#/settings'">Configuration<small>Bot, base, réglages</small></button>
+        ${snapshot.role === 'admin' ? `<button class="home-button" onclick="location.hash='#/users'">Utilisateurs<small>Valider les inscriptions, accorder un temps</small></button>` : ''}
       </div>
       <button class="logout-home-btn" onclick="doLogout()">🔴 Se déconnecter</button>`;
     }
     function strategiesPage() { setNav('strategies'); $('#app').innerHTML = `<div class="section-head" style="padding-top:38px"><div><span class="eyebrow">Catalogue</span><h2 style="margin-top:7px">Choisir une stratégie</h2></div><button class="button ghost" onclick="resetAllStrategies()">Réinitialiser TOUT aux valeurs du code</button></div><div class="strategy-grid">${strategyButtons()}</div>`; }
+
+    // ── Panneau administrateur : Utilisateurs ──────────────────────────────
+    const USER_STATUS_TAG = {
+      attente_email: ['warn', 'Email non confirmé'],
+      attente_admin: ['warn', 'En attente de validation'],
+      actif:         ['good', 'Actif'],
+      bloque:        ['bad',  'Bloqué / expiré'],
+    };
+    function userRow(u) {
+      const [tagClass, tagLabel] = USER_STATUS_TAG[u.status] || ['', u.status];
+      const expiry = u.accessExpiresAt ? formatDate(u.accessExpiresAt) : '—';
+      const grantLabel = u.status === 'attente_admin' ? 'Accepter' : 'Prolonger';
+      return `<article class="proposal" data-user="${esc(u.id)}">
+          <div class="split"><h3>${esc(u.email || u.identifier)}</h3><span class="tag ${tagClass}">${esc(tagLabel)}</span></div>
+          <dl>
+            <dt>Identifiant</dt><dd>${esc(u.identifier)}</dd>
+            <dt>Créé le</dt><dd>${formatDate(u.createdAt)}</dd>
+            <dt>Accès accordé jusqu'au</dt><dd>${expiry}</dd>
+          </dl>
+          <div class="toolbar" style="margin-top:12px">
+            ${u.status !== 'attente_email' ? `
+              <div class="field" style="max-width:110px;margin:0"><input id="mins-${esc(u.id)}" type="number" min="1" placeholder="30"></div>
+              <select id="unit-${esc(u.id)}" style="max-width:120px">
+                <option value="minutes">Minutes</option>
+                <option value="heures">Heures</option>
+              </select>
+              <button class="button small primary" onclick="grantUserAccess('${esc(u.id)}')">${grantLabel}</button>` : ''}
+            ${u.status === 'actif' ? `<button class="button small danger" onclick="blockUserNow('${esc(u.id)}')">Bloquer</button>` : ''}
+            ${u.status === 'attente_admin' ? `<button class="button small danger" onclick="rejectUserNow('${esc(u.id)}')">Refuser</button>` : ''}
+          </div>
+        </article>`;
+    }
+    let usersCache = [];
+    async function usersPage() {
+      setNav('users');
+      $('#app').innerHTML = `<div class="section-head" style="padding-top:38px"><div><span class="eyebrow">Comptes</span><h2 style="margin-top:7px">Utilisateurs</h2><p class="small">Un compte apparaît ici une fois son email Gmail confirmé. Acceptez-le puis accordez un temps d'accès (minutes ou heures) : passé ce délai, le compte est automatiquement bloqué et redirigé vers Telegram.</p></div><button class="button small ghost" onclick="usersPage()">Actualiser</button></div><div id="usersList" class="proposals"><div class="empty">Chargement…</div></div>`;
+      try {
+        const r = await api('/api/users');
+        usersCache = r.users || [];
+        const list = $('#usersList');
+        list.innerHTML = usersCache.length ? usersCache.map(userRow).join('') : '<div class="empty">Aucun compte pour le moment.</div>';
+      } catch (e) { toast(e.message, 'error'); }
+    }
+    async function grantUserAccess(id) {
+      const minsRaw = Number(val(`mins-${id}`));
+      const unit = $(`#unit-${id}`)?.value || 'minutes';
+      if (!minsRaw || minsRaw <= 0) return toast('Indique une durée valide.', 'error');
+      const minutes = unit === 'heures' ? minsRaw * 60 : minsRaw;
+      try {
+        await api(`/api/users/${id}/approve`, 'POST', { minutes });
+        toast(`Accès accordé (${minsRaw} ${unit}).`);
+        usersPage();
+      } catch (e) { toast(e.message, 'error'); }
+    }
+    async function blockUserNow(id) {
+      try { await api(`/api/users/${id}/block`, 'POST', {}); toast('Compte bloqué.'); usersPage(); }
+      catch (e) { toast(e.message, 'error'); }
+    }
+    async function rejectUserNow(id) {
+      try { await api(`/api/users/${id}/reject`, 'POST', {}); toast('Compte refusé et supprimé.'); usersPage(); }
+      catch (e) { toast(e.message, 'error'); }
+    }
     async function resetAllStrategies() {
       if (!confirm('Réinitialiser TOUTES les stratégies aux valeurs par défaut actuelles du code ? Les réglages personnalisés (rattrapages, absence, canaux...) seront perdus.')) return;
       try { const r = await api('/api/strategies/reset-all', 'POST', {}); await refresh(); strategiesPage(); toast(`${(r.reset||[]).length} stratégie(s) réinitialisée(s).`); }
@@ -578,7 +678,7 @@
     }
     async function runAdvice(remote) { const box = $('#aiAdvice'); if (box) box.innerHTML = '<div class="loading">Analyse en cours…</div>'; try { await api('/api/ai/strategy-advice/run', 'POST', { remote: !!remote }); await loadAdvice(); toast('Avis mis à jour.'); } catch(e) { toast(e.message, 'error'); } }
     function renderAiQaEntry(e) {
-      return `<div class="notice" style="margin-bottom:10px"><b>${esc(e.question)}</b><div style="margin-top:6px;white-space:pre-wrap">${esc(e.answer)}</div><div class="small muted" style="margin-top:6px">${formatDate(e.at)} · source : ${esc(e.source || 'local')}</div></div>`;
+      return `<div class="ai-qa-entry"><div class="ai-qa-question">${esc(e.question)}</div><div class="ai-qa-text">${esc(e.answer)}</div><div class="ai-qa-meta">${formatDate(e.at)} · source : ${esc(e.source || 'local')}</div></div>`;
     }
     async function loadAiQaHistory() {
       const box = $('#aiQaHistory'); if (!box) return;
@@ -834,9 +934,11 @@
         else if (h === '#/database') await databasePage();
         else if (h === '#/formats') await formatsPage();
         else if (h === '#/settings') settingsPage();
+        else if (h === '#/users') await usersPage();
         else home();
       } catch(e) { $('#app').innerHTML = `<div class="notice error">${esc(e.message)}</div>`; }
       injectBack();
+      applyReadOnly();
       firstRouteDone = true;
     }
     new MutationObserver(() => injectBack()).observe($('#app'), { childList: true });
