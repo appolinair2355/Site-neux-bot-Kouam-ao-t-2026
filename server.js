@@ -656,6 +656,26 @@ app.post('/api/strategies/:key/reset', async (req, res) => {
   res.json({ ok: true, ...strategyPayload(req.params.key) });
 });
 
+// Réinitialise TOUTES les stratégies aux valeurs par défaut ACTUELLES du code
+// (strategies.js), y compris celles déjà enregistrées en base avec d'anciennes
+// valeurs — sans ce bouton, changer un default dans le code n'a aucun effet
+// sur une stratégie déjà en base tant qu'on ne la réinitialise pas à la main
+// (voir applyDbConfigs() : la base prime toujours sur les defaults une fois
+// la ligne créée).
+app.post('/api/strategies/reset-all', async (req, res) => {
+  const results = [];
+  for (const def of strategies.LIST) {
+    const cfg = resetStrategy(def.key);
+    if (!cfg) continue;
+    if (db.ready) await db.saveStrategy(def.key, def.name, cfg);
+    results.push(def.key);
+  }
+  persist();
+  await cumulative.purgeStaleFor(cumulative.strategySignature());
+  cumulative.tick();
+  res.json({ ok: true, reset: results });
+});
+
 // suppression (administrateur) : configuration effacée en base + stratégie arrêtée
 app.delete('/api/strategies/:key', async (req, res) => {
   if (!strategies.BY_KEY[req.params.key]) return res.status(404).json({ error: 'Stratégie inconnue' });

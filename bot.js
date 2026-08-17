@@ -795,10 +795,27 @@ function wire(b) {
     b.sendMessage(msg.chat.id, `🗄️ *Configurations en base*\n\n${lines.join('\n')}`, { parse_mode: 'Markdown' });
   });
 
-  b.onText(/^\/resetstrat(?:\s+(\w+))?/, (msg, m) => {
+  b.onText(/^\/resetstrat(?:\s+(\w+))?/, async (msg, m) => {
     if (!isAdmin(msg)) return deny(msg.chat.id);
     const key = (m[1] || '').toLowerCase();
-    if (!resetStrategy(key)) return b.sendMessage(msg.chat.id, 'ℹ️ Usage : /resetstrat <clé>');
+    if (key === 'all' || key === 'tout') {
+      const done = [];
+      for (const def of strategies.LIST) {
+        const cfg = resetStrategy(def.key);
+        if (!cfg) continue;
+        if (db.ready) await db.saveStrategy(def.key, def.name, cfg);
+        done.push(def.name);
+      }
+      persist();
+      return b.sendMessage(msg.chat.id, `♻️ *${done.length} stratégie(s)* remise(s) aux valeurs par défaut du code.`, { parse_mode: 'Markdown' });
+    }
+    const cfg = resetStrategy(key);
+    if (!cfg) return b.sendMessage(msg.chat.id, 'ℹ️ Usage : /resetstrat <clé> (ou /resetstrat all)');
+    // CORRECTIF : avant, seul persist() (fichier local, perdu au redéploiement
+    // Render sans disque persistant) était appelé — le reset ne survivait donc
+    // jamais à un redémarrage. On enregistre maintenant aussi en base, comme
+    // le fait déjà le bouton du panneau web.
+    if (db.ready) await db.saveStrategy(key, strategies.BY_KEY[key].name, cfg);
     persist();
     b.sendMessage(msg.chat.id, `♻️ Configuration de *${strategies.BY_KEY[key].name}* remise par défaut.`, { parse_mode: 'Markdown' });
   });
@@ -1479,15 +1496,20 @@ async function applyDbConfigs() {
   const missing = strategies.LIST.filter((d) => !loaded.includes(d.key)).map((d) => d.key);
   if (missing.length) await saveConfigsToDb();
 
-  // CORRECTIF DÉPLOIEMENT : la stratégie « ombre » doit toujours fonctionner
-  // en double perte (lossTrigger = 2). Si une valeur différente (ex. 1, issue
-  // d'un ancien déploiement ou d'un réglage manuel) est encore enregistrée en
-  // base, on la force ici à 2 et on la ré-enregistre — sinon le filtre
-  // « silencieux » ne filtre plus rien (chaque perte confirme seule et finit
-  // publiée, voir predictor.js/phase1Waiting).
-  if (state.strategies.ombre && state.strategies.ombre.lossTrigger !== 2) {
-    state.strategies.ombre.lossTrigger = 2;
-    await db.saveStrategy('ombre', strategies.BY_KEY.ombre.name, state.strategies.ombre);
+  // CORRECTIF DÉPLOIEMENT : la stratégie « ombre » doit toujours démarrer avec
+  // lossTrigger=2 (double perte), lossWindow=6 et lossInterval=5. Comme la
+  // stratégie « ombre » existe déjà en base depuis longtemps, applyDbConfigs()
+  // prend TOUJOURS la valeur déjà enregistrée en base (spread `...cfg` après
+  // les defaults) — changer strategies.js seul ne suffit donc jamais à faire
+  // apparaître un nouveau default une fois la ligne déjà créée. On force ici
+  // ces 3 réglages à chaque démarrage et on les ré-enregistre si besoin.
+  const OMBRE_FORCED_DEFAULTS = { lossTrigger: 2, lossWindow: 6, lossInterval: 5 };
+  if (state.strategies.ombre) {
+    let changed = false;
+    for (const [k, v] of Object.entries(OMBRE_FORCED_DEFAULTS)) {
+      if (state.strategies.ombre[k] !== v) { state.strategies.ombre[k] = v; changed = true; }
+    }
+    if (changed) await db.saveStrategy('ombre', strategies.BY_KEY.ombre.name, state.strategies.ombre);
   }
 
   // filtre « double perte » (gates) : restauré depuis la base pour survivre à
