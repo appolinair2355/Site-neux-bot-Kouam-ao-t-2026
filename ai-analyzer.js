@@ -88,7 +88,31 @@ function localAnalysis(rawGames = [], options = {}) {
 
   const playerHas = (g, s) => (g.playerSuits || []).includes(s);
 
+  // Taux de retour réel : parmi toutes les fois, dans l'historique, où le
+  // costume vient d'enchaîner `threshold` absences consécutives, quelle
+  // fraction le voit effectivement revenir dans les `lead` jeux suivants ?
+  // (à distinguer de la fréquence de présence globale du costume, qui ne
+  // mesure pas du tout la même chose — cf. bug rate trompeur.)
+  function returnRate(suit, threshold, lead) {
+    const chron = games.slice().reverse(); // du plus ancien au plus récent
+    let streak = 0;
+    let trials = 0;
+    let hits = 0;
+    for (let i = 0; i < chron.length; i += 1) {
+      if (playerHas(chron[i], suit)) { streak = 0; continue; }
+      streak += 1;
+      if (streak === threshold) {
+        trials += 1;
+        for (let k = i + 1; k <= i + lead && k < chron.length; k += 1) {
+          if (playerHas(chron[k], suit)) { hits += 1; break; }
+        }
+      }
+    }
+    return { trials, hits, rate: pct(hits, trials) };
+  }
+
   // 1) absence de costume dans la main du joueur
+  const returnLead = 2;
   for (const suit of SUITS) {
     let absence = 0;
     for (const g of games) { if (playerHas(g, suit)) break; absence += 1; }
@@ -96,19 +120,25 @@ function localAnalysis(rawGames = [], options = {}) {
     if (absence >= 4) {
       findings.push(`${suit} absent de la main du joueur depuis ${absence} jeux (présence globale ${pct(seen, games.length)}%).`);
       if (absence >= 5 && games.length >= 20) {
-        proposals.push({
-          name: `Retour du costume ${suit} après ${absence} absences`,
-          logic: `Quand ${suit} est absent de la main du joueur pendant ${absence} jeux consécutifs, viser son retour sur le jeu suivant.`,
-          trigger: `${absence} jeux sans ${suit} côté joueur`,
-          target: 'jeu suivant, avec rattrapages',
-          suggestedLead: 2,
-          minimumSample: 20,
-          rate: pct(seen, games.length),
-          support: games.length,
-          evidence: `Sur ${games.length} jeux observés, ${suit} apparaît dans ${pct(seen, games.length)}% des mains du joueur.`,
-          risks: "Une absence longue ne garantit aucun retour : le tirage reste indépendant. À tester en mode silencieux.",
-          compatibleExisting: 'absente',
-        });
+        const rr = returnRate(suit, 4, returnLead);
+        // Sous 5 essais historiques, le taux n'est pas fiable : on publie le
+        // constat dans les findings mais on ne fabrique pas de proposition
+        // chiffrée dessus plutôt que d'afficher un pourcentage trompeur.
+        if (rr.trials >= 5) {
+          proposals.push({
+            name: `Retour du costume ${suit} après ${absence} absences`,
+            logic: `Quand ${suit} est absent de la main du joueur pendant ${absence} jeux consécutifs, viser son retour dans les ${returnLead} jeux suivants.`,
+            trigger: `${absence} jeux sans ${suit} côté joueur`,
+            target: `jeu suivant (fenêtre de ${returnLead} jeux), avec rattrapages`,
+            suggestedLead: returnLead,
+            minimumSample: 20,
+            rate: rr.rate,
+            support: rr.trials,
+            evidence: `Sur ${rr.trials} séries historiques d'au moins 4 absences consécutives de ${suit}, il est revenu dans les ${returnLead} jeux suivants ${rr.hits} fois (${rr.rate}%). Présence globale du costume : ${pct(seen, games.length)}%.`,
+            risks: "Une absence longue ne garantit aucun retour : le tirage reste indépendant. À tester en mode silencieux.",
+            compatibleExisting: 'absente',
+          });
+        }
       }
     }
   }
