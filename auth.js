@@ -20,6 +20,8 @@ const ADMIN_IDENTIFIER = 'sossoukouam';
 const ADMIN_PASSWORD_DEFAULT = 'arrow2026';
 const CODE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 const MAX_CODE_ATTEMPTS = 5;
+// contact affiché à un compte bloqué (temps accordé par l'admin écoulé)
+const TELEGRAM_CONTACT = 't.me/Kouamappoloak';
 
 function normalize(v) {
   return String(v || '').trim().toLowerCase();
@@ -46,8 +48,8 @@ async function ensureAdminSeed() {
   try {
     const hash = await bcrypt.hash(ADMIN_PASSWORD_DEFAULT, 10);
     await db.exec(
-      `INSERT INTO users (identifier, email, password_hash, role, verified)
-       VALUES ($1, NULL, $2, 'admin', true)
+      `INSERT INTO users (identifier, email, password_hash, role, verified, approved)
+       VALUES ($1, NULL, $2, 'admin', true, true)
        ON CONFLICT (identifier) DO NOTHING`,
       [ADMIN_IDENTIFIER, hash]
     );
@@ -84,7 +86,53 @@ async function login(identifierRaw, password) {
   }
   const match = await bcrypt.compare(pwd, user.password_hash);
   if (!match) return { ok: false, error: 'Identifiants incorrects.' };
+
+  if (user.role !== 'admin') {
+    const access = await checkUserAccess(user);
+    if (!access.ok) return access;
+  }
+
   return { ok: true, userId: user.id, identifier: user.identifier, role: user.role };
+}
+
+// ---------------------------------------------------------------------------
+// Vérifie qu'un compte « user » (jamais l'admin) est bien accordé par
+// l'administrateur et que le temps accordé n'est pas dépassé. Utilisé à la
+// connexion ET à chaque requête (voir server.js) pour couper l'accès dès
+// l'expiration, même en pleine session.
+// ---------------------------------------------------------------------------
+async function checkUserAccess(user) {
+  if (!user.approved) {
+    return {
+      ok: false,
+      error: "Compte en attente : l'administrateur doit encore valider votre inscription. Merci de patienter.",
+      pendingApproval: true,
+    };
+  }
+  const expiresAt = user.access_expires_at ? new Date(user.access_expires_at).getTime() : null;
+  const expired = expiresAt !== null && expiresAt < Date.now();
+  if (expired || user.blocked) {
+    if (expired && !user.blocked) {
+      await db.exec(`UPDATE users SET blocked = true WHERE id = $1`, [user.id]);
+    }
+    return {
+      ok: false,
+      error: 'Votre temps d’accès est écoulé — votre compte est bloqué.',
+      blocked: true,
+      telegram: TELEGRAM_CONTACT,
+    };
+  }
+  return { ok: true };
+}
+
+// contrôle léger utilisé sur chaque requête protégée (via l'id de session)
+async function checkAccess(userId) {
+  if (!db.ready) return { ok: true };
+  const rows = await db.rows(`SELECT * FROM users WHERE id = $1`, [Number(userId)]);
+  const user = rows[0];
+  if (!user) return { ok: false, error: 'Session invalide.' };
+  if (user.role === 'admin') return { ok: true };
+  return checkUserAccess(user);
 }
 
 // ---------------------------------------------------------------------------
@@ -172,7 +220,88 @@ async function verify(emailRaw, codeRaw) {
   await db.exec(`UPDATE users SET verified = true WHERE email = $1`, [email]);
   await db.exec(`DELETE FROM email_codes WHERE email = $1`, [email]);
   const user = await findUser(email);
+
+  // L'email est confirmé, mais le compte reste en attente : c'est
+  // l'administrateur qui doit encore l'accepter et lui accorder un temps
+  // d'accès depuis le panneau « Utilisateurs ». Pas de session ouverte ici.
+  if (user.role !== 'admin' && !user.approved) {
+    return { ok: true, pendingApproval: true, identifier: user.identifier, email: user.email };
+  }
   return { ok: true, userId: user.id, identifier: user.identifier, role: user.role };
+}
+
+// ---------------------------------------------------------------------------
+// Panneau administrateur « Utilisateurs » : lister les comptes créés par
+// email, accepter un compte (avec un temps d'accès en minutes ou en heures),
+// bloquer manuellement, ou refuser/supprimer un compte en attente.
+// ---------------------------------------------------------------------------
+function userView(u) {
+  const expiresAt = u.access_expires_at ? new Date(u.access_expires_at).getTime() : null;
+  const expired = expiresAt !== null && expiresAt < Date.now();
+  const blocked = !!u.blocked || expired;
+  let status = 'attente_email';
+  if (u.verified && !u.approved) status = 'attente_admin';
+  else if (u.verified && u.approved && blocked) status = 'bloque';
+  else if (u.verified && u.approved && !blocked) status = 'actif';
+  return {
+    id: u.id,
+    identifier: u.identifier,
+    email: u.email,
+    verified: !!u.verified,
+    approved: !!u.approved,
+    blocked,
+    accessExpiresAt: u.access_expires_at || null,
+    status,
+    createdAt: u.created_at,
+    approvedAt: u.approved_at || null,
+  };
+}
+
+async function listUsers() {
+  if (!db.ready) return [];
+  const rows = await db.rows(
+    `SELECT id, identifier, email, verified, approved, access_expires_at, blocked, created_at, approved_at
+       FROM users WHERE role != 'admin' ORDER BY created_at DESC`
+  );
+  return rows.map(userView);
+}
+
+async function approveUser(userIdRaw, minutesRaw) {
+  if (!db.ready) return { ok: false, error: 'Base de données non connectée.' };
+  const id = Number(userIdRaw);
+  const minutes = Number(minutesRaw);
+  if (!id) return { ok: false, error: 'Utilisateur invalide.' };
+  if (!minutes || minutes <= 0) return { ok: false, error: "Durée invalide — indiquez un temps en minutes ou en heures." };
+  const rows = await db.rows(`SELECT * FROM users WHERE id = $1 AND role != 'admin'`, [id]);
+  const user = rows[0];
+  if (!user) return { ok: false, error: 'Utilisateur introuvable.' };
+  const expiresAt = new Date(Date.now() + minutes * 60000).toISOString();
+  await db.exec(
+    `UPDATE users SET approved = true, blocked = false, access_expires_at = $2, approved_at = now() WHERE id = $1`,
+    [id, expiresAt]
+  );
+  return { ok: true, user: userView({ ...user, approved: true, blocked: false, access_expires_at: expiresAt }) };
+}
+
+async function blockUser(userIdRaw) {
+  if (!db.ready) return { ok: false, error: 'Base de données non connectée.' };
+  const id = Number(userIdRaw);
+  if (!id) return { ok: false, error: 'Utilisateur invalide.' };
+  const rows = await db.rows(`SELECT * FROM users WHERE id = $1 AND role != 'admin'`, [id]);
+  const user = rows[0];
+  if (!user) return { ok: false, error: 'Utilisateur introuvable.' };
+  await db.exec(`UPDATE users SET blocked = true WHERE id = $1`, [id]);
+  return { ok: true, user: userView({ ...user, blocked: true }) };
+}
+
+async function rejectUser(userIdRaw) {
+  if (!db.ready) return { ok: false, error: 'Base de données non connectée.' };
+  const id = Number(userIdRaw);
+  if (!id) return { ok: false, error: 'Utilisateur invalide.' };
+  const rows = await db.rows(`SELECT * FROM users WHERE id = $1 AND role != 'admin'`, [id]);
+  if (!rows[0]) return { ok: false, error: 'Utilisateur introuvable.' };
+  await db.exec(`DELETE FROM users WHERE id = $1`, [id]);
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -303,11 +432,17 @@ async function sendMail(to, code) {
 
 module.exports = {
   ADMIN_IDENTIFIER,
+  TELEGRAM_CONTACT,
   ensureAdminSeed,
   login,
   signup,
   verify,
   resend,
+  checkAccess,
+  listUsers,
+  approveUser,
+  blockUser,
+  rejectUser,
   configureMailSender,
   mailerStatus,
   debugInfo,

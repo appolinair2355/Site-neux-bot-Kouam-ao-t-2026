@@ -85,6 +85,11 @@ app.post('/api/auth/signup', async (req, res) => {
 app.post('/api/auth/verify', async (req, res) => {
   const r = await auth.verify(req.body.email, req.body.code);
   if (!r.ok) return res.status(400).json(r);
+  // Email confirmé mais compte pas encore accepté par l'administrateur :
+  // pas de session ouverte — le navigateur affiche « patientez ».
+  if (r.pendingApproval) {
+    return res.json({ ok: true, pendingApproval: true, identifier: r.identifier });
+  }
   req.session.userId = r.userId;
   req.session.identifier = r.identifier;
   req.session.role = r.role;
@@ -138,19 +143,89 @@ function isPublicPath(p) {
   if (p.startsWith('/api/auth/')) return true;
   return false;
 }
-app.use((req, res, next) => {
+app.use(async (req, res, next) => {
   if (isPublicPath(req.path)) return next();
-  if (req.session && req.session.userId) return next();
+  if (req.session && req.session.userId) {
+    // vérifie, sur chaque requête, qu'un compte « user » n'a pas dépassé le
+    // temps accordé par l'administrateur (coupure immédiate, même en pleine
+    // session) — l'admin, lui, n'est jamais concerné par cette vérification.
+    if (req.session.role !== 'admin') {
+      const access = await auth.checkAccess(req.session.userId);
+      if (!access.ok) {
+        return req.session.destroy(() => {
+          if (req.path.startsWith('/api/')) {
+            return res.status(401).json({ error: access.error, blocked: !!access.blocked, telegram: access.telegram || null });
+          }
+          return res.redirect(`/login.html?blocked=1&telegram=${encodeURIComponent(access.telegram || auth.TELEGRAM_CONTACT)}`);
+        });
+      }
+    }
+    return next();
+  }
   if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'Authentification requise.' });
   return res.redirect('/login.html');
 });
 
 app.use(express.static(path.join(__dirname, 'public')));
 
+// ---------------------------------------------------------------------------
+// Lecture seule pour les comptes « user » — seul l'administrateur peut
+// modifier quoi que ce soit (stratégies, canaux, bot, base, formats…). Un
+// compte utilisateur ne peut que consulter le tableau de bord et poser des
+// questions à l'IA (Question IA, seule action autorisée).
+// ---------------------------------------------------------------------------
+const USER_WRITE_ALLOWLIST = new Set([
+  '/api/ai/ask', // Question IA
+]);
+app.use((req, res, next) => {
+  if (isPublicPath(req.path)) return next();
+  if (!req.path.startsWith('/api/')) return next();
+  if (req.method === 'GET') return next();
+  if (!req.session || req.session.role === 'admin') return next();
+  if (USER_WRITE_ALLOWLIST.has(req.path)) return next();
+  return res.status(403).json({
+    error: "Accès en lecture seule — seul l'administrateur peut modifier la configuration.",
+    readOnly: true,
+  });
+});
+
 app.get('/health', (req, res) => res.send('ok'));
+
+// ---------------------------------------------------------------------------
+// Panneau administrateur « Utilisateurs » — réservé à l'administrateur :
+// liste des comptes, acceptation avec un temps d'accès (minutes/heures),
+// blocage manuel, refus d'un compte en attente.
+// ---------------------------------------------------------------------------
+function requireAdmin(req, res) {
+  if (!req.session || req.session.role !== 'admin') {
+    res.status(403).json({ error: "Réservé à l'administrateur." });
+    return false;
+  }
+  return true;
+}
+app.get('/api/users', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  res.json({ users: await auth.listUsers() });
+});
+app.post('/api/users/:id/approve', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const r = await auth.approveUser(req.params.id, req.body.minutes);
+  res.status(r.ok ? 200 : 400).json(r);
+});
+app.post('/api/users/:id/block', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const r = await auth.blockUser(req.params.id);
+  res.status(r.ok ? 200 : 400).json(r);
+});
+app.post('/api/users/:id/reject', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const r = await auth.rejectUser(req.params.id);
+  res.status(r.ok ? 200 : 400).json(r);
+});
 
 app.get('/api/state', async (req, res) => {
   res.json({
+    role: req.session ? req.session.role || null : null,
     b: state.B,
     maxR: state.maxR,
     hand: 'joueur',

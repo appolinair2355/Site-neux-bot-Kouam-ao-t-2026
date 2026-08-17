@@ -164,6 +164,20 @@ CREATE TABLE IF NOT EXISTS email_codes (
   expires_at  TIMESTAMPTZ NOT NULL,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- validation manuelle par l'administrateur, après le code email : un compte
+-- « user » vérifié par email reste en attente (approved=false) tant que
+-- l'administrateur ne l'a pas accepté depuis le panneau « Utilisateurs ».
+-- L'admin accorde alors un temps d'accès (access_expires_at) ; une fois ce
+-- délai dépassé, le compte est considéré bloqué (blocked=true) et redirigé
+-- vers Telegram depuis la page de connexion.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS approved          BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS access_expires_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked           BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS approved_at       TIMESTAMPTZ;
+-- le compte admin fixe n'a jamais besoin de validation (au cas où la colonne
+-- vient d'être ajoutée sur une base déjà en place, avec l'admin déjà semé).
+UPDATE users SET approved = true, blocked = false WHERE role = 'admin' AND approved = false;
 `;
 
 function status() {
