@@ -353,6 +353,8 @@
         <button class="home-button" onclick="location.hash='#/ai'">Analyseur IA<small>${ai.auto?.running ? 'Analyse en temps réel' : 'Analyseur arrêté'}</small></button>
         <button class="home-button" onclick="location.hash='#/ai-strategies'">Stratégies IA<small>${created} créée(s)</small></button>
         <button class="home-button" onclick="location.hash='#/predit'">Prédit IA<small>${(snapshot.predit?.activeCount || 0)} stratégie(s) certifiée(s)</small></button>
+        <button class="home-button" onclick="location.hash='#/ai-ask'">Question IA<small>Demander une explication au bot</small></button>
+        <button class="home-button" onclick="resetAllStrategies()">Réinitialiser stratégies<small>Restaurer les valeurs du code</small></button>
         <button class="home-button" onclick="location.hash='#/announcements'">Annonces<small>Prédiction dans l'ombre</small></button>
         <button class="home-button" onclick="location.hash='#/diagnostics'">Envois<small>Vérification des canaux</small></button>
         <button class="home-button" onclick="location.hash='#/database'">Base de données<small>Historique enregistré</small></button>
@@ -475,15 +477,19 @@
       <div id="aiCumulative" class="section"><div class="loading">Chargement des paliers…</div></div>
       <div class="section-head" style="margin-top:10px"><div><span class="eyebrow">Avis sur les stratégies</span><h2 style="margin-top:7px">L’IA juge les stratégies existantes (cumul complet)</h2><p class="small">L’IA reprend TOUT le cumul de la journée (jeux 1 → 1440) et les résultats réels de chaque stratégie pour dire laquelle garder, laquelle ajuster et laquelle mettre en silencieux.</p></div><div class="toolbar"><button class="button primary" onclick="runAdvice(false)">Mettre à jour</button><button class="button orange" onclick="runAdvice(true)">Avis Pollinations.ai</button></div></div>
       <div id="aiAdvice" class="section"><div class="loading">Chargement de l’avis…</div></div>
-      <div class="section-head" style="margin-top:10px"><div><span class="eyebrow">Question</span><h2 style="margin-top:7px">Poser une question à l’IA</h2><p class="small">Pose une question sur le projet — ex. « Pourquoi la stratégie ombre a prédit le jeu 12 ? ». L’IA répond à partir des VRAIES prédictions envoyées (raison enregistrée par le bot), pas d’une supposition générale.</p></div></div>
+      <div id="aiResult" class="section"></div>`;
+      renderAiResults(); loadPatterns(); loadCompare(); loadCumulative(); loadAdvice();
+    }
+    function aiAskPage() {
+      setNav('ai');
+      $('#app').innerHTML = `<div class="section-head" style="padding-top:38px"><div><span class="eyebrow">Question</span><h2 style="margin-top:7px">Poser une question à l’IA</h2><p class="small">Pose une question sur le projet — ex. « Pourquoi la stratégie ombre a prédit le jeu 12 ? ». L’IA répond à partir des VRAIES prédictions envoyées (raison enregistrée par le bot), pas d’une supposition générale.</p></div></div>
       <div class="panel">
         <div class="field"><label>Ta question</label><textarea id="aiQaQuestion" placeholder="Ex. Pourquoi la stratégie ombre a prédit le jeu 12 ?"></textarea></div>
         <div class="toolbar"><button class="button primary" onclick="askAi()">Poser la question</button></div>
         <div id="aiQaAnswer" style="margin-top:14px"></div>
         <div id="aiQaHistory" style="margin-top:18px"></div>
-      </div>
-      <div id="aiResult" class="section"></div>`;
-      renderAiResults(); loadPatterns(); loadCompare(); loadCumulative(); loadAdvice(); loadAiQaHistory();
+      </div>`;
+      loadAiQaHistory();
     }
     function renderAiResults() {
       const list = (snapshot.ai?.results || []).filter(Boolean);
@@ -756,6 +762,7 @@
         if (h.startsWith('#/strategy/')) await strategyPage(decodeURIComponent(h.split('/')[2]));
         else if (h === '#/strategies') strategiesPage();
         else if (h === '#/ai') aiPage();
+        else if (h === '#/ai-ask') aiAskPage();
         else if (h === '#/ai-strategies') aiStrategiesPage();
         else if (h === '#/predit') preditPage();
         else if (h === '#/announcements') await announcementsPage();
