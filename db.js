@@ -93,6 +93,12 @@ CREATE INDEX IF NOT EXISTS announcements_strategy_idx ON announcements (strategy
 
 ALTER TABLE predictions ADD COLUMN IF NOT EXISTS strategy TEXT DEFAULT 'costume';
 ALTER TABLE predictions ADD COLUMN IF NOT EXISTS label    TEXT;
+-- raison humaine de la prédiction (ex. « ❤️ absent pendant 5 jeux consécutifs
+-- … retour au jeu #N959 → prédiction ❤️ sur #N963 »), fournie par detect() dans
+-- strategies.js. Persistée pour que le module de questions-réponses IA (voir
+-- ai-qa.js) puisse expliquer une prédiction même après un redémarrage/purge
+-- mémoire (state.predictions ne garde que les 300 dernières).
+ALTER TABLE predictions ADD COLUMN IF NOT EXISTS reason TEXT;
 ALTER TABLE predictions DROP CONSTRAINT IF EXISTS predictions_target_suit_hand_key;
 CREATE UNIQUE INDEX IF NOT EXISTS predictions_uniq_idx ON predictions (strategy, target, suit);
 
@@ -267,10 +273,10 @@ function normalizeDate(s) {
 // ---- prédictions -----------------------------------------------------------
 async function savePrediction(p, bValue) {
   return q(
-    `INSERT INTO predictions (target, suit, hand, b_value, b_counter, max_r, status, strategy, label)
-     VALUES ($1,$2,$3,$4,$5,$6,'attente',$7,$8)
+    `INSERT INTO predictions (target, suit, hand, b_value, b_counter, max_r, status, strategy, label, reason)
+     VALUES ($1,$2,$3,$4,$5,$6,'attente',$7,$8,$9)
      ON CONFLICT (strategy, target, suit) DO NOTHING`,
-    [p.target, p.suit || p.cardsLabel || '-', p.hand, bValue, p.counter, p.maxR, p.strategy || 'costume', p.label || null]
+    [p.target, p.suit || p.cardsLabel || '-', p.hand, bValue, p.counter, p.maxR, p.strategy || 'costume', p.label || null, p.reason || null]
   );
 }
 
@@ -280,6 +286,21 @@ async function closePrediction(p) {
      WHERE strategy=$4 AND target=$5 AND suit=$6`,
     [p.status === 'gagné' ? 'gagne' : 'perdu', p.step, p.hitNumber, p.strategy || 'costume', p.target, p.suit || p.cardsLabel || '-']
   );
+}
+
+// recherche une (ou plusieurs, si diffusée par plusieurs stratégies) prédiction(s)
+// dont le jeu CIBLÉ (target) correspond au numéro donné — utilisé par le module
+// de questions-réponses IA pour répondre à « pourquoi la stratégie X a prédit
+// le jeu #N... ». Cherche aussi les jeux dont hit_number correspond, au cas où
+// la question porte sur le jeu où la prédiction s'est réalisée plutôt que sur
+// le jeu ciblé au départ.
+async function predictionsByNumber(number, limit = 10) {
+  const r = await q(
+    `SELECT * FROM predictions WHERE target = $1 OR hit_number = $1
+     ORDER BY created_at DESC LIMIT $2`,
+    [number, limit]
+  );
+  return r ? r.rows : [];
 }
 
 // ---- stratégies (configurations persistantes) -------------------------------
@@ -448,6 +469,17 @@ async function loadAiStrategies() {
 
 async function deleteAiStrategy(id) {
   return q(`DELETE FROM ai_strategies WHERE id = $1`, [id]);
+}
+
+// Supprime en base toutes les stratégies IA créées il y a plus de 60 minutes
+// (aucune stratégie IA ne doit survivre plus de 60 min, voir ai-auto.js).
+// Retourne la liste des id supprimés pour permettre de les retirer aussi de
+// l'état en mémoire (state.aiStrategies).
+async function pruneAiStrategies() {
+  const r = await q(
+    `DELETE FROM ai_strategies WHERE created_at < now() - interval '60 minutes' RETURNING id`
+  );
+  return r ? r.rows.map((row) => row.id) : [];
 }
 
 // ---- analyses IA ------------------------------------------------------------
@@ -671,11 +703,11 @@ async function rows(sql, params = []) { const r = await q(sql, params); return r
 
 module.exports = {
   connect, status, saveGame, gamesByDate, dailySummary, exec, rows,
-  savePrediction, closePrediction, setSetting, getSetting, normalizeDate,
+  savePrediction, closePrediction, predictionsByNumber, setSetting, getSetting, normalizeDate,
   saveStrategy, loadStrategies, deleteStrategy, strategyStats, strategyPredictions, clearPredictions,
   saveGate, loadGates,
   saveAnnouncement, deleteAnnouncement, loadAnnouncements,
-  saveAiStrategy, loadAiStrategies, deleteAiStrategy,
+  saveAiStrategy, loadAiStrategies, deleteAiStrategy, pruneAiStrategies,
   saveAiAnalysis, loadAiAnalyses,
   lastGames, gameByNumber, predictionsByDate, predictionSummary,
   overview, availableDates, readOnlyQuery,

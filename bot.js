@@ -1479,6 +1479,17 @@ async function applyDbConfigs() {
   const missing = strategies.LIST.filter((d) => !loaded.includes(d.key)).map((d) => d.key);
   if (missing.length) await saveConfigsToDb();
 
+  // CORRECTIF DÉPLOIEMENT : la stratégie « ombre » doit toujours fonctionner
+  // en double perte (lossTrigger = 2). Si une valeur différente (ex. 1, issue
+  // d'un ancien déploiement ou d'un réglage manuel) est encore enregistrée en
+  // base, on la force ici à 2 et on la ré-enregistre — sinon le filtre
+  // « silencieux » ne filtre plus rien (chaque perte confirme seule et finit
+  // publiée, voir predictor.js/phase1Waiting).
+  if (state.strategies.ombre && state.strategies.ombre.lossTrigger !== 2) {
+    state.strategies.ombre.lossTrigger = 2;
+    await db.saveStrategy('ombre', strategies.BY_KEY.ombre.name, state.strategies.ombre);
+  }
+
   // filtre « double perte » (gates) : restauré depuis la base pour survivre à
   // un redémarrage du process (veille Render Free, redéploiement, crash…),
   // sinon 2 pertes réellement tombées avant un redémarrage étaient « oubliées ».

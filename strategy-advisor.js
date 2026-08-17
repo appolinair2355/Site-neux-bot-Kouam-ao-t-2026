@@ -32,20 +32,37 @@ const runtime = {
 
 function pct(a, b) { return b ? Math.round((a / b) * 1000) / 10 : 0; }
 
-// résultats CUMULÉS d'une stratégie depuis le début (mémoire + base)
+// résultats CUMULÉS d'une stratégie depuis le début (base si disponible,
+// sinon mémoire). CORRECTIF : avant, mémoire ET base étaient additionnées —
+// or chaque prédiction est enregistrée dans les DEUX dès son envoi
+// (db.savePrediction() dans broadcast()) et la mémoire n'est vidée qu'une
+// fois par jour (flushBilans()) : chaque prédiction terminée du jour était
+// donc comptée deux fois (total gonflé, seuil « échantillon suffisant »
+// atteint à tort). On ne prend plus qu'UNE seule source à la fois.
 function liveStats(key, dbRows = []) {
+  const dbForKey = dbRows.filter((r) => r.strategy === key);
+  if (dbForKey.length) {
+    const done = dbForKey.filter((r) => String(r.status || '').startsWith('gagn') || String(r.status || '').startsWith('perd'));
+    const win = done.filter((r) => String(r.status || '').startsWith('gagn')).length;
+    const steps = done.filter((r) => String(r.status || '').startsWith('gagn')).map((r) => r.rattrapage || 0);
+    const avgStep = steps.length ? Math.round((steps.reduce((a, b) => a + b, 0) / steps.length) * 100) / 100 : 0;
+    return {
+      total: done.length, win, loss: done.length - win,
+      rate: pct(win, done.length),
+      pending: dbForKey.length - done.length,
+      avgStep,
+      firstAt: null,
+    };
+  }
+  // repli mémoire : base indisponible, ou pas encore de ligne pour cette clé
   const list = (state.predictions || []).filter((p) => p.strategy === key);
   const done = list.filter((p) => p.status === 'gagné' || p.status === 'perdu');
   const win = done.filter((p) => p.status === 'gagné').length;
   const steps = done.filter((p) => p.status === 'gagné').map((p) => p.step || 0);
   const avgStep = steps.length ? Math.round((steps.reduce((a, b) => a + b, 0) / steps.length) * 100) / 100 : 0;
-  const dbDone = dbRows.filter((r) => r.strategy === key);
-  const dbWin = dbDone.filter((r) => String(r.status || '').startsWith('gagn')).length;
-  const total = done.length + dbDone.length;
-  const wins = win + dbWin;
   return {
-    total, win: wins, loss: total - wins,
-    rate: pct(wins, total),
+    total: done.length, win, loss: done.length - win,
+    rate: pct(win, done.length),
     pending: list.length - done.length,
     avgStep,
     firstAt: list.length ? list[list.length - 1].sentAt : null,

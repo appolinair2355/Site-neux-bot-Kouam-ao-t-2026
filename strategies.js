@@ -438,7 +438,8 @@ const ombre = {
     absence: 4,
     scope: 'tous',        // 'tous' = joueur + banquier, 'joueur' = main du joueur
     silent: true,         // mode silencieux : envoi seulement après double perte
-    lossWindow: 5,        // nombre de prédictions suivies après une perte (5 par défaut)
+    lossTrigger: 2,        // nombre de pertes nécessaires avant de confirmer une position (2 = double perte)
+    lossWindow: 6,         // nombre de prédictions suivies après une perte (6 par défaut)
     lossInterval: 5,      // écart max toléré entre la perte de référence et la perte de confirmation
     resetOnWin: true,
     template: null,

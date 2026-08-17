@@ -15,6 +15,7 @@ const miner = require('./pattern-miner');
 const aiAuto = require('./ai-auto');
 const cumulative = require('./cumulative');
 const advisor = require('./strategy-advisor');
+const aiQa = require('./ai-qa');
 const predit = require('./predit');
 const dayCompare = require('./day-compare');
 const {
@@ -740,6 +741,19 @@ app.post('/api/ai/strategy-advice/run', async (req, res) => {
   const remote = !!(req.body && req.body.remote);
   res.json(await advisor.run({ remote }));
 });
+
+// --- « Poser une question à l'IA » sur le projet (prédictions réelles, raisons, réglages) ---
+app.post('/api/ai/ask', async (req, res) => {
+  const question = req.body && req.body.question;
+  if (!question || !String(question).trim()) return res.status(400).json({ error: 'Question vide.' });
+  try {
+    const entry = await aiQa.ask(question);
+    res.json({ ok: true, ...entry, history: aiQa.history() });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+app.get('/api/ai/ask', (req, res) => res.json({ ok: true, history: aiQa.history() }));
 
 // --- analyseur automatique en temps réel ------------------------------------
 app.get('/api/ai/auto', (req, res) => res.json(aiAuto.status()));

@@ -117,6 +117,39 @@ function listStrategies() {
   }));
 }
 
+// ---------------------------------------------------------------------------
+// Expiration automatique (1h) : aucune stratégie créée par l'IA ne doit
+// rester en base (ni en mémoire) plus de 60 minutes après sa création.
+// Un timer dédié vérifie chaque minute et supprime tout ce qui a dépassé
+// l'âge maximum — en base ET dans state.aiStrategies (sinon la liste
+// mémoire resterait affichée jusqu'au prochain redémarrage).
+// ---------------------------------------------------------------------------
+const AI_STRATEGY_MAX_AGE_MS = 60 * 60 * 1000; // 60 min
+const PRUNE_CHECK_INTERVAL_MS = 60 * 1000; // vérification chaque minute
+
+async function pruneExpiredStrategies() {
+  const cutoff = Date.now() - AI_STRATEGY_MAX_AGE_MS;
+  const list = state.aiStrategies || [];
+  const expired = list.filter((s) => {
+    const t = Date.parse(s.createdAt);
+    return Number.isFinite(t) && t <= cutoff;
+  });
+  if (!expired.length) return [];
+  const expiredIds = new Set(expired.map((s) => s.id));
+  state.aiStrategies = list.filter((s) => !expiredIds.has(s.id));
+  if (db.ready) {
+    try {
+      await db.pruneAiStrategies();
+    } catch (_) {
+      // secours si la requête groupée échoue : suppression une par une
+      for (const s of expired) { try { await db.deleteAiStrategy(s.id); } catch (_) {} }
+    }
+  }
+  return expired.map((s) => s.name);
+}
+
+let pruneTimer = null;
+
 // Stratégies « au-dessus de la barre » : taux actuel >= seuil ET jamais
 // descendues sous ce seuil depuis leur création (rateMin >= seuil).
 function eliteStrategies(threshold = 90) {
@@ -227,6 +260,10 @@ function start(onChange) {
   localTimer = setInterval(tickLocal, config.AI_LOCAL_INTERVAL_MS);
   remoteTimer = setInterval(tickRemote, config.AI_REMOTE_INTERVAL_MS);
   setTimeout(tickRemote, 20000);
+  pruneExpiredStrategies().catch((e) => { auto.lastError = e.message; });
+  pruneTimer = setInterval(() => {
+    pruneExpiredStrategies().catch((e) => { auto.lastError = e.message; });
+  }, PRUNE_CHECK_INTERVAL_MS);
   return auto;
 }
 
@@ -234,7 +271,8 @@ function stop() {
   auto.running = false;
   if (localTimer) clearInterval(localTimer);
   if (remoteTimer) clearInterval(remoteTimer);
-  localTimer = remoteTimer = null;
+  if (pruneTimer) clearInterval(pruneTimer);
+  localTimer = remoteTimer = pruneTimer = null;
   return auto;
 }
 
@@ -251,4 +289,4 @@ function status() {
   };
 }
 
-module.exports = { MIN_STRATEGY_RATE, listStrategies, eliteStrategies, trackRate, start, stop, status, cumulative, runLocal, runRemote, saveProposal, refreshPastDays, getPastDays: () => pastDays, auto };
+module.exports = { MIN_STRATEGY_RATE, listStrategies, eliteStrategies, trackRate, start, stop, status, cumulative, runLocal, runRemote, saveProposal, refreshPastDays, getPastDays: () => pastDays, auto, pruneExpiredStrategies };
