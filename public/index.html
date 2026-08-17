@@ -470,8 +470,15 @@
       <div id="aiCumulative" class="section"><div class="loading">Chargement des paliers…</div></div>
       <div class="section-head" style="margin-top:10px"><div><span class="eyebrow">Avis sur les stratégies</span><h2 style="margin-top:7px">L’IA juge les stratégies existantes (cumul complet)</h2><p class="small">L’IA reprend TOUT le cumul de la journée (jeux 1 → 1440) et les résultats réels de chaque stratégie pour dire laquelle garder, laquelle ajuster et laquelle mettre en silencieux.</p></div><div class="toolbar"><button class="button primary" onclick="runAdvice(false)">Mettre à jour</button><button class="button orange" onclick="runAdvice(true)">Avis Pollinations.ai</button></div></div>
       <div id="aiAdvice" class="section"><div class="loading">Chargement de l’avis…</div></div>
+      <div class="section-head" style="margin-top:10px"><div><span class="eyebrow">Question</span><h2 style="margin-top:7px">Poser une question à l’IA</h2><p class="small">Pose une question sur le projet — ex. « Pourquoi la stratégie ombre a prédit le jeu 12 ? ». L’IA répond à partir des VRAIES prédictions envoyées (raison enregistrée par le bot), pas d’une supposition générale.</p></div></div>
+      <div class="panel">
+        <div class="field"><label>Ta question</label><textarea id="aiQaQuestion" placeholder="Ex. Pourquoi la stratégie ombre a prédit le jeu 12 ?"></textarea></div>
+        <div class="toolbar"><button class="button primary" onclick="askAi()">Poser la question</button></div>
+        <div id="aiQaAnswer" style="margin-top:14px"></div>
+        <div id="aiQaHistory" style="margin-top:18px"></div>
+      </div>
       <div id="aiResult" class="section"></div>`;
-      renderAiResults(); loadPatterns(); loadCompare(); loadCumulative(); loadAdvice();
+      renderAiResults(); loadPatterns(); loadCompare(); loadCumulative(); loadAdvice(); loadAiQaHistory();
     }
     function renderAiResults() {
       const list = (snapshot.ai?.results || []).filter(Boolean);
@@ -557,6 +564,32 @@
       } catch (e) { box.innerHTML = `<div class="notice error">${esc(e.message)}</div>`; }
     }
     async function runAdvice(remote) { const box = $('#aiAdvice'); if (box) box.innerHTML = '<div class="loading">Analyse en cours…</div>'; try { await api('/api/ai/strategy-advice/run', 'POST', { remote: !!remote }); await loadAdvice(); toast('Avis mis à jour.'); } catch(e) { toast(e.message, 'error'); } }
+    function renderAiQaEntry(e) {
+      return `<div class="notice" style="margin-bottom:10px"><b>${esc(e.question)}</b><div style="margin-top:6px;white-space:pre-wrap">${esc(e.answer)}</div><div class="small muted" style="margin-top:6px">${formatDate(e.at)} · source : ${esc(e.source || 'local')}</div></div>`;
+    }
+    async function loadAiQaHistory() {
+      const box = $('#aiQaHistory'); if (!box) return;
+      try {
+        const r = await api('/api/ai/ask');
+        const hist = (r.history || []).slice(1); // la plus récente reste affichée dans #aiQaAnswer
+        box.innerHTML = hist.length ? `<h3 class="small muted">Questions précédentes</h3>${hist.map(renderAiQaEntry).join('')}` : '';
+      } catch (e) { /* silencieux : l'historique n'est pas essentiel */ }
+    }
+    async function askAi() {
+      const input = $('#aiQaQuestion'); const question = (input?.value || '').trim();
+      if (!question) return toast('Écris une question.', 'error');
+      const answerBox = $('#aiQaAnswer');
+      if (answerBox) answerBox.innerHTML = '<div class="loading">L’IA réfléchit…</div>';
+      try {
+        const r = await api('/api/ai/ask', 'POST', { question });
+        if (answerBox) answerBox.innerHTML = renderAiQaEntry(r);
+        if (input) input.value = '';
+        await loadAiQaHistory();
+      } catch (e) {
+        if (answerBox) answerBox.innerHTML = `<div class="notice error">${esc(e.message)}</div>`;
+        toast(e.message, 'error');
+      }
+    }
     async function unlockStrategy(key) { try { await api('/api/strategies/' + key + '/unlock', 'POST', {}); toast('Envoi débloqué.'); await loadAdvice(); } catch(e) { toast(e.message, 'error'); } }
 
     async function runCumulative() { try { await api('/api/ai/cumulative/run', 'POST', {}); await loadCumulative(); toast('Paliers mis à jour.'); } catch(e) { toast(e.message, 'error'); } }
