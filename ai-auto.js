@@ -59,18 +59,28 @@ function trackRate(item, rate) {
 function saveProposal(proposal, origin = 'auto-local') {
   if (!proposal || !proposal.name) return null;
   const rate = proposalRate(proposal);
-  if (rate == null || rate < MIN_STRATEGY_RATE) return null;
+  if (rate == null) return null;
   const name = String(proposal.name).slice(0, 100);
-  // CORRECTIF : avant, une stratégie déjà connue était simplement ignorée et son
-  // taux ne bougeait jamais. On met désormais la mesure à jour pour pouvoir
-  // suivre les stratégies qui restent à 90% ou plus sans jamais descendre.
+  // CORRECTIF : le seuil ne doit filtrer que la CRÉATION d'une nouvelle
+  // stratégie. Avant, il coupait aussi la mise à jour d'une stratégie déjà
+  // connue dès que sa nouvelle mesure retombait sous le seuil : son taux ne
+  // bougeait donc plus jamais vers le bas, et elle n'était jamais retirée
+  // (« ça n'arrive plus à renouveler »). On met maintenant TOUJOURS le taux à
+  // jour pour une stratégie existante, puis on la retire immédiatement (liste
+  // + base de données) si elle repasse sous le seuil.
   const existing = (state.aiStrategies || []).find((s) => slug(s.name) === slug(name));
   if (existing) {
     trackRate(existing, rate);
     existing.support = Number(proposal.support) || existing.support || null;
-    if (db.ready) db.saveAiStrategy(existing).catch(() => {});
+    if (rate < MIN_STRATEGY_RATE) {
+      state.aiStrategies = (state.aiStrategies || []).filter((s) => s.id !== existing.id);
+      if (db.ready) db.deleteAiStrategy(existing.id).catch(() => {});
+    } else if (db.ready) {
+      db.saveAiStrategy(existing).catch(() => {});
+    }
     return null;
   }
+  if (rate < MIN_STRATEGY_RATE) return null;
   const item = {
     id: `ai-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     name,

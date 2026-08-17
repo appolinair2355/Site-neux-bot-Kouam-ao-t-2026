@@ -658,10 +658,14 @@ app.post('/api/strategies/:key/reset', async (req, res) => {
 // suppression (administrateur) : configuration effacée en base + stratégie arrêtée
 app.delete('/api/strategies/:key', async (req, res) => {
   if (!strategies.BY_KEY[req.params.key]) return res.status(404).json({ error: 'Stratégie inconnue' });
-  if (db.ready) await db.deleteStrategy(req.params.key);
   resetStrategy(req.params.key);
   setStrategyConfig(req.params.key, { enabled: false });
+  // CORRECTIF : persist() réécrit TOUTES les stratégies en base (y compris
+  // celle-ci, remise à ses valeurs par défaut). Si on supprimait AVANT
+  // persist(), la ligne réapparaissait aussitôt en base. On supprime donc
+  // en dernier, après que persist() ait fini d'écrire.
   persist();
+  if (db.ready) await db.deleteStrategy(req.params.key);
   res.json({ ok: true, ...strategyPayload(req.params.key) });
 });
 

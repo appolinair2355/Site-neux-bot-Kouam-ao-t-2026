@@ -187,20 +187,45 @@ function triggered(rule, game) {
 // ---------------------------------------------------------------------------
 // Certification : SEULES les stratégies créées par l'IA à 100% entrent ici
 // ---------------------------------------------------------------------------
+// prédictions du panneau liées à une règle donnée (retirée elles aussi de la
+// base de données, puisque panel.predictions est réenregistré en entier par
+// persist()/db.savePreditState()).
+function dropPredictionsFor(id) {
+  panel.predictions = panel.predictions.filter((p) => !p.sources.some((s) => s.id === id));
+}
+
 function certifyDiscoveries() {
   const found = miner.mine(state.history || [], { lead: 2 });
-  const list = (found.discoveries || []).filter(
+  const discoveries = found.discoveries || [];
+  const byId = new Map();
+  for (const d of discoveries) {
+    if (!d.rule) continue;
+    byId.set(`ia:${d.rule.kind}:${d.rule.hand}:${d.rule.token}:${d.rule.k}:${d.rule.suit}`, d);
+  }
+  // CORRECTIF : avant, seules les règles ENCORE au-dessus du seuil (85% par
+  // défaut) étaient réévaluées ci-dessous (elles étaient filtrées AVANT).
+  // Une règle déjà certifiée qui retombait sous le seuil gardait donc pour
+  // toujours son ancien taux, n'était jamais retirée, et le panneau
+  // n'arrivait plus à « renouveler » ses stratégies. On met maintenant à
+  // jour TOUTE règle déjà certifiée qui réapparaît dans l'analyse, et on la
+  // retire aussitôt (liste + prédictions en base) si elle repasse sous le seuil.
+  for (const entry of panel.certified) {
+    const d = byId.get(entry.id);
+    if (!d) continue;
+    entry.rate = d.rate;
+    entry.sample = d.support;
+    if (Number(d.rate) < panel.minRate) {
+      retire(entry, `Repasse sous le seuil de ${panel.minRate}% (nouveau taux : ${d.rate}%).`);
+      dropPredictionsFor(entry.id);
+    }
+  }
+  const list = discoveries.filter(
     (d) => d.rule && Number(d.rate) >= panel.minRate && Number(d.support || 0) >= panel.minSample,
   );
   for (const d of list) {
     const id = `ia:${d.rule.kind}:${d.rule.hand}:${d.rule.token}:${d.rule.k}:${d.rule.suit}`;
     if (panel.retired.some((r) => r.id === id)) continue;
-    const existing = panel.certified.find((c) => c.id === id);
-    if (existing) {
-      existing.rate = d.rate;
-      existing.sample = d.support;
-      continue;
-    }
+    if (panel.certified.some((c) => c.id === id)) continue; // déjà mise à jour ci-dessus
     panel.certified.push({
       id,
       type: 'ia',
@@ -570,25 +595,27 @@ function globalBilanText() {
   );
 }
 
-// Envoie le bilan de CHAQUE stratégie IA ayant prédit, puis le bilan global.
+// Envoie UN SEUL bilan global « Prédit IA » (toutes stratégies confondues),
+// puis remet les compteurs à zéro pour repartir sur une nouvelle journée.
+// CORRECTIF : avant, un message était envoyé PAR stratégie IA ayant prédit,
+// en plus du bilan global — plusieurs bilans au lieu d'un seul.
 async function sendBilans() {
   const bot = typeof sender === 'function' ? sender() : null;
   if (!bot) return { ok: false, error: 'Aucun token Telegram configuré' };
   if (!panel.channels.length) return { ok: false, error: 'Aucun canal configuré pour le panneau Prédit' };
-  const texts = strategiesView()
-    .filter((v) => v.bilan && v.bilan.total > 0)
-    .map((v) => v.bilanText);
-  texts.push(globalBilanText());
+  const text = globalBilanText();
   const sent = [];
   const errors = [];
   for (const id of panel.channels) {
-    for (const text of texts) {
-      try { await bot.sendMessage(id, text); sent.push(String(id)); panel.sentCount = (panel.sentCount || 0) + 1; }
-      catch (e) { errors.push(`${id} : ${e.message}`); }
-    }
+    try { await bot.sendMessage(id, text); sent.push(String(id)); panel.sentCount = (panel.sentCount || 0) + 1; }
+    catch (e) { errors.push(`${id} : ${e.message}`); }
   }
   panel.lastError = errors.length ? errors[0] : panel.lastError;
-  return { ok: sent.length > 0, sent, errors, count: texts.length };
+  // un bilan par jour, puis on repart à zéro : seules les prédictions encore
+  // « en attente » (en cours) restent affichées ; l'historique reste en base.
+  panel.predictions = panel.predictions.filter((p) => p.status === 'en attente');
+  persist();
+  return { ok: sent.length > 0, sent, errors, count: 1 };
 }
 
 async function test() {

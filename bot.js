@@ -36,6 +36,19 @@ if (Array.isArray(saved.aiAnalyses)) state.aiAnalyses = saved.aiAnalyses;
 if (Array.isArray(saved.aiStrategies)) state.aiStrategies = saved.aiStrategies;
 initStrategies();
 
+// jour calendaire (UTC) du dernier bilan envoyé — persisté pour ne pas
+// renvoyer/re-déclencher deux fois le même jour après un redémarrage.
+let lastBilanDate = saved.lastBilanDate || null;
+
+// date du jour à Abidjan (Côte d'Ivoire, GMT+0 toute l'année, pas d'heure
+// d'été) — sert à faire partir le bilan à 00h00 heure ivoirienne.
+const abidjanFmt = new Intl.DateTimeFormat('fr-CA', {
+  timeZone: 'Africa/Abidjan', year: 'numeric', month: '2-digit', day: '2-digit',
+});
+function abidjanDateString(d = new Date()) {
+  return abidjanFmt.format(d); // "YYYY-MM-DD"
+}
+
 // CORRECTIF : quand `persist()` est appelée alors que la base n'est pas
 // joignable (coupure, veille Render Free…), l'écriture DB est silencieusement
 // SAUTÉE — sans ce drapeau, rien ne se souvenait qu'un changement (ex. nouvel
@@ -60,6 +73,7 @@ function persist() {
     strategies: state.strategies,
     aiAnalyses: state.aiAnalyses,
     aiStrategies: state.aiStrategies,
+    lastBilanDate,
   });
   if (db.ready) {
     // configuration complète (token, admin, canaux) : elle est relue au démarrage
@@ -1015,6 +1029,12 @@ const bilanPending = new Set();
 let lastLiveNumber = null;
 let lastShoeSeq = 0;
 let firstTick = true;
+// CORRECTIF : setInterval(tick, 1500ms) ne garantit pas qu'un tick se termine
+// avant que le suivant démarre. Si un tour (appel réseau, envoi Telegram) est
+// lent, deux exécutions de tick() pouvaient se chevaucher et repérer TOUTES
+// LES DEUX la même prédiction « ombre » encore non envoyée (state.predictions
+// pas encore mis à jour par la première) → double envoi dans le canal public.
+let ticking = false;
 
 async function sendBilan(key) {
   const cfg = state.strategies[key] || {};
@@ -1028,9 +1048,9 @@ async function sendBilan(key) {
   }
 }
 
-// Publie le bilan COMPLET : chaque stratégie ayant prédit pendant le sabot
-// (et pas seulement celles clôturées au dernier tour) + les prédictions IA.
-async function flushBilans(reason = 'nouveau sabot') {
+// Publie le bilan COMPLET (un par jour calendaire) : chaque stratégie ayant
+// prédit + les prédictions IA, puis remet les compteurs à zéro sur le site.
+async function flushBilans(reason = 'nouveau jour') {
   bilanPending.clear();
   const keys = strategies.LIST
     .map((d) => d.key)
@@ -1043,6 +1063,11 @@ async function flushBilans(reason = 'nouveau sabot') {
   let ai = { ok: false, error: 'panneau Prédit indisponible' };
   try { ai = await predit.sendBilans(); }
   catch (e) { ai = { ok: false, error: e.message }; }
+  // CORRECTIF : un bilan par jour, puis le site repart à zéro. On ne retire
+  // que les prédictions déjà TERMINÉES (gagné/perdu/annulé) de la vue en
+  // cours — celles encore « en attente » restent affichées (en cours), et
+  // l'historique complet reste consultable en base de données (/pred, /jeux…).
+  state.predictions = state.predictions.filter((p) => p.status === 'en attente');
   console.log(`📊 Bilan (${reason}) : ${done.join(', ') || 'aucune stratégie'} • IA : ${ai.ok ? 'envoyé' : ai.error}`);
   return { strategies: done, ai };
 }
@@ -1297,6 +1322,8 @@ async function ensureDb() {
 }
 
 async function tick() {
+  if (ticking) return; // un tick précédent tourne encore : on saute celui-ci
+  ticking = true;
   try {
     await ensureDb();
     const games = await api.fetchGames();
@@ -1331,29 +1358,35 @@ async function tick() {
       // laisser la vraie prédiction « ombre » du sabot courant partir — ce qui
       // désynchronisait complètement la position réellement envoyée par
       // rapport à celle annoncée dans /ombreannonces.
+      // CORRECTIF #2 : même problème avec un cycle (phase 1→2→3) ABANDONNÉ en
+      // cours de route (écart dépassé → resetGate, nouvelle référence…) : la
+      // prédiction « ombre » restée silencieuse de ce cycle-là n'était ni
+      // envoyée ni annulée, donc toujours candidate au rattrapage. Une fois
+      // qu'un cycle SUIVANT confirmait une nouvelle position, ce rattrapage
+      // pouvait ressortir cette vieille prédiction hors contexte et
+      // « fulfillAnnouncement » la rattachait quand même à l'annonce actuelle
+      // → doublon visible (deux prédictions pour ce qui semblait être la même
+      // annonce). On ignore donc toute prédiction antérieure à la référence
+      // (`since`) du cycle EN COURS.
+      const since = gateView('ombre').since;
       const stuck = state.predictions
-        .filter((p) => p.strategy === 'ombre' && p.status !== 'annulé' && (!p.messages || !p.messages.length))
+        .filter((p) => p.strategy === 'ombre' && p.status !== 'annulé' && (!p.messages || !p.messages.length)
+          && (since == null || p.target >= since))
         .sort((a, b) => a.target - b.target)[0];
       if (stuck) await broadcast(stuck);
     }
 
-    // Le bilan est publié quand le jeu repart au n°1 (nouveau sabot).
-    // CORRECTIF : il partait uniquement pour les stratégies dont une prédiction
-    // venait de se clôturer sur le tout dernier tour, et jamais pour les
-    // prédictions IA. Un nouveau sabot annule aussi les prédictions en attente
-    // (resetShoe), donc plus rien n'arrivait dans « bilanPending ». On publie
-    // désormais le bilan de TOUTES les stratégies ayant prédit + celui des
-    // prédictions IA, dès que le sabot change.
-    const liveNumber = state.live ? state.live.number : null;
-    const shoeSeq = state.shoeSeq || 0;
-    let nouveauSabot = shoeSeq !== lastShoeSeq;
-    lastShoeSeq = shoeSeq;
-    if (liveNumber && liveNumber !== lastLiveNumber) {
-      const prev = lastLiveNumber;
-      lastLiveNumber = liveNumber;
-      if (liveNumber === 1 || (prev != null && liveNumber < prev)) nouveauSabot = true;
+    // CORRECTIF : le bilan partait à CHAQUE nouveau sabot (donc plusieurs fois
+    // par jour, dès que le jeu repartait au n°1). On publie désormais UN SEUL
+    // bilan par jour, à 00h00 heure d'Abidjan (Côte d'Ivoire, GMT+0 toute
+    // l'année). Le jour est comparé au dernier jour où un bilan a été envoyé
+    // (persisté, pour ne pas en renvoyer un second après un redémarrage le
+    // même jour).
+    const today = abidjanDateString();
+    if (!firstTick && lastBilanDate && today !== lastBilanDate) {
+      await flushBilans('nouveau jour (00h00 Abidjan)');
     }
-    if (nouveauSabot && !firstTick) await flushBilans('nouveau sabot');
+    if (lastBilanDate !== today) { lastBilanDate = today; persist(); }
     firstTick = false;
 
     const preds = evaluate();
@@ -1363,6 +1396,8 @@ async function tick() {
     await predit.tick();
   } catch (e) {
     state.lastError = e.message;
+  } finally {
+    ticking = false;
   }
 }
 

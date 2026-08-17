@@ -382,6 +382,12 @@ function gate(key) {
 }
 
 function resetGate(key) {
+  // CORRECTIF : cancelPendingAnnouncement() existait déjà mais n'était jamais
+  // appelée. Si le cycle repart de zéro (écart dépassé, etc.) alors qu'une
+  // annonce de phase 3 était encore « en_attente », elle restait bloquée pour
+  // toujours dans l'historique — un nouveau cycle en créait une seconde →
+  // deux annonces visibles dans /ombreannonces pour la même séquence.
+  if (key === 'ombre') cancelPendingAnnouncement(key);
   state.gates[key] = emptyGate();
   emitGateChange(key);
   return state.gates[key];
