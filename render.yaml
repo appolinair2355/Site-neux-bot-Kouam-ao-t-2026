@@ -19,3 +19,11 @@ services:
         sync: false
       - key: POLLINATIONS_MODEL
         value: openai
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b

@@ -229,6 +229,12 @@ app.get('/api/state', async (req, res) => {
     ai: {
       configured: ai.keyLooksValid(),
       model: config.POLLINATIONS.MODEL,
+      openrouterConfigured: ai.openrouterConfigured(),
+      openrouterModel: config.OPENROUTER.MODEL,
+      geminiConfigured: ai.geminiConfigured(),
+      geminiModel: config.GEMINI.MODEL,
+      groqConfigured: ai.groqConfigured(),
+      groqModel: config.GROQ.MODEL,
       auto: aiAuto.status(),
       lastAnalysis: state.aiAnalyses[0] || null,
       results: state.aiAnalyses.slice(0, 6),
@@ -855,6 +861,25 @@ app.post('/api/ai/auto/toggle', (req, res) => {
 app.post('/api/ai/key', (req, res) => {
   ai.setApiKey(req.body && req.body.key);
   res.json({ ok: true, configured: ai.keyLooksValid() });
+});
+
+// clés Gemini / Groq saisissables à chaud depuis la page Analyseur IA —
+// mêmes principe et route que /api/ai/key ci-dessus, avec persistance en base
+// pour survivre à un redémarrage/redéploiement (voir applyDbConfigs dans bot.js).
+app.post('/api/ai/key/gemini', async (req, res) => {
+  ai.setGeminiKey(req.body && req.body.key);
+  if (db.ready) await db.setSetting('ai_gemini_key', ai.geminiKey());
+  res.json({ ok: true, configured: ai.geminiConfigured() });
+});
+app.post('/api/ai/key/groq', async (req, res) => {
+  ai.setGroqKey(req.body && req.body.key);
+  if (db.ready) await db.setSetting('ai_groq_key', ai.groqKey());
+  res.json({ ok: true, configured: ai.groqConfigured() });
+});
+app.post('/api/ai/key/openrouter', async (req, res) => {
+  ai.setOpenrouterKey(req.body && req.body.key);
+  if (db.ready) await db.setSetting('ai_openrouter_key', ai.openrouterKey());
+  res.json({ ok: true, configured: ai.openrouterConfigured() });
 });
 
 app.get('/api/ai/models', async (req, res) => {

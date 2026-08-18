@@ -18,6 +18,23 @@ function keyLooksValid() {
   return !!k && k !== 'POLLINATIONS_KEY_A_REMPLACER';
 }
 
+// clés Gemini / Groq utilisables à chaud (page Analyseur IA), sinon variable
+// d'environnement (GEMINI_API_KEY / GROQ_API_KEY) — même principe que la clé
+// Pollinations ci-dessus. La persistance en base (pour survivre à un
+// redémarrage) est gérée par l'appelant (voir server.js + bot.js/applyDbConfigs).
+let runtimeGeminiKey = '';
+let runtimeGroqKey = '';
+let runtimeOpenrouterKey = '';
+function setGeminiKey(key) { runtimeGeminiKey = String(key || '').trim(); return geminiKey(); }
+function setGroqKey(key) { runtimeGroqKey = String(key || '').trim(); return groqKey(); }
+function setOpenrouterKey(key) { runtimeOpenrouterKey = String(key || '').trim(); return openrouterKey(); }
+function geminiKey() { return runtimeGeminiKey || (config.GEMINI && config.GEMINI.API_KEY) || ''; }
+function groqKey() { return runtimeGroqKey || (config.GROQ && config.GROQ.API_KEY) || ''; }
+function openrouterKey() { return runtimeOpenrouterKey || (config.OPENROUTER && config.OPENROUTER.API_KEY) || ''; }
+function geminiConfigured() { return !!geminiKey(); }
+function groqConfigured() { return !!groqKey(); }
+function openrouterConfigured() { return !!openrouterKey(); }
+
 
 // ---------------------------------------------------------------------------
 // Appel chat mutualisé, avec REPLIS automatiques.
@@ -32,6 +49,23 @@ function chatAttempts() {
   const key = apiKey();
   const model = config.POLLINATIONS.MODEL || 'openai';
   const list = [];
+
+  // OpenRouter est le service PAR DÉFAUT : essayé en tout premier. Puis
+  // Gemini et Groq (avant Pollinations) : deux services avec clé, nettement
+  // plus fiables/rapides que le repli gratuit sans clé. Si l'un échoue ou
+  // expire (timeout), chat() passe automatiquement à l'entrée suivante de
+  // cette liste — donc au fournisseur suivant.
+  // Un fournisseur sans clé configurée est simplement absent de la liste.
+  if (config.OPENROUTER && openrouterKey()) {
+    list.push({ url: config.OPENROUTER.CHAT_URL, key: openrouterKey(), model: config.OPENROUTER.MODEL, label: 'OpenRouter' });
+  }
+  if (config.GEMINI && geminiKey()) {
+    list.push({ url: config.GEMINI.CHAT_URL, key: geminiKey(), model: config.GEMINI.MODEL, label: 'Google Gemini' });
+  }
+  if (config.GROQ && groqKey()) {
+    list.push({ url: config.GROQ.CHAT_URL, key: groqKey(), model: config.GROQ.MODEL, label: 'Groq' });
+  }
+
   if (keyLooksValid()) {
     list.push({ url: config.POLLINATIONS.CHAT_URL, key, model, label: 'Pollinations (clé)' });
     list.push({ url: FREE_CHAT_URL, key, model, label: 'Pollinations texte (clé)' });
@@ -440,4 +474,6 @@ async function listModels() {
 module.exports = {
   analyze, localAnalysis, compactGame, localSummary, listModels, chat, chatRoute,
   setApiKey, apiKey, keyLooksValid, MAX_GAMES,
+  setGeminiKey, setGroqKey, geminiKey, groqKey, geminiConfigured, groqConfigured,
+  setOpenrouterKey, openrouterKey, openrouterConfigured,
 };

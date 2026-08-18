@@ -19,6 +19,42 @@ const POLLINATIONS = {
 };
 
 // ---------------------------------------------------------------------------
+// Google Gemini (point d'accès compatible OpenAI) et Groq — utilisés en
+// PRIORITÉ par ai-analyzer.js/chat() avant le repli Pollinations : deux
+// services avec clé, nettement plus fiables/rapides que le repli gratuit sans
+// clé. Si l'un échoue ou expire, l'appel suivant prend automatiquement le
+// relais (voir chatAttempts()/chat() dans ai-analyzer.js).
+// Laisser la clé vide désactive simplement ce fournisseur (aucune erreur).
+// ---------------------------------------------------------------------------
+const GEMINI = {
+  // point d'accès officiel « compatibilité OpenAI » de l'API Gemini
+  CHAT_URL: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+  API_KEY: process.env.GEMINI_API_KEY || '',
+  MODEL: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+};
+
+const GROQ = {
+  CHAT_URL: 'https://api.groq.com/openai/v1/chat/completions',
+  API_KEY: process.env.GROQ_API_KEY || '',
+  // llama-3.3-70b-versatile est en cours de retrait chez Groq (courant 2026) :
+  // openai/gpt-oss-120b est le modèle de migration recommandé. Réglable via
+  // GROQ_MODEL sans toucher au code si Groq change encore ses modèles.
+  MODEL: process.env.GROQ_MODEL || 'openai/gpt-oss-120b',
+};
+
+// ---------------------------------------------------------------------------
+// OpenRouter — fournisseur PAR DÉFAUT, essayé en tout premier par
+// ai-analyzer.js/chatAttempts() avant Gemini/Groq/Pollinations. Clé en dur
+// (aucune variable Render requise) comme les autres services ci-dessus.
+// ---------------------------------------------------------------------------
+const OPENROUTER = {
+  CHAT_URL: 'https://openrouter.ai/api/v1/chat/completions',
+  API_KEY: process.env.OPENROUTER_API_KEY
+    || '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',
+  MODEL: process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini',
+};
+
+// ---------------------------------------------------------------------------
 // Compte Brevo expéditeur (codes de confirmation) — clé API en dur.
 // Créer un compte gratuit sur https://app.brevo.com (300 emails/jour gratuits)
 // puis générer une clé API dans Settings > SMTP & API > API Keys.
@@ -68,6 +104,12 @@ module.exports = {
   POLLINATIONS_API_KEY: POLLINATIONS.API_KEY,
   POLLINATIONS_BASE_URL: `${POLLINATIONS.BASE_URL}/v1`,
   POLLINATIONS_MODEL: POLLINATIONS.MODEL,
+
+  // Fournisseurs IA prioritaires (avec clé), utilisés avant Pollinations.
+  // OPENROUTER est le service PAR DÉFAUT (essayé en premier).
+  OPENROUTER,
+  GEMINI,
+  GROQ,
 
   // Analyse automatique en temps réel.
   AI_AUTO_ENABLED: true,

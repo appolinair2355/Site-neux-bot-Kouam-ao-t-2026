@@ -7,6 +7,7 @@ const db = require('./db');
 const predit = require('./predit');
 const auth = require('./auth');
 const aiAuto = require('./ai-auto');
+const ai = require('./ai-analyzer');
 const fmt = require('./formats');
 const strategies = require('./strategies');
 const afterLoss = require('./after-loss');
@@ -1549,6 +1550,17 @@ async function applyDbConfigs() {
   if (analyses.length) state.aiAnalyses = analyses;
   const autoEnabled = await db.getSetting('ai_auto_enabled');
   if (autoEnabled !== null) aiAuto.auto.enabled = autoEnabled !== 'false';
+  // clés Gemini / Groq saisies à chaud depuis la page Analyseur IA : rechargées
+  // ici pour survivre à un redémarrage/redéploiement (Render sans disque
+  // persistant efface le reste). Comme pour la clé Pollinations existante, la
+  // clé à chaud prime sur la variable d'environnement si les deux sont définies
+  // (voir geminiKey()/groqKey() dans ai-analyzer.js).
+  const geminiKeySaved = await db.getSetting('ai_gemini_key');
+  if (geminiKeySaved) ai.setGeminiKey(geminiKeySaved);
+  const groqKeySaved = await db.getSetting('ai_groq_key');
+  if (groqKeySaved) ai.setGroqKey(groqKeySaved);
+  const openrouterKeySaved = await db.getSetting('ai_openrouter_key');
+  if (openrouterKeySaved) ai.setOpenrouterKey(openrouterKeySaved);
 
   store.patch({
     strategies: state.strategies,
