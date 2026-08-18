@@ -6,20 +6,17 @@
 //    écrasé au redémarrage).
 //  • Si les identifiants ne correspondent à aucun compte connu, la personne
 //    peut créer un compte : email @gmail.com + mot de passe + confirmation.
-//  • Un code de confirmation à 6 chiffres est alors envoyé sur cette adresse
-//    Gmail (via le compte expéditeur configuré une fois par l'admin) et
-//    expire au bout de 15 minutes.
+//  • AUCUN code n'est envoyé par email : dès l'inscription, le compte est
+//    créé « en attente » et c'est l'administrateur qui l'accepte (et lui
+//    accorde un temps d'accès) depuis le panneau « Utilisateurs ».
 'use strict';
 
-const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const db = require('./db');
 const config = require('./config');
 
 const ADMIN_IDENTIFIER = 'sossoukouam';
 const ADMIN_PASSWORD_DEFAULT = 'arrow2026';
-const CODE_TTL_MS = 15 * 60 * 1000; // 15 minutes
-const MAX_CODE_ATTEMPTS = 5;
 // contact affiché à un compte bloqué (temps accordé par l'admin écoulé)
 const TELEGRAM_CONTACT = 't.me/Kouamappoloak';
 
@@ -29,14 +26,6 @@ function normalize(v) {
 
 function isGmail(email) {
   return /^[^\s@]+@gmail\.com$/i.test(normalize(email));
-}
-
-function genCode() {
-  return String(crypto.randomInt(100000, 1000000)); // toujours 6 chiffres
-}
-
-function hashCode(code) {
-  return crypto.createHash('sha256').update(String(code)).digest('hex');
 }
 
 // ---------------------------------------------------------------------------
@@ -53,6 +42,9 @@ async function ensureAdminSeed() {
        ON CONFLICT (identifier) DO NOTHING`,
       [ADMIN_IDENTIFIER, hash]
     );
+    // La confirmation par email a été supprimée : tous les comptes existants
+    // deviennent « confirmés » et n'attendent plus que l'accord de l'admin.
+    await db.exec(`UPDATE users SET verified = true WHERE verified = false`);
   } catch (e) { console.error('Seed admin impossible :', e.message); }
 }
 
@@ -76,14 +68,6 @@ async function login(identifierRaw, password) {
   if (!identifier || !pwd) return { ok: false, error: 'Identifiant et mot de passe requis.' };
   const user = await findUser(identifier);
   if (!user) return { ok: false, error: 'Identifiants incorrects.', unknown: true };
-  if (!user.verified) {
-    return {
-      ok: false,
-      error: "Ce compte n'est pas encore vérifié — un code de confirmation est requis.",
-      needsVerification: true,
-      email: user.email,
-    };
-  }
   const match = await bcrypt.compare(pwd, user.password_hash);
   if (!match) return { ok: false, error: 'Identifiants incorrects.' };
 
@@ -153,81 +137,18 @@ async function signup(emailRaw, password, confirmPassword) {
 
   const hash = await bcrypt.hash(String(password), 10);
   if (existing) {
-    await db.exec(`UPDATE users SET password_hash = $2 WHERE id = $1`, [existing.id, hash]);
+    await db.exec(`UPDATE users SET password_hash = $2, verified = true WHERE id = $1`, [existing.id, hash]);
   } else {
     await db.exec(
-      `INSERT INTO users (identifier, email, password_hash, role, verified)
-       VALUES ($1, $1, $2, 'user', false)`,
+      `INSERT INTO users (identifier, email, password_hash, role, verified, approved)
+       VALUES ($1, $1, $2, 'user', true, false)`,
       [email, hash]
     );
   }
 
-  return sendConfirmationCode(email);
-}
-
-async function sendConfirmationCode(emailRaw) {
-  const email = normalize(emailRaw);
-  const code = genCode();
-  const expiresAt = new Date(Date.now() + CODE_TTL_MS).toISOString();
-  await db.exec(
-    `INSERT INTO email_codes (email, code_hash, attempts, expires_at, created_at)
-     VALUES ($1, $2, 0, $3, now())
-     ON CONFLICT (email) DO UPDATE SET
-       code_hash = EXCLUDED.code_hash, attempts = 0,
-       expires_at = EXCLUDED.expires_at, created_at = now()`,
-    [email, hashCode(code), expiresAt]
-  );
-  try {
-    await sendMail(email, code);
-  } catch (e) {
-    return { ok: false, error: `Compte créé mais l'envoi de l'email a échoué : ${e.message}` };
-  }
-  return { ok: true, email };
-}
-
-async function resend(emailRaw) {
-  if (!db.ready) return { ok: false, error: 'Base de données non connectée.' };
-  const email = normalize(emailRaw);
-  const user = await findUser(email);
-  if (!user || user.verified)
-    return { ok: false, error: 'Aucune inscription en attente pour cet email.' };
-  return sendConfirmationCode(email);
-}
-
-// ---------------------------------------------------------------------------
-// Vérification du code (expire après 15 min, 5 tentatives max)
-// ---------------------------------------------------------------------------
-async function verify(emailRaw, codeRaw) {
-  if (!db.ready) return { ok: false, error: 'Base de données non connectée.' };
-  const email = normalize(emailRaw);
-  const code = String(codeRaw || '').trim();
-  if (!email || !code) return { ok: false, error: 'Email et code requis.' };
-
-  const rows = await db.rows(`SELECT * FROM email_codes WHERE email = $1`, [email]);
-  const row = rows[0];
-  if (!row) return { ok: false, error: "Aucun code en attente pour cet email — recommencez l'inscription." };
-  if (new Date(row.expires_at).getTime() < Date.now()) {
-    return { ok: false, error: 'Code expiré (15 minutes) — demandez-en un nouveau.', expired: true };
-  }
-  if (row.attempts >= MAX_CODE_ATTEMPTS) {
-    return { ok: false, error: 'Trop de tentatives incorrectes — demandez un nouveau code.', expired: true };
-  }
-  if (hashCode(code) !== row.code_hash) {
-    await db.exec(`UPDATE email_codes SET attempts = attempts + 1 WHERE email = $1`, [email]);
-    return { ok: false, error: `Code incorrect (${row.attempts + 1}/${MAX_CODE_ATTEMPTS} tentatives).` };
-  }
-
-  await db.exec(`UPDATE users SET verified = true WHERE email = $1`, [email]);
-  await db.exec(`DELETE FROM email_codes WHERE email = $1`, [email]);
-  const user = await findUser(email);
-
-  // L'email est confirmé, mais le compte reste en attente : c'est
-  // l'administrateur qui doit encore l'accepter et lui accorder un temps
-  // d'accès depuis le panneau « Utilisateurs ». Pas de session ouverte ici.
-  if (user.role !== 'admin' && !user.approved) {
-    return { ok: true, pendingApproval: true, identifier: user.identifier, email: user.email };
-  }
-  return { ok: true, userId: user.id, identifier: user.identifier, role: user.role };
+  // Plus aucun code par email : le compte attend simplement la validation
+  // de l'administrateur dans le panneau « Utilisateurs ».
+  return { ok: true, email, pendingApproval: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -239,10 +160,9 @@ function userView(u) {
   const expiresAt = u.access_expires_at ? new Date(u.access_expires_at).getTime() : null;
   const expired = expiresAt !== null && expiresAt < Date.now();
   const blocked = !!u.blocked || expired;
-  let status = 'attente_email';
-  if (u.verified && !u.approved) status = 'attente_admin';
-  else if (u.verified && u.approved && blocked) status = 'bloque';
-  else if (u.verified && u.approved && !blocked) status = 'actif';
+  let status = 'attente_admin';
+  if (u.approved && blocked) status = 'bloque';
+  else if (u.approved && !blocked) status = 'actif';
   return {
     id: u.id,
     identifier: u.identifier,
@@ -374,70 +294,12 @@ async function debugInfo() {
   return { db: dbStatus, usersTableReachable: true, userCount, adminExists, adminVerified };
 }
 
-async function sendMail(to, code) {
-  let apiKey = null, from = null;
-  if (db.ready) {
-    apiKey = await db.getSetting('brevo_api_key');
-    from = await db.getSetting('brevo_from');
-  }
-  // Repli sur la clé Brevo écrite en dur dans config.js.
-  apiKey = apiKey || config.BREVO_API_KEY;
-  from = from || config.BREVO_FROM;
-  if (!apiKey || apiKey === 'BREVO_API_KEY_A_REMPLACER') {
-    throw new Error(
-      "Clé API Brevo non configurée — l'administrateur doit la renseigner une fois dans les réglages de sécurité."
-    );
-  }
-  const sender = parseFromAddress(from);
-  if (!sender) {
-    throw new Error(
-      "Adresse expéditrice Brevo invalide — l'administrateur doit la reconfigurer (format : Nom <adresse@exemple.com>)."
-    );
-  }
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 8000); // 8s au lieu de rester planté
-  let res;
-  try {
-    res = await fetch('https://api.brevo.com/v3/smtp/email', {
-      method: 'POST',
-      headers: {
-        'api-key': apiKey,
-        'Content-Type': 'application/json',
-        accept: 'application/json',
-      },
-      body: JSON.stringify({
-        sender,
-        to: [{ email: to }],
-        subject: 'Code de confirmation — Baccara Bot',
-        textContent:
-          `Votre code de confirmation est : ${code}\n\n` +
-          `Il expire dans 15 minutes. Si vous n'êtes pas à l'origine de cette demande, ignorez ce message.`,
-      }),
-      signal: controller.signal,
-    });
-  } catch (e) {
-    if (e.name === 'AbortError') throw new Error('Délai dépassé en contactant Brevo (8s).');
-    throw new Error(`Connexion à Brevo impossible : ${e.message}`);
-  } finally {
-    clearTimeout(timer);
-  }
-
-  if (!res.ok) {
-    let detail = '';
-    try { const body = await res.json(); detail = body && (body.message || JSON.stringify(body)); } catch (_) {}
-    throw new Error(`Brevo a refusé l'envoi (${res.status})${detail ? ' : ' + detail : ''}`);
-  }
-}
-
 module.exports = {
   ADMIN_IDENTIFIER,
   TELEGRAM_CONTACT,
   ensureAdminSeed,
   login,
   signup,
-  verify,
-  resend,
   checkAccess,
   listUsers,
   approveUser,

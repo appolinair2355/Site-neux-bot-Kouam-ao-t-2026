@@ -66,7 +66,7 @@ app.use(session({
 
 // ---------------------------------------------------------------------------
 // Authentification — identifiant admin fixe (« sossoukouam »), ou compte créé
-// par email @gmail.com + code de confirmation (15 min, voir auth.js).
+// par email @gmail.com puis validé par l'administrateur (voir auth.js).
 // ---------------------------------------------------------------------------
 app.post('/api/auth/login', async (req, res) => {
   const r = await auth.login(req.body.identifier, req.body.password);
@@ -79,25 +79,7 @@ app.post('/api/auth/login', async (req, res) => {
 
 app.post('/api/auth/signup', async (req, res) => {
   const r = await auth.signup(req.body.email, req.body.password, req.body.confirmPassword);
-  res.status(r.ok ? 200 : 400).json(r);
-});
-
-app.post('/api/auth/verify', async (req, res) => {
-  const r = await auth.verify(req.body.email, req.body.code);
-  if (!r.ok) return res.status(400).json(r);
-  // Email confirmé mais compte pas encore accepté par l'administrateur :
-  // pas de session ouverte — le navigateur affiche « patientez ».
-  if (r.pendingApproval) {
-    return res.json({ ok: true, pendingApproval: true, identifier: r.identifier });
-  }
-  req.session.userId = r.userId;
-  req.session.identifier = r.identifier;
-  req.session.role = r.role;
-  res.json({ ok: true, identifier: r.identifier });
-});
-
-app.post('/api/auth/resend', async (req, res) => {
-  const r = await auth.resend(req.body.email);
+  // Aucun code n'est envoyé : le compte attend la validation de l'admin.
   res.status(r.ok ? 200 : 400).json(r);
 });
 

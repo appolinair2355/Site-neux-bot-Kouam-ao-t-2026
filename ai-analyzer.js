@@ -18,6 +18,104 @@ function keyLooksValid() {
   return !!k && k !== 'POLLINATIONS_KEY_A_REMPLACER';
 }
 
+
+// ---------------------------------------------------------------------------
+// Appel chat mutualisé, avec REPLIS automatiques.
+// Le compte Pollinations payant peut renvoyer « Insufficient balance » (solde
+// à 0) : dans ce cas on bascule automatiquement sur le point d'accès public
+// gratuit text.pollinations.ai (avec puis sans clé) au lieu de tomber en
+// panne d'IA.
+// ---------------------------------------------------------------------------
+const FREE_CHAT_URL = 'https://text.pollinations.ai/openai';
+
+function chatAttempts() {
+  const key = apiKey();
+  const model = config.POLLINATIONS.MODEL || 'openai';
+  const list = [];
+  if (keyLooksValid()) {
+    list.push({ url: config.POLLINATIONS.CHAT_URL, key, model, label: 'Pollinations (clé)' });
+    list.push({ url: FREE_CHAT_URL, key, model, label: 'Pollinations texte (clé)' });
+  }
+  // Fournisseur de secours compatible OpenAI (Groq, OpenRouter, OpenAI…) :
+  // renseigner AI_FALLBACK_URL + AI_FALLBACK_KEY (+ AI_FALLBACK_MODEL).
+  const fbUrl = process.env.AI_FALLBACK_URL;
+  const fbKey = process.env.AI_FALLBACK_KEY;
+  if (fbUrl && fbKey) {
+    list.push({
+      url: fbUrl,
+      key: fbKey,
+      model: process.env.AI_FALLBACK_MODEL || 'gpt-4o-mini',
+      label: 'fournisseur de secours',
+    });
+  }
+  for (const free of ['openai', 'openai-fast', 'mistral', 'llamascout']) {
+    list.push({ url: FREE_CHAT_URL, key: '', model: free, label: `service gratuit (${free})` });
+  }
+  return list;
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function callChat(attempt, { system, user, temperature, timeoutMs }) {
+  const headers = { 'content-type': 'application/json' };
+  if (attempt.key) headers.authorization = `Bearer ${attempt.key}`;
+  const response = await fetch(attempt.url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      model: attempt.model,
+      temperature,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: typeof user === 'string' ? user : JSON.stringify(user) },
+      ],
+    }),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const msg = body?.error?.message || (typeof body?.error === 'string' ? body.error : '') || `réponse ${response.status}`;
+    const err = new Error(msg);
+    err.status = response.status;
+    throw err;
+  }
+  const text = (body?.choices?.[0]?.message?.content || body?.choices?.[0]?.text || '').trim();
+  if (!text) throw new Error('réponse vide');
+  return text;
+}
+
+// Le service gratuit limite le débit (402/429 quand plusieurs requêtes
+// s'enchaînent) : on réessaie brièvement avant de passer au repli suivant.
+async function chat({ system, user, temperature = 0.2, timeoutMs = 45000 } = {}) {
+  const errors = [];
+  for (const attempt of chatAttempts()) {
+    for (let tryNo = 0; tryNo < 3; tryNo += 1) {
+      try {
+        const text = await callChat(attempt, { system, user, temperature, timeoutMs });
+        lastChatRoute = attempt.label;
+        return text;
+      } catch (e) {
+        const retriable = e.status === 402 || e.status === 429 || e.status >= 500;
+        const wait = e.status === 429 ? 6000 : 2500;
+        if (retriable && tryNo < 2) { await sleep(wait * (tryNo + 1)); continue; }
+        errors.push(`${attempt.label} : ${e.message}`);
+        break;
+      }
+    }
+  }
+  const soldeVide = errors.some((m) => /budget|balance|402/i.test(m));
+  const error = new Error(
+    (soldeVide
+      ? "Le compte Pollinations n'a plus de crédit (solde à 0) et les services gratuits sont saturés. Rechargez le compte sur enter.pollinations.ai, ou renseignez un fournisseur de secours (AI_FALLBACK_URL, AI_FALLBACK_KEY, AI_FALLBACK_MODEL). "
+      : '') + `Détail : ${errors.join(' | ')}`
+  );
+  error.code = 'AI_REQUEST_FAILED';
+  throw error;
+}
+
+let lastChatRoute = null;
+function chatRoute() { return lastChatRoute; }
+
 function compactGame(game) {
   return {
     n: game.number,
@@ -260,11 +358,7 @@ function localAnalysis(rawGames = [], options = {}) {
 // Enrichissement Pollinations.ai
 // ---------------------------------------------------------------------------
 async function analyze({ games = [], date = null, objective = '', pastDays = [] } = {}) {
-  if (!keyLooksValid()) {
-     const error = new Error("Clé Pollinations.ai absente : configure POLLINATIONS_API_KEY dans l'environnement ou depuis la page Analyseur IA.");
-    error.code = 'AI_NOT_CONFIGURED';
-    throw error;
-  }
+  // Aucune clé requise : à défaut, l'appel passe par le service public gratuit.
 
   const normalized = games.map(compactGame).filter((game) => game.n != null).slice(0, MAX_GAMES);
   if (normalized.length < 6) {
@@ -314,40 +408,16 @@ async function analyze({ games = [], date = null, objective = '', pastDays = [] 
     },
   };
 
-  const response = await fetch(config.POLLINATIONS.CHAT_URL, {
-    method: 'POST',
-    headers: {
-      accept: 'application/json',
-      'content-type': 'application/json',
-      authorization: `Bearer ${apiKey()}`,
-    },
-    body: JSON.stringify({
-      model: config.POLLINATIONS.MODEL,
-      temperature: 0.2,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: JSON.stringify(user) },
-      ],
-    }),
-    signal: AbortSignal.timeout(45000),
-  });
-
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const error = new Error(body?.error?.message || `Pollinations.ai a répondu ${response.status}.`);
-    error.code = 'AI_REQUEST_FAILED';
-    throw error;
-  }
-  const text = body?.choices?.[0]?.message?.content || body?.choices?.[0]?.text || '';
+  const text = await chat({ system, user, temperature: 0.2, timeoutMs: 45000 });
   const result = extractJson(text);
   if (!result) {
-    const error = new Error('La réponse de Pollinations.ai n’est pas un JSON exploitable.');
+    const error = new Error('La réponse de l’IA n’est pas un JSON exploitable.');
     error.code = 'AI_INVALID_RESPONSE';
     throw error;
   }
   return {
     ...result,
-    source: 'pollinations',
+    source: `IA — ${chatRoute() || 'pollinations'}`,
     findings: Array.isArray(result.findings) && result.findings.length ? result.findings : local.findings,
     discoveries: local.discoveries || [],
     replacements: Array.isArray(result.replacements) && result.replacements.length ? result.replacements : local.replacements || [],
@@ -368,6 +438,6 @@ async function listModels() {
 }
 
 module.exports = {
-  analyze, localAnalysis, compactGame, localSummary, listModels,
+  analyze, localAnalysis, compactGame, localSummary, listModels, chat, chatRoute,
   setApiKey, apiKey, keyLooksValid, MAX_GAMES,
 };

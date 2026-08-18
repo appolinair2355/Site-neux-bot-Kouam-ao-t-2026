@@ -384,7 +384,13 @@ function verify(games) {
     let checked = pred.target + pred.step;
     while (checked <= last) {
       const g = gameByNumber(games, checked);
-      if (!g) { checked += 1; continue; }
+      // CORRECTIF : un tour absent, non terminé ou sans cartes lues (flux qui
+      // « saute ») est ignoré — il ne consomme PAS d'étape de rattrapage et ne
+      // peut donc plus provoquer une fausse perte.
+      if (!g || g.finished === false || g.complete === false || !suitsOf(g).length) {
+        checked += 1;
+        continue;
+      }
       if (suitsOf(g).includes(pred.suit)) {
         pred.status = 'gagné';
         pred.closedAt = new Date().toISOString();

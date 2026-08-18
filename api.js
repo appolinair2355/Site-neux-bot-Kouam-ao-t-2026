@@ -139,6 +139,11 @@ function parseChamp(data) {
       winner: winnerOf(scS),
       phase: ph,
       finished,
+      // CORRECTIF « jeux sautés » : un tour n'est exploitable pour la
+      // vérification que si les cartes du joueur sont réellement arrivées.
+      // Un tour terminé sans cartes (flux tronqué) ne doit JAMAIS être
+      // compté comme une perte : il est marqué incomplet.
+      complete: cards.player.length > 0,
       score: sc.FS || {},
       at: Date.now(),
     });
@@ -165,20 +170,54 @@ function endpoints() {
   return config.API_HOSTS.map((h) => `${h}/LiveFeed/GetChampZip?${qs}`);
 }
 
-async function fetchGames() {
-  for (const url of endpoints()) {
-    const data = await get(url);
-    const parsed = data ? parseChamp(data) : [];
-    if (parsed.length) return parsed;
+// CORRECTIF « le jeu en live saute » : un seul miroir 1xbet renvoie parfois une
+// fenêtre tronquée (tours manquants, tour terminé sans cartes). On interroge
+// donc les miroirs EN PARALLÈLE et on FUSIONNE les réponses : pour chaque
+// numéro de tour on garde la version la plus complète (cartes présentes >
+// terminé > la plus récente). Plus aucun tour n'est perdu à cause d'un miroir.
+function betterGame(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  if (!!a.complete !== !!b.complete) return a.complete ? a : b;
+  if (!!a.finished !== !!b.finished) return a.finished ? a : b;
+  if ((a.playerCards + a.bankerCards) !== (b.playerCards + b.bankerCards)) {
+    return (a.playerCards + a.bankerCards) > (b.playerCards + b.bankerCards) ? a : b;
   }
+  return (a.at || 0) >= (b.at || 0) ? a : b;
+}
+
+function merge(lists) {
+  const map = new Map();
+  for (const list of lists) {
+    for (const g of list || []) map.set(g.number, betterGame(map.get(g.number), g));
+  }
+  return [...map.values()].sort((a, b) => b.number - a.number);
+}
+
+async function fetchGames() {
+  const direct = await Promise.all(
+    endpoints().map(async (url) => {
+      const data = await get(url);
+      return data ? parseChamp(data) : [];
+    }),
+  );
+  const merged = merge(direct);
+  if (merged.length) return merged;
+
+  const viaProxy = [];
   for (const url of endpoints().slice(0, 2)) {
     for (const p of config.PROXIES) {
       const data = await get(p(url));
       const parsed = data ? parseChamp(data) : [];
-      if (parsed.length) return parsed;
+      if (parsed.length) viaProxy.push(parsed);
     }
+    if (viaProxy.length) break;
   }
+  const mp = merge(viaProxy);
+  if (mp.length) return mp;
+
   throw new Error('API 1xbet Baccara injoignable');
 }
 
 module.exports = { fetchGames, parseChamp, endpoints, SUIT_MAP, RANK_MAP, cardLabel, handValue };
+

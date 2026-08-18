@@ -232,3 +232,27 @@ Désormais :
 3. `predit.sendBilans()` publie le bilan de **chaque stratégie IA** ayant prédit
    plus un **bilan global IA** dans le canal du panneau « Prédit ».
 4. Déclenchement manuel : `/bilan` ou `POST /api/bilans/send`.
+
+## IA — que faire quand « Insufficient balance » s'affiche
+
+La clé Pollinations est bien configurée, mais le **solde du compte est à 0
+pollen** : l'API refuse alors chaque requête (402). Le bot bascule
+automatiquement sur les services gratuits, qui sont parfois saturés.
+
+Deux solutions :
+
+1. Recharger le compte sur https://enter.pollinations.ai (la clé actuelle
+   refonctionne aussitôt, sans redéploiement).
+2. Ou configurer un fournisseur de secours compatible OpenAI (Groq,
+   OpenRouter, OpenAI…) avec ces variables d'environnement Render :
+   - `AI_FALLBACK_URL` (ex. `https://api.groq.com/openai/v1/chat/completions`)
+   - `AI_FALLBACK_KEY`
+   - `AI_FALLBACK_MODEL` (ex. `llama-3.3-70b-versatile`)
+
+## Inscription — plus de code par email
+
+L'envoi d'un code de confirmation par Gmail a été supprimé. À l'inscription,
+le compte est créé immédiatement en statut « en attente » et une fenêtre
+« Merci de patienter » récapitule les informations. C'est l'administrateur
+qui accepte le compte et accorde un temps d'accès depuis le panneau
+« Utilisateurs ».

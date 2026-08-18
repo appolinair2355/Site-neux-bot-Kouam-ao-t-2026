@@ -964,6 +964,14 @@ function registerGames(games) {
   const ordered = [...games].sort((a, b) => a.number - b.number);
   for (const g of ordered) {
     const prev = state.games.get(g.number);
+    // CORRECTIF « vérifications ratées » : le flux 1xbet renvoie parfois un
+    // tour DÉJÀ connu dans une version appauvrie (cartes vidées, tour repassé
+    // « en cours »). Écraser la bonne version faisait perdre les cartes du
+    // joueur → la vérification comparait du vide et comptait une perte.
+    // On ne remplace donc jamais une version complète par une version moins
+    // complète du même tour.
+    if (prev && prev.finished && prev.complete && !(g.finished && g.complete)) continue;
+    if (prev && prev.complete && !g.complete) continue;
     state.games.set(g.number, g);
     if (g.finished && (!prev || !prev.finished)) onFinished(g);
   }
@@ -1141,25 +1149,38 @@ function verify() {
   for (const p of queue) {
     if (p.status !== 'en attente') continue;
     let guard = 0;
-    while (p.status === 'en attente' && guard++ <= p.maxR + 2) {
-      const num = p.target + p.step;
+    if (p.gap == null) p.gap = 0;
+    while (p.status === 'en attente' && guard++ <= p.maxR + p.gap + 8) {
+      const num = p.target + p.step + p.gap;
       const g = state.games.get(num);
-      if (!g || !g.finished) {
-        // le tour manque dans le flux mais des tours plus récents sont déjà
-        // terminés → on ne reste pas bloqué, on passe au rattrapage suivant
-        if (num < maxDone && (!g || !g.finished)) {
-          if (p.step >= p.maxR) {
-            p.status = 'perdu';
-            p.badge = '❌';
-            p.hitNumber = num;
+      // Un tour n'est vérifiable que s'il est TERMINÉ **et** complet (cartes
+      // du joueur reçues). Sinon il est considéré comme manquant.
+      const usable = !!g && g.finished && g.complete !== false;
+      if (!usable) {
+        // CORRECTIF MAJEUR « le jeu en live saute » : avant, un tour absent du
+        // flux consommait une étape de rattrapage et pouvait clôturer la
+        // prédiction en ❌ alors qu'elle n'avait jamais été vérifiée.
+        // Désormais un tour manquant est SAUTÉ (décalage `gap`) sans consommer
+        // d'étape : la vérification se fera sur le tour suivant réellement lu.
+        // On laisse d'abord 2 tours de battement pour que les données arrivent.
+        if (num + 2 <= maxDone) {
+          p.gap += 1;
+          p.skipped = (p.skipped || 0) + 1;
+          if (!p.skippedNumbers) p.skippedNumbers = [];
+          p.skippedNumbers.push(num);
+          // trop de tours illisibles d'affilée : on annule au lieu d'inventer
+          // un résultat faux.
+          if (p.skipped > 6) {
+            p.status = 'annulé';
+            p.badge = '♻️';
+            p.result = 'tours non lus dans le flux';
             noteClosed(p);
             closed.push(p);
             break;
           }
-          p.step += 1;
           continue;
         }
-        break; // le tour est encore en cours : on attend
+        break; // le tour est encore en cours (ou pas encore lu) : on attend
       }
       if (matches(p, g)) {
         p.status = 'gagné';
