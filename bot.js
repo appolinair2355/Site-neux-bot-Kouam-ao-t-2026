@@ -1508,13 +1508,17 @@ async function applyDbConfigs() {
   if (missing.length) await saveConfigsToDb();
 
   // CORRECTIF DÉPLOIEMENT : la stratégie « ombre » doit toujours démarrer avec
-  // lossTrigger=2 (double perte), lossWindow=6 et lossInterval=5. Comme la
-  // stratégie « ombre » existe déjà en base depuis longtemps, applyDbConfigs()
-  // prend TOUJOURS la valeur déjà enregistrée en base (spread `...cfg` après
-  // les defaults) — changer strategies.js seul ne suffit donc jamais à faire
-  // apparaître un nouveau default une fois la ligne déjà créée. On force ici
-  // ces 3 réglages à chaque démarrage et on les ré-enregistre si besoin.
-  const OMBRE_FORCED_DEFAULTS = { lossTrigger: 2, lossWindow: 6, lossInterval: 5 };
+  // lossTrigger=1 (envoi dès la 1ʳᵉ perte), lossWindow=6 et lossInterval=5.
+  // Comme la stratégie « ombre » existe déjà en base depuis longtemps,
+  // applyDbConfigs() prend TOUJOURS la valeur déjà enregistrée en base
+  // (spread `...cfg` après les defaults) — changer strategies.js seul ne
+  // suffit donc jamais à faire apparaître un nouveau default une fois la
+  // ligne déjà créée. On force ici ces 3 réglages à chaque démarrage et on
+  // les ré-enregistre si besoin. Le réglage reste modifiable à tout moment
+  // depuis le panneau « ombre » (champ « Pertes nécessaires avant d'envoyer »
+  // + bouton « Enregistrer les réglages ») : ce forçage ne s'applique qu'au
+  // démarrage/redéploiement, jamais en cours de session.
+  const OMBRE_FORCED_DEFAULTS = { lossTrigger: 1, lossWindow: 6, lossInterval: 5 };
   if (state.strategies.ombre) {
     let changed = false;
     for (const [k, v] of Object.entries(OMBRE_FORCED_DEFAULTS)) {

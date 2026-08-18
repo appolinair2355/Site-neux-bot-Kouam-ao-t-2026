@@ -51,7 +51,11 @@ const OPENROUTER = {
   CHAT_URL: 'https://openrouter.ai/api/v1/chat/completions',
   API_KEY: process.env.OPENROUTER_API_KEY
     || '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',
-  MODEL: process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini',
+  // Modèle GRATUIT par défaut (suffixe :free) — n'utilise aucun crédit
+  // payant. Limites du compte gratuit OpenRouter : 20 req/min et 50 req/jour
+  // (1000/jour après un achat unique de 10$ de crédits, non requis ici).
+  // Réglable via OPENROUTER_MODEL sans toucher au code.
+  MODEL: process.env.OPENROUTER_MODEL || 'deepseek/deepseek-r1:free',
 };
 
 // ---------------------------------------------------------------------------
