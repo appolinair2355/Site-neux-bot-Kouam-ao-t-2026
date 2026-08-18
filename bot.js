@@ -585,9 +585,17 @@ function wire(b) {
 
     if (g.queueLength > 1) {
       lines.push('');
-      lines.push(`📋 File d'attente (${g.queueLength} position(s), envoyées dans cet ordre) :`);
+      lines.push(`📋 File d'attente (${g.queueLength} position(s)) :`);
+      // la position qui part en premier est la plus ANCIENNE parmi celles
+      // prêtes — ce n'est plus forcément la 1ʳᵉ de la liste : si la 2ᵉ (ou une
+      // autre) termine son décompte avant, c'est elle qui part.
+      const firstReadyIdx = g.queue.findIndex((q) => q.ready);
       g.queue.forEach((q, i) => {
-        lines.push(`   ${i + 1}. N=${q.position} — ${q.ready ? 'prête (en attente de tour d\'envoi)' : `${q.seen}/${q.position} compté(s)`}`);
+        const isNext = i === firstReadyIdx;
+        const status = q.ready
+          ? (isNext ? "✅ prête — 👉 C'EST ELLE QUI PART EN PREMIER" : 'prête (en attente, une autre part avant elle)')
+          : `${q.seen}/${q.position} compté(s)`;
+        lines.push(`   ${i + 1}. N=${q.position} — ${status}`);
       });
     }
 

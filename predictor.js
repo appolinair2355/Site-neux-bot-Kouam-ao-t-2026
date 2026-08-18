@@ -349,12 +349,15 @@ function pushAnnouncement(key, info) {
 
 // la prédiction annoncée finit par partir réellement dans le canal public
 function fulfillAnnouncement(key, gameNumber) {
-  // CORRECTIF file d'attente : on cible désormais explicitement la plus
-  // ANCIENNE annonce en attente (queue FIFO) — c'est toujours elle qui doit
-  // partir en premier, jamais une plus récente qui aurait été confirmée
-  // entre-temps pendant que celle-ci patientait encore.
+  // On envoie la plus ancienne annonce en attente PARMI CELLES PRÊTES : si la
+  // 2ᵉ position de la file a terminé son décompte avant la 1ʳᵉ, c'est elle qui
+  // part — on ne bloque plus tout le monde derrière une position pas encore
+  // prête. Rien n'est perdu : la position encore en décompte reste en file et
+  // partira à son tour dès qu'elle sera prête.
+  const g = gate(key);
+  const readyIds = new Set(g.queue.filter((q) => q.ready).map((q) => q.id));
   const entry = state.announcements
-    .filter((a) => a.strategy === key && a.status === 'en_attente')
+    .filter((a) => a.strategy === key && a.status === 'en_attente' && readyIds.has(a.id))
     .sort((a, b) => a.id - b.id)[0];
   if (!entry) return null;
   entry.status = 'envoyee';
@@ -362,9 +365,8 @@ function fulfillAnnouncement(key, gameNumber) {
   entry.sentAt = Date.now();
   emitAnnouncementSave(entry);
   // retire l'entrée correspondante de la file d'attente interne (phase 3) :
-  // sa position vient de partir réellement dans le canal public — la
-  // suivante (s'il y en a une) devient la nouvelle tête de file.
-  const g = gate(key);
+  // sa position vient de partir réellement dans le canal public — les autres
+  // entrées gardent leur ordre et leur propre progression.
   const idx = g.queue.findIndex((q) => q.id === entry.id);
   if (idx !== -1) { g.queue.splice(idx, 1); emitGateChange(key); }
   return entry;
@@ -605,7 +607,10 @@ function advanceQueue(g, pred) {
     if (entry.ready) continue;
     entry.seen += 1;
     if (pred && pred.target != null) entry.refNumber = pred.target;
-    if (entry.seen >= Math.max(1, entry.need) - 1) entry.ready = true;
+    // N est défini en phase 2 (voir phase2Measuring), mais le décompte de la
+    // phase 3 utilise N+1 : il faut donc attendre `entry.need` prédictions
+    // supplémentaires (et non `entry.need - 1`) avant d'ouvrir l'envoi public.
+    if (entry.seen >= Math.max(1, entry.need)) entry.ready = true;
   }
 }
 
@@ -623,7 +628,10 @@ function advanceQueue(g, pred) {
 // `pred.target` (le vrai numéro de la prédiction), jamais sur `hitNumber`.
 function confirmQueueEntry(pred, g, N) {
   const entry = pushAnnouncement(pred.strategy, { position: N, refNumber: pred.target });
-  g.queue.push({ id: entry.id, need: N, seen: 0, refNumber: entry.refNumber, ready: N <= 1 });
+  // ready toujours false à la création : avec le décompte en N+1, même une
+  // position N=1 exige désormais d'attendre 1 prédiction de plus avant l'envoi
+  // public (voir advanceQueue).
+  g.queue.push({ id: entry.id, need: N, seen: 0, refNumber: entry.refNumber, ready: false });
   emitConfirm(pred.strategy, entry);
   startWindow(pred.strategy, pred.target);
 }
@@ -779,10 +787,12 @@ function canSend(key) {
   // filtre, pas deux qui se cumulent).
   if (key === 'ombre') {
     applyAutoUnlock(key);
-    // seule la position en TÊTE de file (la plus ancienne) peut être envoyée :
-    // même si une position plus récente est déjà prête, elle attend son tour.
+    // n'importe quelle position prête peut partir : si la 2ᵉ (ou une autre
+    // plus récente) de la file termine son décompte avant la 1ʳᵉ, elle n'est
+    // plus bloquée en attendant que la doyenne finisse le sien — rien n'est
+    // laissé de côté, chaque position part dès qu'elle est prête.
     const g = gate(key);
-    return !!(g.queue.length && g.queue[0].ready);
+    return g.queue.some((q) => q.ready);
   }
   // le déclencheur automatique remplace le filtre « double perte » quand il est actif
   if (cfg.autoEnabled) return !!autoGate(key).armed;
@@ -830,7 +840,10 @@ function gateView(key) {
   // ancienne, celle qui part en premier) ; `queue` expose la liste complète.
   const isOmbre = key === 'ombre';
   const front = isOmbre ? (g.queue[0] || null) : null;
-  const armed = isOmbre ? !!(front && front.ready) : !!g.armed;
+  // « armed » : vrai dès qu'AU MOINS une position de la file est prête (elle
+  // peut ne pas être la doyenne — voir canSend()/fulfillAnnouncement()).
+  const readyEntry = isOmbre ? g.queue.find((q) => q.ready) || null : null;
+  const armed = isOmbre ? !!readyEntry : !!g.armed;
   const counting = isOmbre ? !!(front && !front.ready) : !!g.counting;
   const phase = armed ? 3 : counting ? 3 : g.losses >= 1 ? 2 : 1;
   return {
@@ -858,7 +871,10 @@ function gateView(key) {
     // file d'attente complète (« ombre » uniquement) : chaque position en
     // attente, dans l'ordre exact où elle sera envoyée.
     queueLength: isOmbre ? g.queue.length : undefined,
-    queue: isOmbre ? g.queue.map((q) => ({ position: q.need, seen: q.seen, ready: q.ready })) : undefined,
+    queue: isOmbre ? (() => {
+      const firstReadyIdx = g.queue.findIndex((q) => q.ready);
+      return g.queue.map((q, i) => ({ position: q.need, seen: q.seen, ready: q.ready, next: i === firstReadyIdx }));
+    })() : undefined,
     priority: key === 'ombre' ? 'silencieux' : cfg.autoEnabled ? 'auto' : 'direct',
     label: cfg.autoEnabled && key !== 'ombre'
       ? autoView(key).label
@@ -867,10 +883,10 @@ function gateView(key) {
       : armed
         ? (g.autoUnlockReason
             ? `Envoi ACTIF (${g.autoUnlockReason})`
-            : `Phase 3 — prédiction ${front && front.need ? `n°${front.need} ` : ''}ENVOYÉE publiquement${cfg.sendOnlyNext ? ' — puis retour au silence' : ''}` +
+            : `Phase 3 — prédiction ${readyEntry && readyEntry.need ? `n°${readyEntry.need} ` : ''}ENVOYÉE publiquement${cfg.sendOnlyNext ? ' — puis retour au silence' : ''}` +
               (isOmbre && g.queue.length > 1 ? ` · +${g.queue.length - 1} en attente derrière` : ''))
         : counting
-          ? `Phase 3 — décompte silencieux : ${front.seen}/${front.need} avant la position N=${front.need}` +
+          ? `Phase 3 — décompte silencieux : ${front.seen}/${front.need} avant la position N=${front.need} (envoi à N+1)` +
             (isOmbre && g.queue.length > 1 ? ` · +${g.queue.length - 1} en attente derrière` : '')
           : g.losses >= 1
             ? `Phase 2 — référence #N${g.since} · écart ${g.window}` +
