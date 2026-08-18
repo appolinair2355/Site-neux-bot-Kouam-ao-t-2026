@@ -166,7 +166,7 @@
 
     <div id="signupView" class="hidden">
       <h1>✉️ Créer un compte</h1>
-      <p class="sub">Adresse Gmail requise — un code de confirmation vous sera envoyé (expire en 15 min).</p>
+      <p class="sub">Adresse Gmail requise. Aucun code n'est envoyé : après l'inscription, l'administrateur valide votre compte et vous accorde un temps d'accès.</p>
       <label>Email Gmail</label>
       <input id="suEmail" type="email" autocomplete="email" placeholder="vous@gmail.com">
       <label>Mot de passe</label>
@@ -179,26 +179,17 @@
     </div>
   </div>
 
-  <!-- ── Fenêtre modale : code de confirmation ─────────────────────────── -->
-  <div id="verifyModalBackdrop">
-    <div id="verifyModal">
-      <h1>🔑 Code de confirmation</h1>
-      <p class="sub">Un code à 6 chiffres a été envoyé à <b id="verifyEmailLabel"></b>. Il expire dans 15 minutes.</p>
-      <label>Code reçu</label>
-      <input id="verifyCode" inputmode="numeric" maxlength="6" placeholder="123456">
-      <button id="verifyBtn" onclick="doVerify()">Valider</button>
-      <button class="ghost" id="resendBtn" onclick="doResend()">Renvoyer un code</button>
-      <div id="verifyMsg" class="msg"></div>
-    </div>
-  </div>
-
   <!-- ── Fenêtre modale : compte en attente de traitement par l'admin ───── -->
   <div id="pendingModalBackdrop">
     <div id="pendingModal">
       <div class="wait-ico"></div>
       <h1 style="font-size:17px">Merci de patienter</h1>
-      <p>Votre nom, votre identifiant Gmail et votre mot de passe ont bien été confirmés.</p>
-      <p>L'administrateur va maintenant traiter votre compte. Vous pourrez vous connecter dès qu'il l'aura accepté.</p>
+      <p>Inscription enregistrée avec succès.</p>
+      <p>Identifiant Gmail : <b id="pendingEmailLabel"></b></p>
+      <p>Mot de passe : enregistré et sécurisé.</p>
+      <p>Statut : en attente de validation par l'administrateur.</p>
+      <p>L'administrateur va maintenant traiter votre compte depuis son panneau. Vous pourrez vous connecter dès qu'il l'aura accepté et vous aura accordé un temps d'accès.</p>
+      <a class="telegram-link" href="https://t.me/Kouamappoloak" target="_blank" rel="noopener">✈️ Contacter l'administrateur sur Telegram</a>
       <button style="margin-top:18px" onclick="closePendingModal()">Retour à la connexion</button>
     </div>
   </div>
@@ -269,20 +260,11 @@ function showView(name) {
   document.getElementById('signupView').classList.toggle('hidden', name !== 'signup');
 }
 
-function openVerifyModal(email) {
-  pendingEmail = email;
-  document.getElementById('verifyEmailLabel').textContent = email;
-  document.getElementById('verifyCode').value = '';
-  document.getElementById('verifyMsg').className = 'msg';
-  document.getElementById('verifyModalBackdrop').classList.add('open');
-  document.getElementById('verifyCode').focus();
-}
-function closeVerifyModal() {
-  document.getElementById('verifyModalBackdrop').classList.remove('open');
-}
-
-function openPendingModal() {
-  closeVerifyModal();
+function openPendingModal(email) {
+  if (email) {
+    pendingEmail = email;
+    document.getElementById('pendingEmailLabel').textContent = email;
+  }
   document.getElementById('pendingModalBackdrop').classList.add('open');
 }
 function closePendingModal() {
@@ -348,12 +330,8 @@ async function doLogin() {
     window.location.href = '/';
     return;
   }
-  if (data.needsVerification) {
-    openVerifyModal(data.email);
-    return;
-  }
   if (data.pendingApproval) {
-    showMsg('loginMsg', data.error || "Compte en attente de validation par l'administrateur.", false);
+    openPendingModal(identifier.includes('@') ? identifier : '');
     return;
   }
   if (data.blocked) {
@@ -373,39 +351,16 @@ async function doSignup() {
   const confirmPassword = document.getElementById('suPwd2').value;
   if (!email || !password || !confirmPassword) return showMsg('signupMsg', 'Tous les champs sont requis.', false);
   document.getElementById('signupMsg').className = 'msg';
-  setBusy('signupBtn', true, 'Envoi du code en cours…', 'Créer le compte');
+  setBusy('signupBtn', true, 'Création du compte…', 'Créer le compte');
   const { data } = await post('/api/auth/signup', { email, password, confirmPassword });
   setBusy('signupBtn', false, '', 'Créer le compte');
   if (data.ok) {
-    openVerifyModal(data.email);
+    // Plus de code par email : la fenêtre « patientez » s'ouvre directement,
+    // c'est l'administrateur qui confirmera le compte.
+    openPendingModal(data.email || email);
     return;
   }
   showMsg('signupMsg', data.error || "Erreur lors de la création du compte.", false);
-}
-
-async function doVerify() {
-  const code = document.getElementById('verifyCode').value.trim();
-  if (!code) return showMsg('verifyMsg', 'Code requis.', false);
-  setBusy('verifyBtn', true, 'Vérification…', 'Valider');
-  const { ok, data } = await post('/api/auth/verify', { email: pendingEmail, code });
-  setBusy('verifyBtn', false, '', 'Valider');
-  if (ok && data.ok) {
-    if (data.pendingApproval) {
-      openPendingModal();
-      return;
-    }
-    showMsg('verifyMsg', 'Compte vérifié — ouverture du site…', true);
-    setTimeout(() => { window.location.href = '/'; }, 500);
-    return;
-  }
-  showMsg('verifyMsg', data.error || 'Code incorrect.', false);
-}
-
-async function doResend() {
-  setBusy('resendBtn', true, 'Envoi…', 'Renvoyer un code');
-  const { data } = await post('/api/auth/resend', { email: pendingEmail });
-  setBusy('resendBtn', false, '', 'Renvoyer un code');
-  showMsg('verifyMsg', data.ok ? 'Nouveau code envoyé.' : (data.error || "Échec de l'envoi."), !!data.ok);
 }
 </script>
 </body>
