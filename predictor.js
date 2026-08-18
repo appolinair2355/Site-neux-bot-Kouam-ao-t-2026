@@ -570,7 +570,7 @@ function noteClosedInner(pred) {
   //     file ; seul un écart supérieur à l'intervalle max le fait revenir en
   //     phase 1 — et cela ne touche QUE la mesure de référence, jamais la
   //     file d'attente déjà constituée (rien de ce qui y est n'est perdu).
-  advanceQueue(g);
+  advanceQueue(g, pred);
 
   // une prédiction réellement ENVOYÉE PUBLIQUEMENT qui gagne referme le
   // cycle de référence (si resetOnWin) — la file d'attente, elle, continue
@@ -593,10 +593,18 @@ function noteClosedInner(pred) {
 // jusqu'à atteindre sa position N. Une fois prête, une entrée n'avance plus :
 // elle attend simplement son tour d'être réellement envoyée (voir canSend()
 // et fulfillAnnouncement(), qui la retire de la file une fois partie).
-function advanceQueue(g) {
+// CORRECTIF (décalage de position) : `entry.refNumber` est désormais mis à
+// jour à CHAQUE prédiction « sautée » (pas seulement à la création de
+// l'entrée). Sans ça, le « plancher » (voir queueFloor()/bot.js) restait
+// bloqué sur le numéro de la perte confirmante, et le mécanisme de rattrapage
+// des prédictions silencieuses pouvait renvoyer une prédiction déjà comptée
+// dans le décompte (donc une position trop tôt) au lieu d'attendre la vraie
+// N-ᵉ prédiction suivante.
+function advanceQueue(g, pred) {
   for (const entry of g.queue) {
     if (entry.ready) continue;
     entry.seen += 1;
+    if (pred && pred.target != null) entry.refNumber = pred.target;
     if (entry.seen >= Math.max(1, entry.need) - 1) entry.ready = true;
   }
 }
@@ -608,8 +616,13 @@ function advanceQueue(g) {
 // continuer la mesure (retour immédiat en phase 2, sans repasser par la
 // phase 1) — comme demandé : tant qu'il y a des pertes dans l'intervalle, on
 // reste en phase 2 pour alimenter la file.
+// CORRECTIF (numéro affiché faux, ex. « #N47 » au lieu de « #N45 ») :
+// `pred.hitNumber` est le numéro du jeu où la perte a été CONFIRMÉE après
+// rattrapage (target + step + gap), pas le numéro de la prédiction elle-même.
+// La file d'attente et son plancher doivent travailler exclusivement sur
+// `pred.target` (le vrai numéro de la prédiction), jamais sur `hitNumber`.
 function confirmQueueEntry(pred, g, N) {
-  const entry = pushAnnouncement(pred.strategy, { position: N, refNumber: pred.hitNumber ?? pred.target });
+  const entry = pushAnnouncement(pred.strategy, { position: N, refNumber: pred.target });
   g.queue.push({ id: entry.id, need: N, seen: 0, refNumber: entry.refNumber, ready: N <= 1 });
   emitConfirm(pred.strategy, entry);
   startWindow(pred.strategy, pred.target);

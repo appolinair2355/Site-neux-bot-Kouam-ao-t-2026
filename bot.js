@@ -1397,10 +1397,15 @@ async function tick() {
       // envoyée ni annulée, donc toujours candidate au rattrapage. On ignore
       // donc toute prédiction antérieure à la plus ancienne référence encore
       // active (file d'attente comprise) — voir queueFloor().
+      // CORRECTIF (décalage de position) : comparaison désormais STRICTE
+      // (`>` et non `>=`) — le floor pointe sur le numéro de la dernière
+      // prédiction déjà comptée dans le décompte silencieux (perte de
+      // référence comprise) ; elle-même ne doit jamais être reprise comme
+      // « prédiction publique », seule la vraie suivante doit l'être.
       const floor = queueFloor('ombre');
       const stuck = state.predictions
         .filter((p) => p.strategy === 'ombre' && p.status !== 'annulé' && (!p.messages || !p.messages.length)
-          && (floor == null || p.target >= floor))
+          && (floor == null || p.target > floor))
         .sort((a, b) => a.target - b.target)[0];
       if (!stuck) break;
       await broadcast(stuck);
